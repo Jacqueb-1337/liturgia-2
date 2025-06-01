@@ -1,23 +1,38 @@
 const fs = require('fs');
 const path = require('path');
-const { CDN_BASE, BOOKS, CHAPTER_COUNTS } = require('./constants');
+const { CDN_BASE, BOOKS, CHAPTER_COUNTS, BIBLE_JSON, VERSION } = require('./constants');
+
+const LOCAL_BIBLE_FILE = 'bible.json';
+
+async function ensureBibleJson(baseDir) {
+  const filePath = path.join(baseDir, LOCAL_BIBLE_FILE);
+  if (fs.existsSync(filePath)) {
+    // Already downloaded
+    return filePath;
+  }
+  // Download the single JSON file
+  const res = await fetch(BIBLE_JSON);
+  if (!res.ok) throw new Error(`Failed to fetch ${BIBLE_JSON}`);
+  const txt = await res.text();
+  await fs.promises.writeFile(filePath, txt, 'utf8');
+  return filePath;
+}
 
 async function loadAllVersesFromDisk(baseDir) {
+  const filePath = path.join(baseDir, LOCAL_BIBLE_FILE);
+  const txt = await fs.promises.readFile(filePath, 'utf8');
+  const books = JSON.parse(txt);
+
+  // Flatten to allVerses: {key, text}
   const allVerses = [];
-  for (const book of BOOKS) {
-    const chapCount = CHAPTER_COUNTS[book];
-    for (let chap = 1; chap <= chapCount; chap++) {
-      const file = path.join(baseDir, 'books', book, 'chapters', `${chap}.json`);
-      try {
-        const txt = await fs.promises.readFile(file, 'utf8');
-        JSON.parse(txt).data.forEach(v => {
-          allVerses.push({
-            key:  `${v.book} ${v.chapter}:${v.verse}`,
-            text: v.text
-          });
+  for (const book of books) {
+    for (let c = 0; c < book.chapters.length; ++c) {
+      const chapter = book.chapters[c];
+      for (let v = 0; v < chapter.length; ++v) {
+        allVerses.push({
+          key: `${book.name} ${c + 1}:${v + 1}`,
+          text: chapter[v]
         });
-      } catch (e) {
-        // File missing, skip
       }
     }
   }
@@ -117,6 +132,7 @@ function generateAllVerseKeys(VERSE_COUNTS) {
 }
 
 module.exports = {
+  ensureBibleJson,
   loadAllVersesFromDisk,
   fetchChapter,
   downloadRemainingChapters,

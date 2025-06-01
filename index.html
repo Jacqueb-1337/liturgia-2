@@ -59,30 +59,6 @@
       background: #fafafa;
     }
 
-    /* Verse items in the list */
-    .verse-item {
-      padding: 4px 8px;
-      cursor: pointer;
-    }
-    .verse-item.selected {
-      background: #b3d4fc;
-    }
-
-    /* Scripture search styles */
-    #scripture-search {
-      display: flex;
-      gap: 4px;
-      padding: 4px 8px;
-      align-items: center;
-    }
-    .search-segment {
-      border: 1px solid #ccc;
-      padding: 4px;
-      border-radius: 4px;
-      min-width: 40px;
-      text-align: center;
-    }
-
     /* Highlighting style for search results */
     .search-selected {
       background: yellow;
@@ -107,7 +83,7 @@
       <div id="search-box-container" style="width:100%"></div>
     </div>
     <div id="verse-content-row" style="display: flex; flex: 1;">
-      <div id="verse-list" style="flex: 0 0 auto;">
+      <div id="verse-list" style="overflow-y:auto; height:400px; width: 200px">
         <div id="virtual-list"></div>
       </div>
       <div id="verse-display" style="flex: 1 1 auto;"></div>

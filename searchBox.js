@@ -1,4 +1,4 @@
-const { BOOKS, CHAPTER_COUNTS, VERSE_COUNTS, ITEM_HEIGHT, WINDOW_SIZE } = require('./constants');
+const { BOOKS } = require('./constants');
 
 // --- Helpers ---
 
@@ -11,85 +11,104 @@ function prettyBookName(name) {
 
 // --- UI Rendering ---
 
-/**
- * Renders a single search box that autocompletes and jumps to the first matching element in the target div.
- * Highlights the autocompleted portion in the input.
- * @param {Object} searchState - { containerId: string, targetDivId: string }
- */
+function parseReference(input) {
+  // Accepts: "1ch 11 4", "1 chronicles 11:4", "1chronicles11:4", etc.
+  const trimmed = input.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return null;
+
+  // Split into parts: book, chapter, verse
+  const match = trimmed.match(/^([1-3]?\s*[a-zA-Z ]+)\s*(\d+)?[:\s]?(\d+)?$/);
+  if (!match) return null;
+
+  let [ , bookPart, chapter, verse ] = match;
+  // Normalize: remove all non-alphanumerics (including spaces)
+  bookPart = bookPart.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+  // Find best matching book
+  let book = null;
+  let bookIndex = -1;
+  for (let i = 0; i < BOOKS.length; ++i) {
+    const norm = BOOKS[i].replace(/[^a-z0-9]/gi, '').toLowerCase();
+    if (norm.startsWith(bookPart)) {
+      book = BOOKS[i];
+      bookIndex = i;
+      break;
+    }
+  }
+  if (!book) return null;
+
+  chapter = chapter ? parseInt(chapter, 10) : null;
+  verse = verse ? parseInt(verse, 10) : null;
+
+  return { book, bookIndex, chapter, verse };
+}
+
 function updateSearchBox(searchState) {
-  const { containerId, targetDivId } = searchState;
+  const { containerId, onReferenceSelected } = searchState;
   const container = document.getElementById(containerId);
   if (!container) return;
 
   container.innerHTML = '';
+  container.style.paddingTop = '1em'; // Add padding above the search box
 
+  // Input box
   const input = document.createElement('input');
   input.type = 'text';
-  input.placeholder = 'Search...';
+  input.placeholder = 'Book Chapter:Verse';
   input.autocomplete = 'off';
   input.id = 'search-autocomplete-input';
+  input.spellcheck = false;
+  input.style.width = '14em';
 
-  input.addEventListener('input', () => {
-    handleSearchInput({ input, targetDivId });
-  });
+  // Closest match display
+  const matchBox = document.createElement('div');
+  matchBox.style.marginTop = '0.25em';
+  matchBox.style.fontSize = '0.95em';
+  matchBox.style.color = '#0074d9';
+  matchBox.style.minHeight = '1.2em'; // Reserve space so layout doesn't shift
 
-  input.addEventListener('keydown', (e) => {
-    // Allow user to accept autocomplete with right arrow or End
-    if (e.key === 'ArrowRight' || e.key === 'End') {
-      const selectionEnd = input.selectionEnd;
-      if (selectionEnd !== null && selectionEnd < input.value.length) {
-        input.setSelectionRange(input.value.length, input.value.length);
-        e.preventDefault();
+  container.appendChild(input);
+  container.appendChild(matchBox);
+
+  function updateMatchAndJump() {
+    const value = input.value;
+    const ref = parseReference(value);
+    const scriptureSearch = document.getElementById('scripture-search');
+    if (ref && ref.book) {
+      let display = ref.book;
+      if (ref.chapter) display += ` ${ref.chapter}`;
+      if (ref.verse) display += `:${ref.verse}`;
+      matchBox.textContent = `Closest match: ${display}`;
+      // Animate only padding-bottom when match appears
+      if (scriptureSearch) scriptureSearch.style.paddingBottom = '8px';
+      if (typeof onReferenceSelected === 'function') {
+        onReferenceSelected({
+          book: ref.book,
+          bookIndex: ref.bookIndex,
+          chapter: ref.chapter || 1,
+          verse: ref.verse || 1
+        });
       }
+    } else {
+      matchBox.textContent = '';
+      // Animate only padding-bottom when match disappears
+      if (scriptureSearch) scriptureSearch.style.paddingBottom = '0px';
+    }
+  }
+
+  input.addEventListener('input', updateMatchAndJump);
+
+  // Also jump on Enter
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      updateMatchAndJump();
     }
   });
 
-  container.appendChild(input);
+  input.focus();
 }
 
 // --- Main Search Logic ---
-
-/**
- * Handles input and autocompletes/jumps to the first matching element.
- * Highlights the autocompleted portion in the input.
- */
-function handleSearchInput({ input, targetDivId }) {
-  const value = input.value;
-  if (!value) {
-    clearSelection(targetDivId);
-    return;
-  }
-
-  const targetDiv = document.getElementById(targetDivId);
-  if (!targetDiv) return;
-
-  let found = false;
-  let matchText = '';
-  Array.from(targetDiv.children).forEach(child => {
-    child.classList.remove('search-selected');
-    const text = child.textContent.trim();
-    if (!found && text.toLowerCase().startsWith(value.toLowerCase())) {
-      child.classList.add('search-selected');
-      child.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      found = true;
-      matchText = text;
-    }
-  });
-
-  // Autocomplete in input: fill in the rest and select the autocompleted part
-  if (found && matchText.toLowerCase() !== value.toLowerCase()) {
-    input.value = matchText;
-    input.setSelectionRange(value.length, matchText.length);
-  }
-}
-
-function clearSelection(targetDivId) {
-  const targetDiv = document.getElementById(targetDivId);
-  if (!targetDiv) return;
-  Array.from(targetDiv.children).forEach(child => {
-    child.classList.remove('search-selected');
-  });
-}
 
 function setupSearchBox(searchState) {
   updateSearchBox(searchState);
@@ -105,9 +124,9 @@ module.exports = {
   focusSearchSegment,
   setSearchByString,
   scrollToSearch,
-  handleSearchInput,
   setupSearchBox,
   selectSegmentText,
   normalizeBookName,
-  prettyBookName
+  prettyBookName,
+  parseReference
 };

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Settings</title>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #f7f7f7; }
+    .settings-container { display: flex; height: 100vh; min-width: 400px; min-height: 300px; }
+    .sidebar { width: 140px; background: #222; color: #fff; display: flex; flex-direction: column; padding-top: 16px; box-sizing: border-box; }
+    .sidebar button { background: none; border: none; color: inherit; text-align: left; padding: 12px 20px; font-size: 1em; cursor: pointer; outline: none; transition: background 0.2s; }
+    .sidebar button.active, .sidebar button:hover { background: #444; }
+    .settings-content { flex: 1; background: #fff; padding: 24px; box-sizing: border-box; min-width: 200px; }
+    .settings-panel { display: none; }
+    .settings-panel.active { display: block; }
+    .form-row { margin-bottom: 1em; }
+    label { display: block; margin-bottom: 0.25em; }
+    input[type="text"] { width: 100%; padding: 4px; }
+
+    /* Dark theme styles */
+    body.dark-theme {
+      background: #181a1b;
+      color: #eee;
+    }
+    body.dark-theme .settings-content {
+      background: #23272a;
+      color: #eee;
+    }
+    body.dark-theme .sidebar {
+      background: #111;
+      color: #ccc;
+    }
+    body.dark-theme .sidebar button.active,
+    body.dark-theme .sidebar button:hover {
+      background: #333;
+    }
+    body.dark-theme input[type="text"] {
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+    }
+  </style>
+</head>
+<body>
+  <div class="settings-container">
+    <div class="sidebar">
+      <button class="active" data-panel="general">General</button>
+      <button data-panel="display">Display</button>
+      <button data-panel="about">About</button>
+      <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
+    </div>
+    <div class="settings-content">
+      <div class="settings-panel active" id="panel-general">
+        <h2>General Settings</h2>
+        <div class="form-row">
+          <label for="username">Username</label>
+          <input id="username" type="text" />
+        </div>
+        <button class="save-settings" data-panel="general">Save</button>
+        <span class="save-status" data-panel="general"></span>
+      </div>
+      <div class="settings-panel" id="panel-display">
+        <h2>Display Settings</h2>
+        <div class="form-row">
+          <label for="theme">Theme</label>
+          <input id="theme" type="text" />
+        </div>
+        <div class="form-row">
+          <label>
+            <input id="dark-theme" type="checkbox" />
+            Enable Dark Theme
+          </label>
+        </div>
+        <button class="save-settings" data-panel="display">Save</button>
+        <span class="save-status" data-panel="display"></span>
+      </div>
+      <div class="settings-panel" id="panel-about">
+        <h2>About</h2>
+        <p>EasyWorship MVP<br>Version 1.0.0</p>
+        <button class="save-settings" data-panel="about">Save</button>
+        <span class="save-status" data-panel="about"></span>
+      </div>
+      <div class="settings-panel" id="panel-bibles">
+        <h2>Manage Bibles</h2>
+        <div id="bibles-list">
+          <!-- Bible versions will be dynamically loaded here -->
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

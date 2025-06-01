@@ -4,54 +4,66 @@ const fs = require('fs');
 const path = require('path');
 const { ipcRenderer } = require('electron');
 const {
+  ensureBibleJson,
   loadAllVersesFromDisk,
   fetchChapter,
   downloadRemainingChapters
 } = require('./scriptureData');
 const { renderWindow } = require('./virtualList');
 const {
-  updateSearchBox,
-  focusSearchSegment,
-  setSearchByString,
-  scrollToSearch,
-  handleSearchInput,
   setupSearchBox,
-  selectSegmentText
+  parseReference
 } = require('./searchBox');
 const { safeStatus } = require('./uiHelpers');
 const {
-  VERSION, CDN_BASE, ITEM_HEIGHT, WINDOW_SIZE, BUFFER, BOOKS, CHAPTER_COUNTS, VERSE_COUNTS
+  VERSION, CDN_BASE, ITEM_HEIGHT, WINDOW_SIZE, BUFFER, BOOKS, CHAPTER_COUNTS, VERSE_COUNTS, BIBLE_STORAGE_DIR
 } = require('./constants');
 
 let allVerses = [];
-let windowStart = 0;
 let selectedIndices = [];
 let anchorIndex = null;
-let searchState = {
-  book: 0,
-  chapter: 1,
-  verse: 1,
-  segment: 0
-};
 
-document.addEventListener('DOMContentLoaded', () => {
-  const listContainer = document.getElementById('verse-list');
-  if (!listContainer) {
-    console.error('Missing #verse-list in HTML');
-    return;
+// Load settings on startup and apply dark theme if needed
+async function loadAndApplySettings() {
+  const settings = await ipcRenderer.invoke('load-settings');
+  if (settings && settings.darkTheme) {
+    document.body.classList.add('dark-theme');
+  } else {
+    document.body.classList.remove('dark-theme');
   }
-  listContainer.style.position = 'relative';
-  listContainer.style.overflowY = 'auto';
+}
 
-  const wrapper = document.createElement('div');
-  wrapper.id = 'virtual-list';
-  wrapper.style.position = 'relative';
-  listContainer.appendChild(wrapper);
+// Listen for dark theme changes from settings window
+ipcRenderer.on('set-dark-theme', (event, enabled) => {
+  if (enabled) {
+    document.body.classList.add('dark-theme');
+  } else {
+    document.body.classList.remove('dark-theme');
+  }
+});
 
+ipcRenderer.on('default-bible-changed', async (event, bible) => {
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  const biblePath = path.join(userData, BIBLE_STORAGE_DIR, bible);
+
+  allVerses = await loadAllVersesFromDisk(biblePath);
+  document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
+  renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
+  safeStatus(`Switched to ${bible.replace('.json', '').replace('_', ' ')}.`);
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadAndApplySettings();
+
+  const listContainer = document.getElementById('verse-list');
+  if (!listContainer) return;
+
+  // Initial render
+  renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
+
+  // Scroll handler
   listContainer.addEventListener('scroll', () => {
-    const ratio = listContainer.scrollTop / (listContainer.scrollHeight - listContainer.clientHeight);
-    windowStart = Math.floor(ratio * (allVerses.length - WINDOW_SIZE));
-    renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick);
+    renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
   });
 
   initScripture();
@@ -60,55 +72,51 @@ document.addEventListener('DOMContentLoaded', () => {
 async function initScripture() {
   safeStatus('Initializing…');
   allVerses = [];
-  windowStart = 0;
   selectedIndices = [];
   anchorIndex = null;
 
   const userData = await ipcRenderer.invoke('get-user-data-path');
   const baseDir = path.join(userData, 'bibles', VERSION);
-  await fs.promises.mkdir(path.join(baseDir, 'books'), { recursive: true });
+  await fs.promises.mkdir(baseDir, { recursive: true });
 
-  let fullyOnDisk = true;
-  for (const book of BOOKS) {
-    const chapDir = path.join(baseDir, 'books', book, 'chapters');
-    try {
-      const files = await fs.promises.readdir(chapDir);
-      const count = files.filter(f => /^\d+\.json$/.test(f)).length;
-      if (count < CHAPTER_COUNTS[book]) {
-        fullyOnDisk = false;
-        break;
-      }
-    } catch {
-      fullyOnDisk = false;
-      break;
-    }
-  }
+  // Download bible.json if needed
+  await ensureBibleJson(baseDir);
 
   allVerses = await loadAllVersesFromDisk(baseDir);
 
   document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
-  renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick);
+  renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
   safeStatus(`Loaded ${allVerses.length} verses.`);
-  updateSearchBox(searchState);
-  scrollToSearch(searchState, allVerses, { windowStart, selectedIndices, anchorIndex }, () => renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick), updateVerseDisplay);
 
-  if (!fullyOnDisk) {
-    safeStatus('Downloading missing chapters…');
-    await downloadRemainingChapters(baseDir, async () => {
-      allVerses = await loadAllVersesFromDisk(baseDir);
-      renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick);
-      updateSearchBox(searchState);
-    });
-  }
+  // Setup the EasyWorship-style search box
+  setupSearchBox({
+    containerId: 'search-box-container',
+    onReferenceSelected: (ref) => {
+      const key = `${ref.book} ${ref.chapter}:${ref.verse}`;
+      const idx = allVerses.findIndex(v => v.key && v.key.toLowerCase() === key.toLowerCase());
+      if (idx !== -1) {
+        selectedIndices = [idx];
+        anchorIndex = idx;
+        updateVerseDisplay(); // Show the verse content
+        jumpToVerse(idx);     // Scroll to the verse
+        // Also immediately highlight in the list
+        const listContainer = document.getElementById('verse-list');
+        if (listContainer) {
+          renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
+        }
+      } else {
+        safeStatus('Verse not found.');
+      }
+    }
+  });
+}
 
-  setupSearchBox(
-    searchState,
-    allVerses,
-    { windowStart, selectedIndices, anchorIndex },
-    () => renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick),
-    updateVerseDisplay,
-    handleVerseClick
-  );
+// Jump to verse (e.g. after search)
+function jumpToVerse(idx) {
+  const listContainer = document.getElementById('verse-list');
+  if (!listContainer) return;
+  listContainer.scrollTop = idx * ITEM_HEIGHT;
+  // renderWindow will be called by the scroll event
 }
 
 function updateVerseDisplay() {
@@ -116,32 +124,20 @@ function updateVerseDisplay() {
   if (!disp) return;
   disp.innerHTML = selectedIndices
     .sort((a, b) => a - b)
-    .map(i => `<p><strong>${allVerses[i].key}</strong><br>${allVerses[i].text}</p>`)
+    .map(i => {
+      // Remove extra info after the main verse text
+      // This regex removes: .[number][anything] at the end of the verse
+      const cleanText = allVerses[i].text.replace(/(\.\d+[\s\S]*)$/, '');
+      return `<p><strong>${allVerses[i].key}</strong><br>${cleanText}</p>`;
+    })
     .join('');
 }
 
 async function handleVerseClick(i) {
   selectedIndices = [i];
   anchorIndex = i;
-  const match = allVerses[i].key.match(/^(.+?)\s(\d+):(\d+)$/);
-  if (!match) return; // or handle error
-  const [b, c, vnum] = match.slice(1);
-  searchState.book = BOOKS.indexOf(b.toLowerCase());
-  searchState.chapter = Number(c);
-  searchState.verse = Number(vnum);
-  updateSearchBox(searchState);
   updateVerseDisplay();
-  renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick);
+  const listContainer = document.getElementById('verse-list');
+  const scrollTop = listContainer ? listContainer.scrollTop : 0;
+  renderWindow(allVerses, scrollTop, selectedIndices, handleVerseClick);
 }
-
-document.getElementById('verse-list').addEventListener('keydown', (e) => {
-  handleSearchInput(
-    e,
-    searchState,
-    allVerses,
-    { windowStart, selectedIndices, anchorIndex },
-    () => renderWindow(allVerses, windowStart, selectedIndices, handleVerseClick),
-    updateVerseDisplay,
-    handleVerseClick
-  );
-});

@@ -1,22 +1,115 @@
 // main.js
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { BOOKS, CHAPTER_COUNTS } = require('./constants');
+const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
+
+let mainWindow; // Add this at the top
+let defaultBible = 'en_kjv.json'; // Default Bible
+
+const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+ipcMain.handle('load-settings', async () => {
+  try {
+    const data = await fs.promises.readFile(settingsPath, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+});
+
+ipcMain.handle('save-settings', async (event, settings) => {
+  await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  return true;
+});
+
+ipcMain.on('set-default-bible', (event, bible) => {
+  defaultBible = bible;
+  event.reply('default-bible-changed', bible);
+});
+
+ipcMain.handle('get-default-bible', () => defaultBible);
 
 function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+  mainWindow = new BrowserWindow({
+    width: 1000,
+    height: 700,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
       contextIsolation: false   // allow require() in renderer
     }
   });
-  win.loadFile('index.html');
+
+  mainWindow.loadFile('index.html');
+
+  // Define the menu template
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Settings',
+          click: () => {
+            const settingsWin = new BrowserWindow({
+              width: 600,
+              height: 400,
+              parent: mainWindow,
+              modal: true,
+              webPreferences: {
+                nodeIntegration: true,
+                contextIsolation: false
+              }
+            });
+            settingsWin.setMenuBarVisibility(false);
+            settingsWin.loadFile('settings.html');
+          }
+        },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forcereload' },
+        { type: 'separator' },
+        { role: 'toggledevtools' }
+      ]
+    },
+    {
+      label: 'Window',
+      role: 'window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'close' }
+      ]
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'Learn More',
+          click: async () => {
+            await shell.openExternal('https://electronjs.org')
+          }
+        }
+      ]
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
 }
+
+// Listen for dark theme changes from settings window
+ipcMain.on('set-dark-theme', (event, enabled) => {
+  if (mainWindow) {
+    mainWindow.webContents.send('set-dark-theme', enabled);
+  }
+});
 
 app.whenReady().then(createWindow);
 
