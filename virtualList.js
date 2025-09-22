@@ -38,6 +38,7 @@ function renderWindow(allVerses, scrollTop, selectedIndices, handleVerseClick) {
     div.style.width = '100%';
     div.style.height = `${ITEM_HEIGHT}px`;
     div.addEventListener('click', () => handleVerseClick(i));
+    div.addEventListener('dblclick', () => handleVerseDoubleClick(i));
     wrapper.appendChild(div);
   }
 }

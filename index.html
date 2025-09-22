@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
   <title>EasyWorship MVP</title>
 
   <!-- Your existing global styles -->
@@ -18,6 +19,10 @@
       flex-direction: column;
     }
 
+    :root {
+      --preview-aspect: 56.25%; /* Default 16:9 */
+    }
+
     /* Top slide area: preview on left, live on right */
     #slide-container {
       flex: 1 1 auto;
@@ -27,12 +32,107 @@
     #slide-preview, #slide-live {
       flex: 1 1 50%;
       overflow: auto;
-      padding: 16px;
+      padding: 0;
       box-sizing: border-box;
+      position: relative;
+    }
+    #slide-preview {
       border-right: 1px solid #ccc;
     }
-    #slide-live {
-      border-right: none;
+
+    /* Preview content with aspect ratio */
+    #preview-container {
+      position: relative;
+      width: 100%;
+      height: 0;
+      padding-bottom: var(--preview-aspect, 56.25%); /* Default 16:9 */
+      background: #000;
+      overflow: hidden;
+    }
+    #preview-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #verse-number {
+      font-size: 1.5em;
+      align-self: flex-start;
+      vertical-align: super;
+      line-height: 1;
+    }
+    #verse-text {
+      font-size: 2em;
+      text-align: center;
+      flex: 1;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 100%;
+      padding: 0 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #verse-reference {
+      font-size: 0.8em;
+      align-self: flex-end;
+      margin-top: auto;
+    }
+
+    /* Live content - same aspect as preview */
+    #live-container {
+      position: relative;
+      width: 100%;
+      padding-bottom: var(--preview-aspect, 56.25%); /* Same aspect as preview */
+      background: #000;
+      overflow: hidden;
+    }
+    #live-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #live-number {
+      font-size: 1.5em;
+      align-self: flex-start;
+      vertical-align: super;
+      line-height: 1;
+    }
+    #live-text {
+      font-size: 2em;
+      text-align: center;
+      flex: 1;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 100%;
+      padding: 0 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #live-reference {
+      font-size: 0.8em;
+      align-self: flex-end;
+      margin-top: auto;
     }
 
     /* Bottom verse panel: fixed height, two columns */
@@ -63,17 +163,33 @@
     .search-selected {
       background: yellow;
     }
+
+    button.active {
+      background: #0074d9 !important;
+      color: white !important;
+    }
   </style>
 </head>
 <body>
   <!-- Slide preview + live view -->
   <div id="slide-container">
     <div id="slide-preview">
-      <!-- double-click or Enter here loads into live -->
-      <h2>Preview</h2>
+      <div id="preview-container">
+        <div id="preview-content">
+          <div id="verse-number"></div>
+          <div id="verse-text">Select a verse to preview</div>
+          <div id="verse-reference"></div>
+        </div>
+      </div>
     </div>
     <div id="slide-live">
-      <h2>Live</h2>
+      <div id="live-container">
+        <div id="live-content">
+          <div id="live-number"></div>
+          <div id="live-text"></div>
+          <div id="live-reference"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -99,5 +215,20 @@
     setupSearchBox({ containerId: 'search-box-container', targetDivId: 'verse-list' });
   });
 </script>
+
+<!-- CSS Editing Popover -->
+<div id="css-popover" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border:1px solid #ccc; padding:20px; z-index:1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);">
+  <h3>Edit CSS for <span id="css-element-name"></span></h3>
+  <textarea id="css-textarea" rows="10" cols="50" placeholder="Enter CSS rules without braces, e.g. color: red; font-size: 24px;"></textarea>
+  <select id="css-select" style="display:none; width:100%; padding:4px;">
+    <option value="small">Small</option>
+    <option value="medium">Medium</option>
+    <option value="large">Large</option>
+  </select>
+  <br><br>
+  <button id="css-save">Save</button>
+  <button id="css-cancel">Cancel</button>
+  <div id="css-error" style="color:red; margin-top:10px;"></div>
+</div>
 </body>
 </html>

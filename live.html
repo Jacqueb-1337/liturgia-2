@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Live Display</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #000;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    #live-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+    #live-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      color: white;
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #live-number {
+      font-size: 1.5em;
+      align-self: flex-start;
+      vertical-align: super;
+      line-height: 1;
+    }
+    #live-text {
+      font-size: 2em;
+      text-align: center;
+      flex: 1;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      max-width: 100%;
+      padding: 0 10px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #live-reference {
+      font-size: 0.8em;
+      align-self: flex-end;
+      margin-top: auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="live-container">
+    <div id="live-content">
+      <div id="live-number"></div>
+      <div id="live-text"></div>
+      <div id="live-reference"></div>
+    </div>
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('update-content', (event, data) => {
+      document.getElementById('live-number').textContent = data.number;
+      document.getElementById('live-text').textContent = data.text;
+      document.getElementById('live-reference').textContent = data.reference;
+      if (data.styles) {
+        // apply styles first
+        Object.keys(data.styles).forEach(key => {
+          const el = document.getElementById('live-' + key.toLowerCase().replace('verse', ''));
+          if (el && data.styles[key] && data.styles[key] !== '') {
+            try {
+              el.style.cssText = atob(data.styles[key]);
+            } catch (e) {
+              console.error('Error decoding style:', e);
+            }
+          }
+        });
+      }
+      // then set font sizes
+      if (data.numberFontSize) document.getElementById('live-number').style.fontSize = data.numberFontSize;
+      if (data.textFontSize) document.getElementById('live-text').style.fontSize = data.textFontSize;
+    });
+    ipcRenderer.on('clear-live-text', () => {
+      document.getElementById('live-number').style.display = 'none';
+      document.getElementById('live-text').style.display = 'none';
+      document.getElementById('live-reference').style.display = 'none';
+    });
+    ipcRenderer.on('show-live-text', () => {
+      document.getElementById('live-number').style.display = '';
+      document.getElementById('live-text').style.display = '';
+      document.getElementById('live-reference').style.display = '';
+    });
+    ipcRenderer.on('set-live-black', () => {
+      document.getElementById('live-container').style.background = '#000';
+      document.getElementById('live-number').style.display = 'none';
+      document.getElementById('live-text').style.display = 'none';
+      document.getElementById('live-reference').style.display = 'none';
+    });
+    ipcRenderer.on('reset-live-canvas', () => {
+      document.getElementById('live-container').style.background = '#000';
+      document.getElementById('live-number').style.display = '';
+      document.getElementById('live-text').style.display = '';
+      document.getElementById('live-reference').style.display = '';
+    });
+  </script>
+</body>
+</html>

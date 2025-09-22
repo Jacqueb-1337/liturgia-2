@@ -1,12 +1,13 @@
 // main.js
 
-const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
 
 let mainWindow; // Add this at the top
 let defaultBible = 'en_kjv.json'; // Default Bible
+let liveWindow = null;
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 
@@ -30,6 +31,10 @@ ipcMain.on('set-default-bible', (event, bible) => {
 });
 
 ipcMain.handle('get-default-bible', () => defaultBible);
+
+ipcMain.handle('get-displays', () => {
+  return screen.getAllDisplays();
+});
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -156,4 +161,70 @@ async function loadAllVersesFromDiskMain(baseDir) {
 
 ipcMain.handle('load-all-verses', async (event, baseDir) => {
   return await loadAllVersesFromDiskMain(baseDir);
+});
+
+ipcMain.handle('create-live-window', async () => {
+  if (liveWindow) {
+    liveWindow.showInactive();
+    return;
+  }
+  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  let settings = {};
+  try {
+    const data = await fs.promises.readFile(settingsPath, 'utf8');
+    settings = JSON.parse(data);
+  } catch {}
+  const displays = screen.getAllDisplays();
+  const defaultDisplayId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
+  const display = displays.find(d => d.id == defaultDisplayId) || displays[0];
+  if (display) {
+    liveWindow = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      fullscreen: true,
+      frame: false,
+      show: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+    liveWindow.loadFile('live.html');
+    liveWindow.once('ready-to-show', () => {
+      liveWindow.showInactive();
+    });
+    liveWindow.on('closed', () => {
+      liveWindow = null;
+    });
+  }
+});
+
+ipcMain.handle('close-live-window', () => {
+  if (liveWindow) {
+    liveWindow.minimize();
+  }
+});
+
+ipcMain.on('update-live-window', (event, data) => {
+  if (liveWindow) {
+    liveWindow.webContents.send('update-content', data);
+  }
+});
+
+ipcMain.on('clear-live-text', () => {
+  if (liveWindow) liveWindow.webContents.send('clear-live-text');
+});
+
+ipcMain.on('show-live-text', () => {
+  if (liveWindow) liveWindow.webContents.send('show-live-text');
+});
+
+ipcMain.on('set-live-black', () => {
+  if (liveWindow) liveWindow.webContents.send('set-live-black');
+});
+
+ipcMain.on('reset-live-canvas', () => {
+  if (liveWindow) liveWindow.webContents.send('reset-live-canvas');
 });

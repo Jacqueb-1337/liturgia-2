@@ -45,6 +45,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('dark-theme').checked = !!settings.darkTheme;
     applyDarkTheme(!!settings.darkTheme);
   }
+  await loadDisplays();
+  const defaultDisplaySelect = document.getElementById('default-display');
+  if (settings && settings.defaultDisplay) {
+    defaultDisplaySelect.value = settings.defaultDisplay;
+  } else {
+    defaultDisplaySelect.selectedIndex = 0; // Select first option if none saved
+  }
 });
 
 // Save settings from any panel
@@ -53,7 +60,8 @@ document.querySelectorAll('.save-settings').forEach(btn => {
     const username = document.getElementById('username').value;
     const theme = document.getElementById('theme').value;
     const darkTheme = document.getElementById('dark-theme').checked;
-    await ipcRenderer.invoke('save-settings', { username, theme, darkTheme });
+    const defaultDisplay = document.getElementById('default-display').value;
+    await ipcRenderer.invoke('save-settings', { username, theme, darkTheme, defaultDisplay });
     applyDarkTheme(darkTheme);
     // Show status only for the current panel
     const panel = btn.getAttribute('data-panel');
@@ -66,6 +74,16 @@ document.querySelectorAll('.save-settings').forEach(btn => {
 // Live toggle dark theme
 document.getElementById('dark-theme').addEventListener('change', (e) => {
   applyDarkTheme(e.target.checked);
+});
+
+document.getElementById('reload-displays').addEventListener('click', loadDisplays);
+
+document.getElementById('open-live-window').addEventListener('click', async () => {
+  await ipcRenderer.invoke('create-live-window');
+});
+
+document.getElementById('close-live-window').addEventListener('click', async () => {
+  await ipcRenderer.invoke('close-live-window');
 });
 
 async function loadBiblesList() {
@@ -142,4 +160,17 @@ function selectBible(bible) {
   if (selectedItem) {
     selectedItem.classList.add('selected');
   }
+}
+
+async function loadDisplays() {
+  const displays = await ipcRenderer.invoke('get-displays');
+  const select = document.getElementById('default-display');
+  select.innerHTML = '';
+  displays.forEach((display, i) => {
+    const index = i + 1;
+    const option = document.createElement('option');
+    option.value = display.id;
+    option.textContent = `Display ${index} (${display.bounds.width}x${display.bounds.height})`;
+    select.appendChild(option);
+  });
 }

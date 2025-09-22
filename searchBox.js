@@ -1,4 +1,4 @@
-const { BOOKS } = require('./constants');
+// const { BOOKS } = require('./constants');
 
 // --- Helpers ---
 
@@ -11,7 +11,7 @@ function prettyBookName(name) {
 
 // --- UI Rendering ---
 
-function parseReference(input) {
+function parseReference(input, books) {
   // Accepts: "1ch 11 4", "1 chronicles 11:4", "1chronicles11:4", etc.
   const trimmed = input.trim().replace(/\s+/g, ' ');
   if (!trimmed) return null;
@@ -27,10 +27,10 @@ function parseReference(input) {
   // Find best matching book
   let book = null;
   let bookIndex = -1;
-  for (let i = 0; i < BOOKS.length; ++i) {
-    const norm = BOOKS[i].replace(/[^a-z0-9]/gi, '').toLowerCase();
+  for (let i = 0; i < books.length; ++i) {
+    const norm = books[i].replace(/[^a-z0-9]/gi, '').toLowerCase();
     if (norm.startsWith(bookPart)) {
-      book = BOOKS[i];
+      book = books[i];
       bookIndex = i;
       break;
     }
@@ -43,8 +43,7 @@ function parseReference(input) {
   return { book, bookIndex, chapter, verse };
 }
 
-function updateSearchBox(searchState) {
-  const { containerId, onReferenceSelected } = searchState;
+function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter, books, onToggleLive, onToggleClear, onToggleBlack }) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
@@ -67,12 +66,66 @@ function updateSearchBox(searchState) {
   matchBox.style.color = '#0074d9';
   matchBox.style.minHeight = '1.2em'; // Reserve space so layout doesn't shift
 
+  // Buttons container
+  const buttonsContainer = document.createElement('div');
+  buttonsContainer.style.float = 'right';
+  buttonsContainer.style.display = 'flex';
+  buttonsContainer.style.gap = '5px';
+
+  // Go Live button
+  const goLiveBtn = document.createElement('button');
+  goLiveBtn.textContent = 'Go Live';
+  goLiveBtn.style.padding = '4px 8px';
+  goLiveBtn.addEventListener('click', () => {
+    if (onEnter) onEnter();
+  });
+
+  // Live button
+  const liveBtn = document.createElement('button');
+  liveBtn.textContent = 'Live';
+  liveBtn.style.padding = '4px 8px';
+  liveBtn.addEventListener('click', () => {
+    const willBeActive = !liveBtn.classList.contains('active');
+    if (onToggleLive) onToggleLive(willBeActive);
+    liveBtn.classList.toggle('active');
+  });
+
+  // Clear button
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.padding = '4px 8px';
+  clearBtn.addEventListener('click', () => {
+    if (onToggleClear) onToggleClear();
+    clearBtn.classList.toggle('active');
+    if (clearBtn.classList.contains('active')) {
+      blackBtn.classList.remove('active');
+    }
+  });
+
+  // Black button
+  const blackBtn = document.createElement('button');
+  blackBtn.textContent = 'Black';
+  blackBtn.style.padding = '4px 8px';
+  blackBtn.addEventListener('click', () => {
+    if (onToggleBlack) onToggleBlack();
+    blackBtn.classList.toggle('active');
+    if (blackBtn.classList.contains('active')) {
+      clearBtn.classList.remove('active');
+    }
+  });
+
+  buttonsContainer.appendChild(goLiveBtn);
+  buttonsContainer.appendChild(liveBtn);
+  buttonsContainer.appendChild(clearBtn);
+  buttonsContainer.appendChild(blackBtn);
+
   container.appendChild(input);
+  container.appendChild(buttonsContainer);
   container.appendChild(matchBox);
 
   function updateMatchAndJump() {
     const value = input.value;
-    const ref = parseReference(value);
+    const ref = parseReference(value, books);
     const scriptureSearch = document.getElementById('scripture-search');
     if (ref && ref.book) {
       let display = ref.book;
@@ -98,10 +151,17 @@ function updateSearchBox(searchState) {
 
   input.addEventListener('input', updateMatchAndJump);
 
-  // Also jump on Enter
+  // Also handle navigation and enter
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      updateMatchAndJump();
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      if (onNavigate) onNavigate('prev');
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (onNavigate) onNavigate('next');
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (onEnter) onEnter();
     }
   });
 
