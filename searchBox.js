@@ -17,10 +17,11 @@ function parseReference(input, books) {
   if (!trimmed) return null;
 
   // Split into parts: book, chapter, verse
-  const match = trimmed.match(/^([1-3]?\s*[a-zA-Z ]+)\s*(\d+)?[:\s]?(\d+)?$/);
+  // Allow optional spaces around the range hyphen (e.g., '2-4' or '2 - 4')
+  const match = trimmed.match(/^([1-3]?\s*[a-zA-Z ]+)\s*(\d+)?[:\s]?(\d+)?(?:\s*-\s*(\d+))?$/);
   if (!match) return null;
 
-  let [ , bookPart, chapter, verse ] = match;
+  let [ , bookPart, chapter, verse, verseEnd ] = match;
   // Normalize: remove all non-alphanumerics (including spaces)
   bookPart = bookPart.replace(/[^a-z0-9]/gi, '').toLowerCase();
 
@@ -39,8 +40,9 @@ function parseReference(input, books) {
 
   chapter = chapter ? parseInt(chapter, 10) : null;
   verse = verse ? parseInt(verse, 10) : null;
+  verseEnd = verseEnd ? parseInt(verseEnd, 10) : null;
 
-  return { book, bookIndex, chapter, verse };
+  return { book, bookIndex, chapter, verse, verseEnd };
 }
 
 function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter, books, onToggleLive, onToggleClear, onToggleBlack }) {
@@ -66,11 +68,11 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   matchBox.style.color = '#0074d9';
   matchBox.style.minHeight = '1.2em'; // Reserve space so layout doesn't shift
 
-  // Buttons container
-  const buttonsContainer = document.createElement('div');
-  buttonsContainer.style.float = 'right';
-  buttonsContainer.style.display = 'flex';
-  buttonsContainer.style.gap = '5px';
+  // Get the control buttons container (outside tabs)
+  const buttonsContainer = document.getElementById('control-buttons-container');
+  if (buttonsContainer) {
+    buttonsContainer.innerHTML = ''; // Clear any existing buttons
+  }
 
   // Go Live button
   const goLiveBtn = document.createElement('button');
@@ -87,8 +89,11 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   liveBtn.addEventListener('click', () => {
     const willBeActive = !liveBtn.classList.contains('active');
     if (onToggleLive) onToggleLive(willBeActive);
-    liveBtn.classList.toggle('active');
+    // Don't toggle here - let updateLiveButtonState handle it
   });
+  
+  // Store reference globally so renderer.js can update it
+  window.liveButton = liveBtn;
 
   // Clear button
   const clearBtn = document.createElement('button');
@@ -114,13 +119,14 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
     }
   });
 
-  buttonsContainer.appendChild(goLiveBtn);
-  buttonsContainer.appendChild(liveBtn);
-  buttonsContainer.appendChild(clearBtn);
-  buttonsContainer.appendChild(blackBtn);
+  if (buttonsContainer) {
+    buttonsContainer.appendChild(goLiveBtn);
+    buttonsContainer.appendChild(liveBtn);
+    buttonsContainer.appendChild(clearBtn);
+    buttonsContainer.appendChild(blackBtn);
+  }
 
   container.appendChild(input);
-  container.appendChild(buttonsContainer);
   container.appendChild(matchBox);
 
   function updateMatchAndJump() {
@@ -131,6 +137,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
       let display = ref.book;
       if (ref.chapter) display += ` ${ref.chapter}`;
       if (ref.verse) display += `:${ref.verse}`;
+      if (ref.verseEnd) display += `-${ref.verseEnd}`;
       matchBox.textContent = `Closest match: ${display}`;
       // Animate only padding-bottom when match appears
       if (scriptureSearch) scriptureSearch.style.paddingBottom = '8px';
@@ -139,7 +146,8 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
           book: ref.book,
           bookIndex: ref.bookIndex,
           chapter: ref.chapter || 1,
-          verse: ref.verse || 1
+          verse: ref.verse || 1,
+          verseEnd: ref.verseEnd || null
         });
       }
     } else {

@@ -27,7 +27,29 @@ ipcMain.handle('save-settings', async (event, settings) => {
 
 ipcMain.on('set-default-bible', (event, bible) => {
   defaultBible = bible;
+  // Reply back to the sender
   event.reply('default-bible-changed', bible);
+  // Also notify the main window so it can reload verses
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('default-bible-changed', bible);
+  }
+
+  // Persist chosen bible into settings.json
+  (async () => {
+    try {
+      let settings = {};
+      try {
+        const txt = await fs.promises.readFile(settingsPath, 'utf8');
+        settings = JSON.parse(txt);
+      } catch (e) {
+        settings = {};
+      }
+      settings.defaultBible = bible;
+      await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to save default bible to settings:', err);
+    }
+  })();
 });
 
 ipcMain.handle('get-default-bible', () => defaultBible);
@@ -48,6 +70,15 @@ function createWindow() {
   });
 
   mainWindow.loadFile('index.html');
+  
+  // Close live window when main window closes
+  mainWindow.on('closed', () => {
+    if (liveWindow) {
+      liveWindow.close();
+      liveWindow = null;
+    }
+    mainWindow = null;
+  });
 
   // Define the menu template
   const template = [

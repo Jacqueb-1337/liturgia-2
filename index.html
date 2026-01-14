@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
   <title>EasyWorship MVP</title>
 
   <!-- Your existing global styles -->
@@ -35,9 +35,6 @@
       padding: 0;
       box-sizing: border-box;
       position: relative;
-    }
-    #slide-preview {
-      border-right: 1px solid #ccc;
     }
 
     /* Preview content with aspect ratio */
@@ -81,6 +78,14 @@
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+    /* Style for inline verse numbers when concatenating passages */
+    #verse-text p, #verse-display p { margin: 0; }
+    #verse-text p sub.verse-num, #verse-display p sub.verse-num {
+      font-size: 0.65em;
+      vertical-align: sub;
+      margin-right: 6px;
+      opacity: 0.85;
     }
     #verse-reference {
       font-size: 0.8em;
@@ -139,7 +144,6 @@
     #verse-panel {
       flex: 0 0 200px; /* fixed 200px tall */
       display: flex;
-      border-top: 1px solid #ccc;
       height: 200px;
       flex-direction: column;
     }
@@ -148,7 +152,6 @@
       flex: 0 0 auto;
       width: var(--verse-list-width, 150px);
       overflow-y: auto;
-      border-right: 1px solid #ccc;
       background: #fff;
     }
     /* Verse display on right: scrollable */
@@ -171,38 +174,79 @@
   </style>
 </head>
 <body>
-  <!-- Slide preview + live view -->
-  <div id="slide-container">
-    <div id="slide-preview">
-      <div id="preview-container">
-        <div id="preview-content">
-          <div id="verse-number"></div>
-          <div id="verse-text">Select a verse to preview</div>
-          <div id="verse-reference"></div>
+  <div style="display: flex; flex-direction: column; height: 100vh;">
+    <!-- Top section: Schedule sidebar + Preview canvases -->
+    <div id="top-section" style="display: flex; flex: 0 0 calc(100vh - 216px); overflow: hidden; min-height: 0;">
+      <!-- Schedule Sidebar -->
+      <div id="schedule-sidebar" style="width: 250px; display: flex; flex-direction: column;">
+        <div id="schedule-header" style="padding: 10px; font-weight: bold;">
+          Schedule
+        </div>
+        <div id="schedule-list" style="flex: 1; overflow-y: auto; padding: 5px;">
+          <!-- Schedule items will be added here -->
+        </div>
+      </div>
+      
+      <!-- Resizer between schedule and previews -->
+      <div class="resizer resizer-x" id="schedule-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
+      
+      <!-- Slide preview + live view -->
+      <div id="slide-container" style="flex: 1; display: flex; min-width: 0;">
+        <div id="slide-preview" style="flex: 1; overflow: hidden; min-width: 0;">
+          <canvas id="preview-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+        </div>
+        
+        <!-- Resizer between preview and live -->
+        <div class="resizer resizer-x" id="preview-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
+        
+        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0;">
+          <canvas id="live-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
         </div>
       </div>
     </div>
-    <div id="slide-live">
-      <div id="live-container">
-        <div id="live-content">
-          <div id="live-number"></div>
-          <div id="live-text"></div>
-          <div id="live-reference"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Bottom verse selection and display -->
-  <div id="verse-panel">
-    <div id="scripture-search">
-      <div id="search-box-container" style="width:100%"></div>
-    </div>
-    <div id="verse-content-row" style="display: flex; flex: 1;">
-      <div id="verse-list" style="overflow-y:auto; height:400px; width: 200px">
-        <div id="virtual-list"></div>
+    <!-- Resizer between previews and verse panel -->
+    <div class="resizer resizer-y" id="verse-resizer" style="height: 16px; cursor: row-resize; flex-shrink: 0;"></div>
+
+    <!-- Bottom verse selection and display -->
+    <div id="verse-panel" style="flex: 0 0 200px; min-height: 0;">
+      <!-- Control buttons (persist across tabs) -->
+      <div id="control-buttons-container" style="display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid #ccc; background: #f5f5f5; justify-content: flex-end;"></div>
+      
+      <!-- Tabs -->
+      <div id="bottom-tabs" style="display: flex; border-bottom: 1px solid #ccc;">
+        <button class="bottom-tab active" data-tab="verses" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid #0078d4;">Verses</button>
+        <button class="bottom-tab" data-tab="songs" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer;">Songs</button>
       </div>
-      <div id="verse-display" style="flex: 1 1 auto;"></div>
+      
+      <!-- Verses Tab Content -->
+      <div id="verses-tab-content" class="tab-content" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div id="scripture-search" style="flex-shrink: 0;">
+          <div id="search-box-container" style="width:100%"></div>
+        </div>
+        <div id="verse-content-row" style="display: flex; flex: 1; min-height: 0;">
+          <div id="verse-list">
+            <div id="virtual-list"></div>
+          </div>
+          <div id="verse-display"></div>
+        </div>
+      </div>
+      
+      <!-- Songs Tab Content -->
+      <div id="songs-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+        <div id="song-search" style="flex-shrink: 0; padding: 1em; display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 6px; box-sizing: border-box;" />
+          <button id="song-view-toggle" style="padding: 6px 12px; white-space: nowrap;" title="Toggle between full song and verse blocks">Verse Blocks</button>
+        </div>
+        <div style="display: flex; flex: 1; min-height: 0;">
+          <div id="song-list" style="flex: 0 0 200px; overflow-y: auto; position: relative; border: 1px solid #ccc;">
+            <div id="song-virtual-list" style="position: relative;"></div>
+          </div>
+          <div id="song-display" style="flex: 1; padding: 10px; border: 1px solid #ccc; border-left: none; overflow-y: auto;">
+            <!-- Selected song details will be shown here -->
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

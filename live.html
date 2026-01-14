@@ -53,6 +53,9 @@
       align-items: center;
       justify-content: center;
     }
+    /* Inline verse number style for live multi-verse passages */
+    #live-text p { margin: 0; }
+    #live-text p sub.verse-num { font-size: 0.65em; vertical-align: sub; margin-right: 6px; opacity: 0.9; }
     #live-reference {
       font-size: 0.8em;
       align-self: flex-end;
@@ -61,57 +64,289 @@
   </style>
 </head>
 <body>
-  <div id="live-container">
-    <div id="live-content">
-      <div id="live-number"></div>
-      <div id="live-text"></div>
-      <div id="live-reference"></div>
-    </div>
-  </div>
+  <canvas id="live-canvas" style="width: 100vw; height: 100vh; display: block;"></canvas>
   <script>
     const { ipcRenderer } = require('electron');
-    ipcRenderer.on('update-content', (event, data) => {
-      document.getElementById('live-number').textContent = data.number;
-      document.getElementById('live-text').textContent = data.text;
-      document.getElementById('live-reference').textContent = data.reference;
-      if (data.styles) {
-        // apply styles first
-        Object.keys(data.styles).forEach(key => {
-          const el = document.getElementById('live-' + key.toLowerCase().replace('verse', ''));
-          if (el && data.styles[key] && data.styles[key] !== '') {
-            try {
-              el.style.cssText = atob(data.styles[key]);
-            } catch (e) {
-              console.error('Error decoding style:', e);
-            }
-          }
+    
+    const canvas = document.getElementById('live-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Track state for clear/black modes
+    let isClearMode = false;
+    let isBlackMode = false;
+    
+    // Set canvas to actual display resolution
+    function resizeCanvas() {
+      canvas.width = window.screen.width;
+      canvas.height = window.screen.height;
+      // Redraw based on current mode
+      if (isBlackMode || isClearMode) {
+        // Just fill with black
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      } else if (window.currentContent) {
+        renderContent(window.currentContent);
+      }
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    /**
+     * Render verse content to canvas
+     */
+    function renderContent(content) {
+      window.currentContent = content;
+      
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      
+      // Calculate font sizes
+      let baseFontSize = height * 0.08;
+      
+      // Render verse number (top left)
+      if (content.number) {
+        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+      
+      // Render verse text (center)
+      if (content.text) {
+        ctx.textAlign = 'center';
+        const textY = height / 2;
+        
+        // Parse text to handle verse numbers as subscripts
+        const segments = parseVerseSegments(content.text);
+        
+        // Auto-size font to fill vertical space optimally
+        ctx.font = `${baseFontSize}px Arial`;
+        let lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+        
+        // Grow font size to fill available vertical space
+        while (lines.length * baseFontSize * 1.2 < availableHeight * 0.85 && baseFontSize < height * 0.15) {
+          baseFontSize += 4;
+          ctx.font = `${baseFontSize}px Arial`;
+          lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+        }
+        
+        // If we overshot, shrink back down
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          ctx.font = `${baseFontSize}px Arial`;
+          lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+        }
+        
+        // Render lines with subscript numbers
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+        
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
         });
       }
-      // then set font sizes
-      if (data.numberFontSize) document.getElementById('live-number').style.fontSize = data.numberFontSize;
-      if (data.textFontSize) document.getElementById('live-text').style.fontSize = data.textFontSize;
+      
+      // Render reference (bottom right)
+      if (content.reference) {
+        ctx.font = `${baseFontSize * 0.7}px Arial`;
+        ctx.textAlign = 'right';
+        ctx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+      
+      // Render hint (if showing clipped verses)
+      if (content.showingCount && content.totalSelected && content.showingCount < content.totalSelected) {
+        const hint = `Showing ${content.showingCount} of ${content.totalSelected} selected`;
+        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.fillStyle = '#ddd';
+        ctx.textAlign = 'right';
+        ctx.fillText(hint, width - padding, height - padding - baseFontSize * 1.1);
+        ctx.fillStyle = '#fff';
+      }
+    }
+    
+    /**
+     * Parse text into segments of verse numbers and text
+     */
+    function parseVerseSegments(text) {
+      const segments = [];
+      const regex = /(\d+)\s{2}/g;
+      let lastIndex = 0;
+      let match;
+      
+      while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          const textBefore = text.substring(lastIndex, match.index).trim();
+          if (textBefore) segments.push({ isNumber: false, text: textBefore });
+        }
+        segments.push({ isNumber: true, text: match[1] });
+        lastIndex = regex.lastIndex;
+      }
+      
+      if (lastIndex < text.length) {
+        const remaining = text.substring(lastIndex).trim();
+        if (remaining) segments.push({ isNumber: false, text: remaining });
+      }
+      
+      return segments;
+    }
+    
+    /**
+     * Wrap text with subscript segments
+     */
+    function wrapTextWithSubscripts(segments, maxWidth, baseFontSize) {
+      const lines = [];
+      let currentLine = [];
+      let currentWidth = 0;
+      
+      const subscriptSize = baseFontSize * 0.6;
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          ctx.font = `${subscriptSize}px Arial`;
+          const width = ctx.measureText(seg.text + ' ').width;
+          
+          if (currentWidth + width > maxWidth && currentLine.length > 0) {
+            lines.push(currentLine);
+            currentLine = [];
+            currentWidth = 0;
+          }
+          
+          currentLine.push(seg);
+          currentWidth += width;
+          ctx.font = `${baseFontSize}px Arial`;
+        } else {
+          const words = seg.text.split(' ');
+          words.forEach((word, idx) => {
+            const testWord = word + (idx < words.length - 1 ? ' ' : '');
+            const width = ctx.measureText(testWord).width;
+            
+            if (currentWidth + width > maxWidth && currentLine.length > 0) {
+              lines.push(currentLine);
+              currentLine = [];
+              currentWidth = 0;
+            }
+            
+            currentLine.push({ isNumber: false, text: testWord });
+            currentWidth += width;
+          });
+        }
+      });
+      
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+      }
+      
+      return lines;
+    }
+    
+    /**
+     * Render a line with subscript verse numbers
+     */
+    function renderLineWithSubscripts(segments, centerX, y, baseFontSize) {
+      const subscriptSize = baseFontSize * 0.6;
+      let totalWidth = 0;
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          ctx.font = `${subscriptSize}px Arial`;
+          totalWidth += ctx.measureText(seg.text + ' ').width;
+        } else {
+          ctx.font = `${baseFontSize}px Arial`;
+          totalWidth += ctx.measureText(seg.text).width;
+        }
+      });
+      
+      let x = centerX - (totalWidth / 2);
+      
+      ctx.textBaseline = 'alphabetic';  // Use alphabetic baseline for consistent rendering
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          ctx.font = `${subscriptSize}px Arial`;
+          ctx.fillStyle = '#ddd';
+          ctx.textAlign = 'left';
+          ctx.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
+          x += ctx.measureText(seg.text + ' ').width;
+          ctx.fillStyle = '#fff';
+        } else {
+          ctx.font = `${baseFontSize}px Arial`;
+          ctx.textAlign = 'left';
+          ctx.fillText(seg.text, x, y);
+          x += ctx.measureText(seg.text).width;
+        }
+      });
+      
+      ctx.textBaseline = 'middle';  // Reset to middle
+    }
+    
+    /**
+     * Wrap text to fit within a given width
+     */
+    function wrapText(text, maxWidth) {
+      const words = text.split(' ');
+      const lines = [];
+      let currentLine = '';
+      
+      for (let word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        const metrics = ctx.measureText(testLine);
+        
+        if (metrics.width > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      
+      if (currentLine) lines.push(currentLine);
+      return lines;
+    }
+    
+    ipcRenderer.on('update-content', (event, data) => {
+      isClearMode = false;
+      isBlackMode = false;
+      renderContent(data);
     });
+    
     ipcRenderer.on('clear-live-text', () => {
-      document.getElementById('live-number').style.display = 'none';
-      document.getElementById('live-text').style.display = 'none';
-      document.getElementById('live-reference').style.display = 'none';
+      isClearMode = true;
+      isBlackMode = false;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     });
+    
     ipcRenderer.on('show-live-text', () => {
-      document.getElementById('live-number').style.display = '';
-      document.getElementById('live-text').style.display = '';
-      document.getElementById('live-reference').style.display = '';
+      isClearMode = false;
+      isBlackMode = false;
+      if (window.currentContent) {
+        renderContent(window.currentContent);
+      }
     });
+    
     ipcRenderer.on('set-live-black', () => {
-      document.getElementById('live-container').style.background = '#000';
-      document.getElementById('live-number').style.display = 'none';
-      document.getElementById('live-text').style.display = 'none';
-      document.getElementById('live-reference').style.display = 'none';
+      isClearMode = false;
+      isBlackMode = true;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     });
+    
     ipcRenderer.on('reset-live-canvas', () => {
-      document.getElementById('live-container').style.background = '#000';
-      document.getElementById('live-number').style.display = '';
-      document.getElementById('live-text').style.display = '';
-      document.getElementById('live-reference').style.display = '';
+      isClearMode = false;
+      isBlackMode = false;
+      if (window.currentContent) {
+        renderContent(window.currentContent);
+      }
     });
   </script>
 </body>

@@ -5,6 +5,7 @@ body {
   height: 100vh;
   width: 100vw;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 body.dark-theme {
@@ -12,13 +13,252 @@ body.dark-theme {
   color: #eee;
 }
 
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f0f0f0;
+}
+
+body.dark-theme ::-webkit-scrollbar-track {
+  background: #2a2a2a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 5px;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #0078d4;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Control Buttons Container */
+#control-buttons-container {
+  flex-shrink: 0;
+}
+
+body.dark-theme #control-buttons-container {
+  background: #2a2a2a !important;
+  border-bottom-color: #444 !important;
+}
+
+/* Bottom Tabs */
+#bottom-tabs {
+  flex-shrink: 0;
+  background: #f5f5f5;
+}
+
+.bottom-tab {
+  transition: background 0.2s;
+}
+
+.bottom-tab:hover {
+  background: rgba(0, 120, 212, 0.1);
+}
+
+.bottom-tab.active {
+  font-weight: bold;
+}
+
+body.dark-theme #bottom-tabs {
+  background: #2a2a2a;
+  border-bottom-color: #444;
+}
+
+body.dark-theme .bottom-tab {
+  color: #eee;
+}
+
+body.dark-theme .bottom-tab.active {
+  border-bottom-color: #0078d4;
+}
+
+#song-list {
+  background: #fff;
+}
+
+body.dark-theme #song-list {
+  background: #181a1b;
+  color: #eee;
+  border-color: #333;
+}
+
+body.dark-theme #song-display {
+  background: #23272a;
+  color: #eee;
+  border-color: #333;
+}
+
+body.dark-theme #song-search-input {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme #song-view-toggle {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme #song-view-toggle:hover {
+  background: #333;
+}
+
+body.dark-theme .song-item {
+  border-bottom-color: #333 !important;
+}
+
+body.dark-theme .song-item:hover {
+  background: #333 !important;
+}
+
+.search-highlight {
+  background: yellow;
+  color: black;
+  font-weight: bold;
+}
+
+body.dark-theme .search-highlight {
+  background: #ffd700;
+  color: black;
+}
+
+#song-display h2 {
+  color: #000;
+}
+
+#song-display h3 {
+  color: #333;
+}
+
+#song-display .song-author {
+  color: #666;
+  font-style: italic;
+}
+
+body.dark-theme #song-display h2 {
+  color: #fff;
+}
+
+body.dark-theme #song-display h3 {
+  color: #ccc;
+}
+
+body.dark-theme #song-display .song-author {
+  color: #aaa;
+}
+
+.song-verse:hover {
+  background: #f0f0f0 !important;
+}
+
+.song-verse-block {
+  padding: 8px;
+  margin: 4px 0;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  font-size: 0.9em;
+}
+
+.song-verse-block:hover {
+  background: #e8e8e8;
+}
+
+.song-verse-block.selected {
+  background: #0078d4;
+  color: #fff;
+  border-color: #0078d4;
+}
+
+body.dark-theme .song-verse-block {
+  background: #2a2a2a;
+  border-color: #444;
+  color: #eee;
+}
+
+body.dark-theme .song-verse-block:hover {
+  background: #333;
+}
+
+body.dark-theme .song-verse-block.selected {
+  background: #0078d4;
+  color: #fff;
+  border-color: #0078d4;
+}
+
+body.dark-theme .song-verse:hover {
+  background: #333 !important;
+}
+
+.song-verse.selected {
+  background: #0078d4 !important;
+  color: #fff !important;
+}
+
+#schedule-sidebar {
+  background: #f5f5f5;
+}
+
+body.dark-theme #schedule-sidebar {
+  background: #2a2a2a;
+}
+
+#schedule-header {
+  background: #e0e0e0;
+  color: #333;
+}
+
+body.dark-theme #schedule-header {
+  background: #333;
+  color: white;
+}
+
+.resizer {
+  background: transparent;
+}
+
+.resizer-x {
+  background: linear-gradient(to right, transparent 6px, #ccc 6px, #ccc 10px, transparent 10px);
+}
+
+.resizer-y {
+  background: linear-gradient(to bottom, transparent 6px, #ccc 6px, #ccc 10px, transparent 10px);
+}
+
+body.dark-theme .resizer-x {
+  background: linear-gradient(to right, transparent 6px, #444 6px, #444 10px, transparent 10px);
+}
+
+body.dark-theme .resizer-y {
+  background: linear-gradient(to bottom, transparent 6px, #444 6px, #444 10px, transparent 10px);
+}
+
+.resizer:hover.resizer-x {
+  background: linear-gradient(to right, transparent 6px, #0078d4 6px, #0078d4 10px, transparent 10px);
+}
+
+.resizer:hover.resizer-y {
+  background: linear-gradient(to bottom, transparent 6px, #0078d4 6px, #0078d4 10px, transparent 10px);
+}
+
 #verse-panel {
   display: flex;
   flex-direction: column;
-  height: 200px;
-  min-height: 200px;
-  max-height: 200px;
-  border-top: 1px solid #ccc;
   box-sizing: border-box;
   overflow: hidden;
   width: 100vw; /* Make it stretch full width */
@@ -71,7 +311,7 @@ body.dark-theme #verse-content-row {
 
 #verse-list {
   position: relative;
-  height: 400px; /* or whatever height you want */
+  flex: 0 0 200px;
   overflow-y: auto;
   background: #fff;
   border: 1px solid #ccc;
@@ -89,9 +329,7 @@ body.dark-theme #verse-list {
   border: 1px solid #ccc;
   border-left: none;
   min-width: 0;
-  min-height: 100px;
   overflow-y: auto;
-  height: 100%;
   /* This makes it stretch to the right edge */
 }
 
@@ -160,8 +398,12 @@ body.dark-theme #verse-display {
   line-height: 24px;
   padding: 0 8px;
   box-sizing: border-box;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
+}
+
+.verse-item:active {
+  cursor: grabbing;
 }
 
 body.dark-theme .verse-item {
@@ -197,4 +439,92 @@ body.dark-theme .verse-item.selected {
 .bible-item.selected {
   background-color: #e0f7fa; /* Light blue background for the selected Bible */
   border-left: 4px solid #00796b; /* Accent border */
+}
+
+/* Schedule sidebar styles */
+.schedule-item {
+  background: #3a3a3a;
+  margin: 5px 0;
+  border-radius: 4px;
+  cursor: grab;
+  user-select: none;
+}
+
+.schedule-item:active {
+  cursor: grabbing;
+}
+
+.schedule-item:hover {
+  background: #4a4a4a;
+}
+
+.schedule-item-header {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  color: white;
+  outline: none;
+}
+
+.schedule-item-header:focus {
+  outline: 2px solid #0078d4;
+  outline-offset: -2px;
+}
+
+.schedule-item-header.selected {
+  background: #0078d4;
+}
+
+.expand-arrow {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.expand-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.schedule-item-text {
+  flex: 1;
+  font-size: 13px;
+}
+
+.schedule-item-verses {
+  padding: 0 0 5px 24px;
+  display: none;
+}
+
+.schedule-item-verses.expanded {
+  display: block;
+}
+
+.schedule-verse-item {
+  padding: 6px 8px;
+  margin: 2px 0;
+  background: #2a2a2a;
+  border-radius: 3px;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.schedule-verse-item:focus {
+  outline: 2px solid #0078d4;
+  outline-offset: -2px;
+}
+
+.schedule-verse-item:hover {
+  background: #4a4a4a;
+}
+
+.schedule-verse-item.selected {
+  background: #0078d4;
+}
+
+#schedule-list.drag-over {
+  background: rgba(0, 120, 212, 0.1);
 }
