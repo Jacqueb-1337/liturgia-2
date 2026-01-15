@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Live Display</title>
+  <title>Liturgia Live Display</title>
   <style>
     html, body {
       margin: 0;
@@ -125,25 +125,51 @@
         ctx.textAlign = 'center';
         const textY = height / 2;
         
-        // Parse text to handle verse numbers as subscripts
-        const segments = parseVerseSegments(content.text);
+        // Split text by explicit newlines first (for songs), then handle verse numbers
+        const textLines = content.text.split('\n');
+        const allLines = [];
         
-        // Auto-size font to fill vertical space optimally
-        ctx.font = `${baseFontSize}px Arial`;
-        let lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+        textLines.forEach(textLine => {
+          // Parse text to handle verse numbers as subscripts
+          const segments = parseVerseSegments(textLine);
+          
+          // Auto-size font to fill vertical space optimally
+          ctx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+          allLines.push(...wrappedLines);
+        });
+        
+        let lines = allLines;
         
         // Grow font size to fill available vertical space
-        while (lines.length * baseFontSize * 1.2 < availableHeight * 0.85 && baseFontSize < height * 0.15) {
-          baseFontSize += 4;
-          ctx.font = `${baseFontSize}px Arial`;
-          lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+        while (true) {
+          const testSize = baseFontSize + 4;
+          ctx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else {
+            break;
+          }
         }
         
         // If we overshot, shrink back down
         while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
           baseFontSize -= 2;
           ctx.font = `${baseFontSize}px Arial`;
-          lines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
         }
         
         // Render lines with subscript numbers

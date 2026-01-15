@@ -49,9 +49,36 @@ body.dark-theme ::-webkit-scrollbar-thumb {
   flex-shrink: 0;
 }
 
+#control-buttons-container button {
+  background: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+  color: #333;
+}
+
+#control-buttons-container button:hover {
+  background: #e0e0e0;
+  border-color: #999;
+}
+
 body.dark-theme #control-buttons-container {
   background: #2a2a2a !important;
   border-bottom-color: #444 !important;
+}
+
+body.dark-theme #control-buttons-container button {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  color: #eee;
+}
+
+body.dark-theme #control-buttons-container button:hover {
+  background: #333;
+  border-color: #555;
 }
 
 /* Bottom Tabs */
@@ -95,6 +122,42 @@ body.dark-theme #song-list {
   border-color: #333;
 }
 
+/* Song search input and buttons */
+#song-search-input {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+#song-search-input:focus {
+  outline: none;
+  border-color: #0078d4;
+}
+
+#song-view-toggle,
+#song-add-btn {
+  background: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#song-view-toggle:hover,
+#song-add-btn:hover {
+  background: #e0e0e0;
+  border-color: #999;
+}
+
+#song-add-btn {
+  font-size: 18px;
+  font-weight: bold;
+  color: #0078d4;
+}
+
 body.dark-theme #song-display {
   background: #23272a;
   color: #eee;
@@ -107,14 +170,25 @@ body.dark-theme #song-search-input {
   border: 1px solid #444;
 }
 
-body.dark-theme #song-view-toggle {
+#song-search-input:focus {
+  border-color: #0078d4;
+}
+
+body.dark-theme #song-view-toggle,
+body.dark-theme #song-add-btn {
   background: #2a2a2a;
   color: #eee;
   border: 1px solid #444;
 }
 
-body.dark-theme #song-view-toggle:hover {
+body.dark-theme #song-view-toggle:hover,
+body.dark-theme #song-add-btn:hover {
   background: #333;
+  border-color: #555;
+}
+
+body.dark-theme #song-add-btn {
+  color: #4da6ff;
 }
 
 body.dark-theme .song-item {
@@ -136,30 +210,69 @@ body.dark-theme .search-highlight {
   color: black;
 }
 
+/* Verse search box styling */
+#search-autocomplete-input {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+#search-autocomplete-input:focus {
+  outline: none;
+  border-color: #0078d4;
+}
+
+body.dark-theme #search-autocomplete-input {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme #search-autocomplete-input:focus {
+  border-color: #0078d4;
+}
+
 #song-display h2 {
   color: #000;
+  font-size: 1.2em;
+  margin: 0 0 4px 0;
 }
 
 #song-display h3 {
   color: #333;
+  font-size: 0.95em;
+  margin: 8px 0 2px 0;
+  font-weight: 600;
 }
 
 #song-display .song-author {
   color: #666;
   font-style: italic;
+  font-size: 0.85em;
+  margin: 0 0 8px 0;
+}
+
+#song-display p {
+  margin: 2px 0;
+  line-height: 1.3;
+  font-size: 0.85em;
 }
 
 body.dark-theme #song-display h2 {
   color: #fff;
 }
 
-body.dark-theme #song-display h3 {
-  color: #ccc;
-}
-
-body.dark-theme #song-display .song-author {
-  color: #aaa;
-}
+body.dark-t6px;
+  margin: 2px 0;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  font-size: 0.8em;
+  line-height: 1.2
 
 .song-verse:hover {
   background: #f0f0f0 !important;
@@ -199,6 +312,224 @@ body.dark-theme .song-verse-block.selected {
   background: #0078d4;
   color: #fff;
   border-color: #0078d4;
+}
+
+/* Song context menu */
+#song-context-menu {
+  display: none;
+  position: fixed;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 1000;
+  min-width: 150px;
+}
+
+#song-context-menu .context-menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: #000;
+}
+
+#song-context-menu .context-menu-item:hover {
+  background: #f0f0f0;
+}
+
+body.dark-theme #song-context-menu {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+body.dark-theme #song-context-menu .context-menu-item {
+  color: #eee;
+}
+
+body.dark-theme #song-context-menu .context-menu-item:hover {
+  background: #333;
+}
+
+/* Song Editor */
+#song-editor-modal {
+  display: none;
+}
+
+#song-editor-modal.active {
+  display: flex !important;
+}
+
+#song-editor-panel {
+  background: #fff;
+  color: #000;
+}
+
+.song-editor-header {
+  border-bottom: 1px solid #ddd;
+}
+
+.song-editor-footer {
+  border-top: 1px solid #ddd;
+}
+
+#song-editor-title,
+#song-editor-author,
+#song-editor-lyrics {
+  background: #fff;
+  color: #000;
+  border: 1px solid #ccc;
+}
+
+#song-editor-preview {
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+}
+
+.song-editor-help {
+  color: #666;
+}
+
+#song-editor-save {
+  background: #0078d4;
+  color: white;
+}
+
+#song-editor-cancel,
+#song-editor-close {
+  background: #f0f0f0;
+  color: #000;
+  border: 1px solid #ccc;
+}
+
+body.dark-theme #song-editor-panel {
+  background: #23272a;
+  color: #eee;
+}
+
+body.dark-theme .song-editor-header {
+  border-bottom-color: #444;
+}
+
+body.dark-theme .song-editor-footer {
+  border-top-color: #444;
+}
+
+body.dark-theme #song-editor-panel h2 {
+  color: #fff;
+}
+
+body.dark-theme #song-editor-title,
+body.dark-theme #song-editor-author,
+body.dark-theme #song-editor-lyrics {
+  background: #2a2a2a;
+  color: #eee;
+  border-color: #444;
+}
+
+body.dark-theme #song-editor-preview {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+body.dark-theme .song-editor-help {
+  color: #999;
+}
+
+/* Contenteditable song editor styles */
+#song-editor-lyrics[contenteditable] {
+  outline: none;
+  white-space: pre-wrap;
+  font-family: monospace;
+  line-height: 1.6;
+}
+
+#song-editor-lyrics[contenteditable]:empty:before {
+  content: attr(data-placeholder);
+  color: #999;
+  pointer-events: none;
+}
+
+body.dark-theme #song-editor-lyrics[contenteditable]:empty:before {
+  color: #666;
+}
+
+.song-section-editor {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
+.song-section-editor.verse {
+  background: #e3f2fd;
+}
+
+.song-section-editor.chorus {
+  background: #f3e5f5;
+}
+
+.song-section-editor.bridge {
+  background: #fff8e1;
+}
+
+body.dark-theme .song-section-editor.verse {
+  background: #1a237e;
+  border-color: #3949ab;
+}
+
+body.dark-theme .song-section-editor.chorus {
+  background: #4a148c;
+  border-color: #7b1fa2;
+}
+
+body.dark-theme .song-section-editor.bridge {
+  background: #ff6f00;
+  border-color: #ffa726;
+}
+
+.song-section-label {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-weight: bold;
+  background: white;
+  cursor: pointer;
+}
+
+body.dark-theme .song-section-label {
+  background: #333;
+  border-color: #555;
+  color: #eee;
+}
+
+body.dark-theme #song-add-btn {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme #song-add-btn:hover {
+  background: #333;
+}
+
+body.dark-theme #song-editor-save {
+  background: #0078d4;
+}
+
+body.dark-theme #song-editor-save:hover {
+  background: #1976D2;
+}
+
+body.dark-theme #song-editor-cancel,
+body.dark-theme #song-editor-close {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme #song-editor-cancel:hover,
+body.dark-theme #song-editor-close:hover {
+  background: #333;
 }
 
 body.dark-theme .song-verse:hover {

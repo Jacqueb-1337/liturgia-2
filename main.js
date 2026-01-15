@@ -5,6 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
 
+app.setName('liturgia');
+
 let mainWindow; // Add this at the top
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;

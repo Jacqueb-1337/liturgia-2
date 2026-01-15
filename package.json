@@ -1,12 +1,21 @@
 {
-  "name": "easyworship-mvp",
-  "version": "1.0.0",
+  "name": "liturgia",
+  "version": "1.0.1",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.jacqueb.liturgia",
+    "productName": "Liturgia",
+    "win": {
+      "target": "portable"
+    }
   },
   "devDependencies": {
-    "electron": "^25.9.8"
+    "electron": "^25.9.8",
+    "electron-builder": "^26.4.0"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

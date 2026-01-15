@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
-  <title>EasyWorship MVP</title>
+  <title>Liturgia</title>
 
   <!-- Your existing global styles -->
   <link rel="stylesheet" href="style.css" />
@@ -199,7 +199,7 @@
         <!-- Resizer between preview and live -->
         <div class="resizer resizer-x" id="preview-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
         
-        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0;">
+        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0; padding-right: 25px">
           <canvas id="live-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
         </div>
       </div>
@@ -237,6 +237,7 @@
         <div id="song-search" style="flex-shrink: 0; padding: 1em; display: flex; gap: 8px; align-items: center;">
           <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 6px; box-sizing: border-box;" />
           <button id="song-view-toggle" style="padding: 6px 12px; white-space: nowrap;" title="Toggle between full song and verse blocks">Verse Blocks</button>
+          <button id="song-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Create new song">+</button>
         </div>
         <div style="display: flex; flex: 1; min-height: 0;">
           <div id="song-list" style="flex: 0 0 200px; overflow-y: auto; position: relative; border: 1px solid #ccc;">
@@ -246,6 +247,41 @@
             <!-- Selected song details will be shown here -->
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+  <!-- Song context menu -->
+  <div id="song-context-menu">
+    <div class="context-menu-item" id="song-context-edit">Edit Song</div>
+    <div class="context-menu-item" id="song-context-delete">Delete</div>
+    <div class="context-menu-item" id="song-context-export">Export</div>
+    <div class="context-menu-item" id="song-context-import">Import Songs</div>
+  </div>
+  <!-- Song Editor Modal -->
+  <div id="song-editor-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">
+    <div id="song-editor-panel" style="border-radius: 8px; width: 80%; max-width: 900px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+      <div class="song-editor-header" style="padding: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">New Song</h2>
+        <button id="song-editor-close" style="padding: 4px 12px; cursor: pointer; font-size: 24px; border: none;">&times;</button>
+      </div>
+      <div style="padding: 16px; overflow-y: auto; flex: 1;">
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Title:</label>
+          <input type="text" id="song-editor-title" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Song Title" />
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Author:</label>
+          <input type="text" id="song-editor-author" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Author (optional)" />
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Lyrics:</label>
+          <div class="song-editor-help" style="font-size: 0.85em; margin-bottom: 8px;">Use ** or __ for bold, * or _ for italics. Separate verses with blank lines.</div>
+          <div id="song-editor-lyrics" contenteditable="true" style="width: 100%; min-height: 400px; padding: 16px; box-sizing: border-box; border-radius: 4px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.6; overflow-y: auto; white-space: pre-wrap;" data-placeholder="Enter lyrics here...\n\nSeparate verses with blank lines"></div>
+        </div>
+      </div>
+      <div class="song-editor-footer" style="padding: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button id="song-editor-cancel" style="padding: 8px 16px; border-radius: 4px; cursor: pointer;">Cancel</button>
+        <button id="song-editor-save" style="padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;">Save Song</button>
       </div>
     </div>
   </div>

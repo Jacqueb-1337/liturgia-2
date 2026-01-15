@@ -38,6 +38,17 @@ function applyDarkTheme(enabled) {
 
 // Load settings on startup
 window.addEventListener('DOMContentLoaded', async () => {
+  // Load version from package.json
+  try {
+    const packageJson = require('./package.json');
+    const versionElement = document.getElementById('app-version');
+    if (versionElement) {
+      versionElement.textContent = packageJson.version;
+    }
+  } catch (err) {
+    console.error('Failed to load version:', err);
+  }
+  
   const settings = await ipcRenderer.invoke('load-settings');
   if (settings) {
     document.getElementById('username').value = settings.username || '';

@@ -167,16 +167,33 @@ function validateCSS(css) {
 
 function toggleClear() {
   if (blackMode) {
-    blackMode = false;
-    // Reset both canvases
-    if (window.currentContent) {
-      const liveCanvas = document.getElementById('live-canvas');
-      if (liveCanvas) {
-        renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
-      }
+    // First clear the display, then exit black mode
+    ipcRenderer.send('clear-live-text');
+    const liveCanvas = document.getElementById('live-canvas');
+    if (liveCanvas) {
+      const width = window.currentContent ? window.currentContent.width : liveCanvas.width;
+      const height = window.currentContent ? window.currentContent.height : liveCanvas.height;
+      liveCanvas.width = width;
+      liveCanvas.height = height;
+      const ctx = liveCanvas.getContext('2d');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
     }
-    ipcRenderer.send('reset-live-canvas');
+    
+    // Small delay to ensure clear happens before reset
+    setTimeout(() => {
+      blackMode = false;
+      if (window.currentContent) {
+        const liveCanvas = document.getElementById('live-canvas');
+        if (liveCanvas) {
+          renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
+        }
+      }
+      ipcRenderer.send('reset-live-canvas');
+    }, 50);
+    return;
   }
+  
   clearMode = !clearMode;
   if (clearMode) {
     // Clear text from preview canvas (keep black background)
@@ -349,7 +366,8 @@ window.addEventListener('DOMContentLoaded', () => {
     
     // Check if we should handle song navigation
     const isInSongsTab = currentTab === 'songs';
-    const isSongDisplayOpen = selectedSongIndices.length > 0 && document.querySelector('.song-display').style.display !== 'none';
+    const songDisplay = document.getElementById('song-display');
+    const isSongDisplayOpen = selectedSongIndices.length > 0 && songDisplay && songDisplay.style.display !== 'none';
     
     if (isInSongsTab && isSongDisplayOpen && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
       // Song verse navigation
@@ -358,6 +376,12 @@ window.addEventListener('DOMContentLoaded', () => {
         selectPrevSongVerse();
       } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
         selectNextSongVerse();
+      }
+    } else if (isInSongsTab && isSongDisplayOpen && e.key === 'Enter') {
+      // Go live with selected song verse
+      e.preventDefault();
+      if (selectedSongVerseIndex !== null) {
+        handleSongVerseDoubleClick(selectedSongVerseIndex);
       }
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       // Bible verse navigation
@@ -555,25 +579,51 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     ctx.textAlign = 'center';
     const textY = displayHeight / 2;
     
-    // Parse text to handle verse numbers as subscripts
-    const segments = parseVerseSegments(content.text);
+    // Split text by explicit newlines first (for songs), then handle verse numbers
+    const textLines = content.text.split('\n');
+    const allLines = [];
     
-    // Auto-size font to fill vertical space optimally
-    ctx.font = `${baseFontSize}px Arial`;
-    let lines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
+    textLines.forEach(textLine => {
+      // Parse text to handle verse numbers as subscripts
+      const segments = parseVerseSegments(textLine);
+      
+      // Auto-size font to fill vertical space optimally
+      ctx.font = `${baseFontSize}px Arial`;
+      const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
+      allLines.push(...wrappedLines);
+    });
+    
+    let lines = allLines;
     
     // Grow font size to fill available vertical space
-    while (lines.length * baseFontSize * 1.2 < availableHeight * 0.85 && baseFontSize < displayHeight * 0.15) {
-      baseFontSize += 4;
-      ctx.font = `${baseFontSize}px Arial`;
-      lines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
+    while (true) {
+      const testSize = baseFontSize + 4;
+      ctx.font = `${testSize}px Arial`;
+      const testLines = [];
+      textLines.forEach(textLine => {
+        const segments = parseVerseSegments(textLine);
+        const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, testSize);
+        testLines.push(...wrappedLines);
+      });
+      if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < displayHeight * 0.15) {
+        baseFontSize = testSize;
+        lines = testLines;
+      } else {
+        break;
+      }
     }
     
     // If we overshot, shrink back down
     while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
       baseFontSize -= 2;
       ctx.font = `${baseFontSize}px Arial`;
-      lines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
+      const testLines = [];
+      textLines.forEach(textLine => {
+        const segments = parseVerseSegments(textLine);
+        const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
+        testLines.push(...wrappedLines);
+      });
+      lines = testLines;
     }
     
     // Render lines with subscript numbers
@@ -977,6 +1027,22 @@ async function handleVerseClick(i, e) {
 }
 
 async function handleVerseDoubleClick(i) {
+  // Check if we're in songs tab
+  if (currentTab === 'songs') {
+    if (selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+      await updateLiveFromSongVerse(selectedSongVerseIndex);
+      
+      // Turn on the live display when going live
+      if (!liveMode) {
+        toggleLive(true);
+      }
+      return;
+    } else {
+      return; // nothing to do in songs tab without selection
+    }
+  }
+  
+  // Verses tab logic
   // If an index is explicitly provided, treat as a single-verse go-live action.
   // If an array of indices is provided, use those.
   // Otherwise, use the current selection (useful for the Live toggle behavior).
@@ -1105,7 +1171,11 @@ function toggleLive(isActive) {
   liveMode = !!isActive;
   if (isActive) {
     ipcRenderer.invoke('create-live-window');
-    if (selectedIndices.length > 0) {
+    
+    // Display based on current tab
+    if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+      updateLiveFromSongVerse(selectedSongVerseIndex);
+    } else if (selectedIndices.length > 0) {
       updateLive(selectedIndices);
     }
   } else {
@@ -1692,6 +1762,13 @@ function handleScheduleVerseDoubleClick(itemIndex, verseIndexInGroup) {
 function handleScheduleSongVerseClick(itemIndex, verseIndex, event) {
   const item = scheduleItems[itemIndex];
   
+  // Switch to songs tab and select the song
+  switchTab('songs');
+  selectedSongIndices = [item.songIndex];
+  selectedSongVerseIndex = verseIndex;
+  renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+  displaySelectedSong();
+  
   // Handle multi-selection
   if (event.shiftKey && item.selectedVerses.length > 0) {
     const lastSelected = item.selectedVerses[item.selectedVerses.length - 1];
@@ -2051,6 +2128,18 @@ function initTabs() {
     });
   }
   
+  // Song add button
+  const addBtn = document.getElementById('song-add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      openSongEditor();
+    });
+  }
+  
+  // Song editor event listeners
+  initSongEditor();
+  initSongContextMenu();
+  
   // Load saved view mode
   loadSongViewMode();
 }
@@ -2078,7 +2167,8 @@ function switchTab(tabName) {
 
 async function loadSongs() {
   try {
-    const songsPath = path.join(__dirname, 'songs.json');
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const songsPath = path.join(userData, 'songs.json');
     const data = fs.readFileSync(songsPath, 'utf8');
     allSongs = JSON.parse(data);
     renderSongList(allSongs);
@@ -2123,6 +2213,9 @@ function renderSongList(songs) {
   // Render only the visible songs
   for (let i = firstIndex; i < lastIndex; i++) {
     const song = songs[i];
+    // Find the actual index in allSongs
+    const actualIndex = allSongs.findIndex(s => s.title === song.title && s.author === song.author);
+    
     const songItem = document.createElement('div');
     songItem.className = 'song-item';
     
@@ -2133,7 +2226,7 @@ function renderSongList(songs) {
       songItem.textContent = song.title;
     }
     
-    songItem.setAttribute('data-index', i);
+    songItem.setAttribute('data-index', actualIndex);
     songItem.style.cssText = `
       position: absolute;
       top: ${i * SONG_ITEM_HEIGHT}px;
@@ -2146,20 +2239,42 @@ function renderSongList(songs) {
       box-sizing: border-box;
     `;
     
-    if (selectedSongIndices.includes(i)) {
+    if (selectedSongIndices.includes(actualIndex)) {
       songItem.style.background = '#0078d4';
       songItem.style.color = '#fff';
     }
     
     songItem.addEventListener('click', (e) => {
-      handleSongClick(i, e);
+      handleSongClick(actualIndex, e);
+    });
+    
+    songItem.addEventListener('dblclick', async (e) => {
+      // Double-click to go live with first verse
+      selectedSongIndices = [actualIndex];
+      selectedSongVerseIndex = 0;
+      displaySelectedSong();
+      await updateLiveFromSongVerse(0);
+      if (!liveMode) {
+        toggleLive(true);
+      }
+    });
+    
+    songItem.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // Select this song if not already selected
+      if (!selectedSongIndices.includes(actualIndex)) {
+        selectedSongIndices = [actualIndex];
+        renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+        displaySelectedSong();
+      }
+      showSongContextMenu(e.clientX, e.clientY);
     });
     
     songItem.draggable = true;
     songItem.addEventListener('dragstart', (e) => {
       const dragData = {
         type: 'song',
-        songIndex: i
+        songIndex: actualIndex
       };
       e.dataTransfer.effectAllowed = 'copy';
       e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
@@ -2198,7 +2313,7 @@ function handleSongClick(index, event) {
     selectedSongIndices = [index];
   }
   
-  renderSongList(allSongs);
+  renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
   displaySelectedSong();
   
   // Preview first verse
@@ -2246,12 +2361,21 @@ function displaySelectedSong() {
         const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
         const isSelected = selectedSongVerseIndex === globalVerseIndex;
         const verseText = currentSearchQuery ? highlightText(verse, currentSearchQuery) : verse;
-        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 8px; margin: 4px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseText}</p>`;
+        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseText}</p>`;
       });
     });
   }
   
   songDisplay.innerHTML = html;
+  
+  // Add double-click handler to song title
+  const titleElement = songDisplay.querySelector('h2');
+  if (titleElement) {
+    titleElement.style.cursor = 'pointer';
+    titleElement.addEventListener('dblclick', () => {
+      handleSongVerseDoubleClick(0);
+    });
+  }
   
   // Add click handlers to verses (both full view and block view)
   songDisplay.querySelectorAll('.song-verse, .song-verse-block').forEach(verseEl => {
@@ -2443,3 +2567,371 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+// ========== SONG CONTEXT MENU ==========
+
+function showSongContextMenu(x, y) {
+  const menu = document.getElementById('song-context-menu');
+  if (!menu) return;
+  
+  // Show/hide edit option based on selection
+  const editOption = document.getElementById('song-context-edit');
+  if (editOption) {
+    editOption.style.display = selectedSongIndices.length === 1 ? 'block' : 'none';
+  }
+  
+  // Position menu initially to measure its size
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.style.display = 'block';
+  
+  // Adjust position if menu would go off screen
+  const menuRect = menu.getBoundingClientRect();
+  const viewportHeight = window.innerHeight;
+  const viewportWidth = window.innerWidth;
+  
+  // Adjust horizontal position if needed
+  if (menuRect.right > viewportWidth) {
+    menu.style.left = `${viewportWidth - menuRect.width - 5}px`;
+  }
+  
+  // Adjust vertical position if needed
+  if (menuRect.bottom > viewportHeight) {
+    menu.style.top = `${Math.max(5, y - menuRect.height)}px`;
+  }
+  
+  // Close menu when clicking outside
+  const closeMenu = (e) => {
+    if (!menu.contains(e.target)) {
+      menu.style.display = 'none';
+      document.removeEventListener('click', closeMenu);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeMenu), 0);
+}
+
+function initSongContextMenu() {
+  const editBtn = document.getElementById('song-context-edit');
+  const deleteBtn = document.getElementById('song-context-delete');
+  const exportBtn = document.getElementById('song-context-export');
+  const importBtn = document.getElementById('song-context-import');
+  
+  if (editBtn) {
+    editBtn.addEventListener('click', () => {
+      if (selectedSongIndices.length === 1) {
+        editSong(selectedSongIndices[0]);
+      }
+    });
+  }
+  
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      deleteSongs(selectedSongIndices);
+    });
+  }
+  
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      exportSongs(selectedSongIndices);
+    });
+  }
+  
+  if (importBtn) {
+    importBtn.addEventListener('click', () => {
+      importSongs();
+    });
+  }
+}
+
+function editSong(songIndex) {
+  const song = allSongs[songIndex];
+  if (!song) return;
+  
+  const modal = document.getElementById('song-editor-modal');
+  const titleInput = document.getElementById('song-editor-title');
+  const authorInput = document.getElementById('song-editor-author');
+  const lyricsDiv = document.getElementById('song-editor-lyrics');
+  
+  if (modal && titleInput && authorInput && lyricsDiv) {
+    // Store the index we're editing
+    modal.setAttribute('data-editing-index', songIndex);
+    
+    modal.style.display = 'flex';
+    titleInput.value = song.title;
+    authorInput.value = song.author || '';
+    
+    // Convert song lyrics back to plain text with [Section] tags
+    const lyricsText = song.lyrics.map(section => `[${section.section}]\n${section.text}`).join('\n\n');
+    lyricsDiv.textContent = lyricsText;
+    updateInlineSongFormatting();
+    
+    titleInput.focus();
+  }
+}
+
+async function deleteSongs(songIndices) {
+  if (songIndices.length === 0) return;
+  
+  const count = songIndices.length;
+  const message = count === 1 
+    ? `Are you sure you want to delete "${allSongs[songIndices[0]].title}"?`
+    : `Are you sure you want to delete ${count} songs?`;
+  
+  if (!confirm(message)) return;
+  
+  // Sort indices in descending order to avoid index shifting issues
+  const sortedIndices = songIndices.slice().sort((a, b) => b - a);
+  
+  // Remove songs
+  sortedIndices.forEach(index => {
+    allSongs.splice(index, 1);
+  });
+  
+  // Save to file
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const songsPath = path.join(userData, 'songs.json');
+    fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+    
+    // Clear selection and refresh
+    selectedSongIndices = [];
+    selectedSongVerseIndex = null;
+    filteredSongs = [];
+    currentSearchQuery = '';
+    const searchInput = document.getElementById('song-search-input');
+    if (searchInput) searchInput.value = '';
+    
+    renderSongList(allSongs);
+    displaySelectedSong();
+  } catch (err) {
+    console.error('Failed to delete songs:', err);
+    alert('Failed to delete songs');
+  }
+}
+
+function exportSongs(songIndices) {
+  if (songIndices.length === 0) return;
+  
+  const songsToExport = songIndices.map(i => allSongs[i]);
+  const jsonData = JSON.stringify(songsToExport, null, 2);
+  
+  // Create a download
+  const blob = new Blob([jsonData], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `songs-export-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importSongs() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const importedSongs = JSON.parse(e.target.result);
+        
+        if (!Array.isArray(importedSongs)) {
+          alert('Invalid song file format');
+          return;
+        }
+        
+        // Add imported songs to allSongs
+        let addedCount = 0;
+        importedSongs.forEach(song => {
+          if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
+            // Check for duplicates
+            const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+            if (!exists) {
+              allSongs.push(song);
+              addedCount++;
+            }
+          }
+        });
+        
+        if (addedCount > 0) {
+          // Save to file
+          const userData = await ipcRenderer.invoke('get-user-data-path');
+          const songsPath = path.join(userData, 'songs.json');
+          fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+          
+          // Refresh display
+          renderSongList(allSongs);
+          alert(`Imported ${addedCount} song(s)`);
+        } else {
+          alert('No new songs to import (duplicates skipped)');
+        }
+      } catch (err) {
+        console.error('Failed to import songs:', err);
+        alert('Failed to import songs: Invalid file format');
+      }
+    };
+    reader.readAsText(file);
+  };
+  
+  input.click();
+}
+
+// ========== SONG EDITOR ==========
+
+function initSongEditor() {
+  const modal = document.getElementById('song-editor-modal');
+  const closeBtn = document.getElementById('song-editor-close');
+  const cancelBtn = document.getElementById('song-editor-cancel');
+  const saveBtn = document.getElementById('song-editor-save');
+  const lyricsInput = document.getElementById('song-editor-lyrics');
+  
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeSongEditor);
+  }
+  
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', closeSongEditor);
+  }
+  
+  if (saveBtn) {
+    saveBtn.addEventListener('click', saveSongFromEditor);
+  }
+  
+  // Close on backdrop click
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        closeSongEditor();
+      }
+    });
+  }
+}
+
+function openSongEditor() {
+  const modal = document.getElementById('song-editor-modal');
+  const titleInput = document.getElementById('song-editor-title');
+  const authorInput = document.getElementById('song-editor-author');
+  const lyricsInput = document.getElementById('song-editor-lyrics');
+  
+  if (modal) {
+    // Clear editing flag for new song
+    modal.removeAttribute('data-editing-index');
+    
+    modal.style.display = 'flex';
+    if (titleInput) titleInput.value = '';
+    if (authorInput) authorInput.value = '';
+    if (lyricsInput) {
+      lyricsInput.textContent = '';
+      lyricsInput.focus();
+    }
+    if (titleInput) titleInput.focus();
+  }
+}
+
+function closeSongEditor() {
+  const modal = document.getElementById('song-editor-modal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+function parseMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/_(.+?)_/g, '<em>$1</em>');
+}
+
+async function saveSongFromEditor() {
+  const modal = document.getElementById('song-editor-modal');
+  const editingIndex = modal ? modal.getAttribute('data-editing-index') : null;
+  
+  const title = document.getElementById('song-editor-title').value.trim();
+  const author = document.getElementById('song-editor-author').value.trim();
+  const lyricsDiv = document.getElementById('song-editor-lyrics');
+  
+  // Use innerText instead of textContent to preserve newlines from contenteditable
+  const lyricsText = lyricsDiv ? lyricsDiv.innerText.trim() : '';
+  
+  if (!title) {
+    alert('Please enter a song title');
+    return;
+  }
+  
+  if (!lyricsText) {
+    alert('Please enter song lyrics');
+    return;
+  }
+  
+  // Parse sections from plaintext
+  const sectionTexts = lyricsText.split(/\n\n+/).filter(v => v.trim());
+  const sections = [];
+  let verseCount = 0;
+  
+  sectionTexts.forEach((text, index) => {
+    let sectionLabel = '';
+    let sectionContent = text.trim();
+    
+    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
+    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
+    if (tagMatch) {
+      sectionLabel = tagMatch[1].trim();
+      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+    } else {
+      // Default to "Verse" if no tag
+      sectionLabel = 'Verse';
+    }
+    
+    sections.push({
+      section: sectionLabel,
+      text: sectionContent
+    });
+  });
+  
+  if (sections.length === 0) {
+    alert('Please enter song lyrics with at least one section');
+    return;
+  }
+  
+  const songData = {
+    title,
+    author: author || '',
+    lyrics: sections
+  };
+  
+  // Check if we're editing or creating new
+  if (editingIndex !== null && editingIndex !== '') {
+    // Update existing song
+    allSongs[parseInt(editingIndex)] = songData;
+  } else {
+    // Add new song
+    allSongs.push(songData);
+  }
+  
+  // Save to file
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const songsPath = path.join(userData, 'songs.json');
+    fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+    
+    // Clear editing flag
+    if (modal) modal.removeAttribute('data-editing-index');
+    
+    // Refresh song list
+    renderSongList(allSongs);
+    closeSongEditor();
+    
+    // Select the song
+    selectedSongIndices = [allSongs.length - 1];
+    displaySelectedSong();
+    renderSongList(allSongs);
+  } catch (err) {
+    console.error('Failed to save song:', err);
+    alert('Failed to save song. Check console for details.');
+  }
+}
