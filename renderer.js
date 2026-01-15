@@ -34,6 +34,9 @@ let scheduleItems = []; // Array of { indices: [], expanded: false, selectedVers
 let selectedScheduleItems = []; // Indices of selected schedule items for multi-select
 let anchorScheduleIndex = null; // For shift-click range selection
 let focusedScheduleItem = null; // { type: 'header'|'verse', itemIndex: number, verseIndex?: number }
+let allMedia = []; // Media files
+let selectedMediaIndex = null; // Currently selected media item
+let defaultBackgrounds = { songs: null, verses: null }; // Default background images
 
 // Load settings on startup and apply dark theme if needed
 async function loadAndApplySettings() {
@@ -334,6 +337,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
   initScripture();
   loadSongs();
+  loadMedia();
+  initColorEditor();
+  initImageEditor();
+  initVideoEditor();
   initTabs();
   // setupPopover(); // Disabled - not needed with canvas rendering
   initSchedule();
@@ -543,22 +550,177 @@ function updateVerseDisplay() {
 }
 
 /**
+ * Apply fade-in animation to canvas content
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @param {Number} duration - Duration in seconds
+ * @param {Function} callback - Called when animation completes
+ */
+function applyFadeInAnimation(canvas, duration = 1.0, callback = null) {
+  const startTime = Date.now();
+  const ctx = canvas.getContext('2d');
+  
+  // Save original canvas content
+  const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  
+  const animate = () => {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Create a copy of the image data with adjusted alpha
+    const imageData = ctx.createImageData(originalImageData);
+    const data = imageData.data;
+    const originalData = originalImageData.data;
+    
+    // Adjust alpha channel for all pixels
+    for (let i = 3; i < data.length; i += 4) {
+      data[i] = Math.round(originalData[i] * progress);
+    }
+    
+    // Clear canvas and redraw with faded image
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(imageData, 0, 0);
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      ctx.putImageData(originalImageData, 0, 0);
+      if (callback) callback();
+    }
+  };
+  
+  animate();
+}
+
+/**
+ * Apply fade-out animation to canvas content
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @param {Number} duration - Duration in seconds
+ * @param {Function} callback - Called when animation completes
+ */
+function applyFadeOutAnimation(canvas, duration = 1.0, callback = null) {
+  const startTime = Date.now();
+  const ctx = canvas.getContext('2d');
+  
+  // Save original canvas content
+  const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  
+  const animate = () => {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Create a copy of the image data with adjusted alpha (reverse of fade-in)
+    const imageData = ctx.createImageData(originalImageData);
+    const data = imageData.data;
+    const originalData = originalImageData.data;
+    
+    // Adjust alpha channel for all pixels (1 - progress for fade-out)
+    const alpha = 1 - progress;
+    for (let i = 3; i < data.length; i += 4) {
+      data[i] = Math.round(originalData[i] * alpha);
+    }
+    
+    // Clear canvas and redraw with faded image
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.putImageData(imageData, 0, 0);
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      // Clear to black
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (callback) callback();
+    }
+  };
+  
+  animate();
+}
+
+/**
  * Render verse content to a canvas at external display resolution
  * @param {HTMLCanvasElement} canvas - The canvas to render to
  * @param {Object} content - { number, text, reference, showHint }
  * @param {Number} displayWidth - External display width
  * @param {Number} displayHeight - External display height
+ * @param {Function} onRenderComplete - Callback when rendering is complete
  */
-function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 1080) {
+function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 1080, onRenderComplete = null) {
   canvas.width = displayWidth;
   canvas.height = displayHeight;
   
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, displayWidth, displayHeight);
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  
+  // Handle background media (object with type, path, color, and settings)
+  if (content.backgroundMedia) {
+    const media = content.backgroundMedia;
+    
+    if (media.type === 'COLOR') {
+      // Apply color/gradient background
+      applyColorToCanvas(ctx, media.color, displayWidth, displayHeight);
+      // Add semi-transparent overlay for text readability
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillRect(0, 0, displayWidth, displayHeight);
+      renderTextContent();
+      if (onRenderComplete) onRenderComplete();
+    } else if (media.type === 'JPG' || media.type === 'PNG') {
+      // Apply image background with settings
+      const bgImg = new Image();
+      bgImg.onload = () => {
+        drawImageWithSettings(ctx, bgImg, displayWidth, displayHeight, {
+          bgSize: media.bgSize || 'cover',
+          bgRepeat: media.bgRepeat || 'no-repeat',
+          bgPosition: media.bgPosition || 'center'
+        });
+        
+        // Add semi-transparent overlay for text readability
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
+        
+        renderTextContent();
+      };
+      bgImg.onerror = () => {
+        console.error('Failed to load background:', media.path);
+        renderTextContent();
+      };
+      bgImg.src = pathToFileURL(media.path);
+    } else {
+      // Video or unknown type - just render text
+      renderTextContent();
+    }
+  } else if (content.backgroundPath) {
+    // Legacy path string support
+    const bgImg = new Image();
+    bgImg.onload = () => {
+      const scale = Math.min(displayWidth / bgImg.width, displayHeight / bgImg.height);
+      const w = bgImg.width * scale;
+      const h = bgImg.height * scale;
+      const x = (displayWidth - w) / 2;
+      const y = (displayHeight - h) / 2;
+      ctx.drawImage(bgImg, x, y, w, h);
+      
+      // Add semi-transparent overlay for text readability
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillRect(0, 0, displayWidth, displayHeight);
+      
+      renderTextContent();
+    };
+    bgImg.onerror = () => {
+      console.error('Failed to load background:', content.backgroundPath);
+      renderTextContent();
+    };
+    bgImg.src = pathToFileURL(content.backgroundPath);
+  } else {
+    renderTextContent();
+  }
+  
+  function renderTextContent() {
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
   
   const padding = displayWidth * 0.02;
   const availableWidth = displayWidth - (padding * 2);
@@ -650,6 +812,10 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     ctx.textAlign = 'right';
     ctx.fillText(content.showHint, displayWidth - padding, displayHeight - padding - baseFontSize * 1.1);
   }
+        
+      // Call completion callback after rendering text
+      if (onRenderComplete) onRenderComplete();
+    } // end renderTextContent
 }
 
 /**
@@ -850,11 +1016,13 @@ async function updatePreview(verseOrIndices) {
   // Render to preview canvas
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
+    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
     renderToCanvas(previewCanvas, {
       number: numberText,
       text: textContent,
       reference: refText,
-      showHint: showHint
+      showHint: showHint,
+      backgroundMedia: backgroundMedia
     }, width, height);
   }
 
@@ -897,24 +1065,33 @@ async function updateLive(verseOrIndices) {
   // Render to live canvas (right preview - shows current live state)
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
+    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
     window.currentContent = {
       number: numberText,
       text: textContent,
       reference: refText,
       showHint: showHint,
       width: width,
-      height: height
+      height: height,
+      backgroundMedia: backgroundMedia
     };
     renderToCanvas(liveCanvas, window.currentContent, width, height);
+    
+    // Text fade-in animation is applied only on external display (live.html)
+    // Preview canvas shows instantly at full opacity
   }
 
   // Send update to the external live window with plain text (canvas needs plain text, not HTML)
+  const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
+  console.log('[DEBUG] Sending backgroundMedia to live window:', backgroundMedia);
   ipcRenderer.send('update-live-window', {
     number: numberText,
     text: textContent,  // Send plain text with double-space format for canvas rendering
     reference: refText,
     showingCount: indicesToShow.length,
-    totalSelected: indices.length
+    totalSelected: indices.length,
+    backgroundMedia: backgroundMedia,
+    transitionIn: transitionSettings['fade-in']
   });
 }
 
@@ -1009,7 +1186,10 @@ async function handleVerseClick(i, e) {
   console.debug('handleVerseClick selectedIndices', selectedIndices, 'anchor', anchorIndex, 'event.shiftKey', !!(e && e.shiftKey));
 
   updateVerseDisplay();
-  await updatePreview(selectedIndices);
+  // Only update preview if on verses tab
+  if (currentTab === 'verses') {
+    await updatePreview(selectedIndices);
+  }
   const listContainer = document.getElementById('verse-list');
   const scrollTop = listContainer ? listContainer.scrollTop : 0;
   renderWindow(allVerses, scrollTop, selectedIndices, handleVerseClick);
@@ -1172,8 +1352,13 @@ function toggleLive(isActive) {
   if (isActive) {
     ipcRenderer.invoke('create-live-window');
     
-    // Display based on current tab
-    if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+    // Display based on current tab and selection
+    if (currentTab === 'media' && selectedMediaIndex !== null) {
+      const media = allMedia[selectedMediaIndex];
+      if (media) {
+        displayMediaOnLive(media);
+      }
+    } else if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
       updateLiveFromSongVerse(selectedSongVerseIndex);
     } else if (selectedIndices.length > 0) {
       updateLive(selectedIndices);
@@ -1297,6 +1482,9 @@ function handleScheduleDrop(e) {
     if (dragData.type === 'song') {
       // Song drop
       addSongToSchedule(dragData.songIndex);
+    } else if (dragData.type === 'media') {
+      // Media drop
+      addMediaToSchedule(dragData.mediaIndex);
     } else if (Array.isArray(dragData)) {
       // Verse indices (legacy format)
       addScheduleItem(dragData);
@@ -1304,6 +1492,21 @@ function handleScheduleDrop(e) {
   } catch (err) {
     console.error('Failed to parse dropped data:', err);
   }
+}
+
+function addMediaToSchedule(mediaIndex) {
+  const media = allMedia[mediaIndex];
+  if (!media) return;
+  
+  const newItem = {
+    type: 'media',
+    mediaIndex: mediaIndex,
+    expanded: false
+  };
+  
+  scheduleItems.push(newItem);
+  renderSchedule();
+  saveScheduleToSettings();
 }
 
 function addSongToSchedule(songIndex) {
@@ -1361,7 +1564,9 @@ function renderSchedule() {
     header.className = 'schedule-item-header';
     
     const itemType = item.type || 'verses'; // Default to verses for backwards compatibility
-    const itemLength = itemType === 'song' ? getSongVerseCount(item.songIndex) : item.indices.length;
+    const itemLength = itemType === 'song' ? getSongVerseCount(item.songIndex) : 
+                       itemType === 'media' ? 1 : 
+                       item.indices.length;
     
     // Arrow icon (only show if more than 1 verse)
     if (itemLength > 1) {
@@ -1386,11 +1591,28 @@ function renderSchedule() {
     const text = document.createElement('div');
     text.className = 'schedule-item-text';
     
+    let displayText = '';
     if (itemType === 'song') {
       const song = allSongs[item.songIndex];
-      text.textContent = song ? song.title : 'Unknown Song';
+      displayText = song ? song.title : 'Unknown Song';
+    } else if (itemType === 'media') {
+      const media = allMedia[item.mediaIndex];
+      const iconSVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M15 12V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 8.172 2H7.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 4.172 4H3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2zM8 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
+      const mediaName = media ? media.name : 'Unknown Media';
+      displayText = mediaName.length > 35 ? mediaName.substring(0, 32) + '...' : mediaName;
+      text.innerHTML = media ? iconSVG + displayText : 'Unknown Media';
     } else {
-      text.textContent = getScheduleItemLabel(item.indices);
+      displayText = getScheduleItemLabel(item.indices);
+    }
+    
+    if (itemType !== 'media') {
+      // Truncate text if too long (max 40 chars)
+      if (displayText.length > 40) {
+        text.textContent = displayText.substring(0, 37) + '...';
+        text.title = displayText; // Show full text on hover
+      } else {
+        text.textContent = displayText;
+      }
     }
     
     header.appendChild(text);
@@ -1664,6 +1886,13 @@ function handleScheduleItemClick(itemIndex, event) {
       if (verseData) {
         updatePreviewFromSongVerse(firstVerseIndex, verseData);
       }
+    } else if (itemType === 'media') {
+      // If it's media, display on preview canvas
+      const media = allMedia[item.mediaIndex];
+      console.log('Schedule media item clicked:', media);
+      if (media) {
+        displayMediaOnPreview(media);
+      }
     }
   }
   
@@ -1694,6 +1923,12 @@ function handleScheduleItemDoubleClick(itemIndex) {
     const verseData = getScheduleSongVerseText(item.songIndex, firstVerseIndex);
     if (verseData) {
       updateLiveFromSongVerse(firstVerseIndex, verseData);
+    }
+  } else if (itemType === 'media') {
+    // For media, display the media file
+    const media = allMedia[item.mediaIndex];
+    if (media) {
+      displayMediaOnLive(media);
     }
   } else {
     // For bible verses, go live with all selected schedule items (or just this one if not selected)
@@ -2161,6 +2396,7 @@ function switchTab(tabName) {
   // Show/hide tab content
   document.getElementById('verses-tab-content').style.display = tabName === 'verses' ? 'flex' : 'none';
   document.getElementById('songs-tab-content').style.display = tabName === 'songs' ? 'flex' : 'none';
+  document.getElementById('media-tab-content').style.display = tabName === 'media' ? 'flex' : 'none';
 }
 
 // ========== SONGS MANAGEMENT ==========
@@ -2436,11 +2672,13 @@ async function updatePreviewFromSongVerse(verseIndex) {
   
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
+    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
     renderToCanvas(previewCanvas, {
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
-      showHint: null
+      showHint: null,
+      backgroundMedia: backgroundMedia
     }, width, height);
   }
 }
@@ -2458,23 +2696,28 @@ async function updateLiveFromSongVerse(verseIndex) {
   
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
+    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
     window.currentContent = {
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
       showHint: null,
       width: width,
-      height: height
+      height: height,
+      backgroundMedia: backgroundMedia
     };
     renderToCanvas(liveCanvas, window.currentContent, width, height);
   }
   
+  const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
   ipcRenderer.send('update-live-window', {
     number: '',
     text: verseData.text,
     reference: `${verseData.title} - ${verseData.section}`,
     showingCount: 1,
-    totalSelected: 1
+    totalSelected: 1,
+    backgroundMedia: backgroundMedia,
+    transitionIn: transitionSettings['fade-in']
   });
 }
 
@@ -2935,3 +3178,1258 @@ async function saveSongFromEditor() {
     alert('Failed to save song. Check console for details.');
   }
 }
+
+// ========== MEDIA MANAGEMENT ==========
+
+async function loadMedia() {
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const mediaPath = path.join(userData, 'media.json');
+    
+    if (fs.existsSync(mediaPath)) {
+      const data = fs.readFileSync(mediaPath, 'utf8');
+      const mediaData = JSON.parse(data);
+      allMedia = mediaData.files || [];
+      defaultBackgrounds = mediaData.defaultBackgrounds || { songs: null, verses: null };
+    }
+    
+    renderMediaGrid();
+    initMediaHandlers();
+  } catch (err) {
+    console.error('Failed to load media:', err);
+    allMedia = [];
+  }
+}
+
+async function saveMedia() {
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const mediaPath = path.join(userData, 'media.json');
+    const mediaData = {
+      files: allMedia,
+      defaultBackgrounds: defaultBackgrounds
+    };
+    fs.writeFileSync(mediaPath, JSON.stringify(mediaData, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save media:', err);
+  }
+}
+
+function initMediaHandlers() {
+  const addBtn = document.getElementById('media-add-btn');
+  if (addBtn) {
+    addBtn.addEventListener('click', importMediaFiles);
+  }
+  
+  const searchInput = document.getElementById('media-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', renderMediaGrid);
+  }
+  
+  // Context menu
+  document.addEventListener('click', () => {
+    const menu = document.getElementById('media-context-menu');
+    if (menu) menu.style.display = 'none';
+  });
+}
+
+async function importMediaFiles() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.accept = 'image/*,video/*';
+  
+  input.onchange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+    
+    try {
+      const userData = await ipcRenderer.invoke('get-user-data-path');
+      const mediaDir = path.join(userData, 'media');
+      
+      // Create media directory if it doesn't exist
+      if (!fs.existsSync(mediaDir)) {
+        fs.mkdirSync(mediaDir, { recursive: true });
+      }
+      
+      for (const file of files) {
+        const fileName = file.name;
+        const destPath = path.join(mediaDir, fileName);
+        
+        // Copy file
+        const buffer = await file.arrayBuffer();
+        fs.writeFileSync(destPath, Buffer.from(buffer));
+        
+        // Add to media list
+        const stats = fs.statSync(destPath);
+        const fileType = path.extname(fileName).substring(1).toUpperCase();
+        const fileSize = formatFileSize(stats.size);
+        
+        allMedia.push({
+          name: fileName,
+          path: destPath,
+          type: fileType,
+          size: fileSize,
+          addedDate: new Date().toISOString()
+        });
+      }
+      
+      await saveMedia();
+      renderMediaGrid();
+    } catch (err) {
+      console.error('Failed to import media:', err);
+      alert('Failed to import media files');
+    }
+  };
+  
+  input.click();
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  else return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function pathToFileURL(filePath) {
+  // Convert Windows path to proper file URL
+  const normalized = filePath.replace(/\\/g, '/');
+  return 'file:///' + normalized;
+}
+
+function renderMediaGrid() {
+  const display = document.getElementById('media-display');
+  if (!display) return;
+  
+  const searchInput = document.getElementById('media-search-input');
+  const query = searchInput ? searchInput.value.toLowerCase() : '';
+  
+  const filteredMedia = query ? 
+    allMedia.filter(m => m.name.toLowerCase().includes(query)) : 
+    allMedia;
+  
+  let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 12px; padding: 10px;">';
+  
+  // Always show "Create Color/Gradient" as first item (unless searching)
+  if (!query) {
+    html += `<div class="media-item media-create-color" data-index="-1" tabindex="0" style="cursor: pointer; border: 1px solid transparent; border-radius: 6px; padding: 6px; text-align: center;">`;
+    html += `<div style="width: 100%; height: 60px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 3px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: white;">
+      <svg width="30" height="30" viewBox="0 0 16 16" fill="white"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+    </div>`;
+    html += `<div style="font-size: 10px; font-weight: 500; margin-bottom: 3px;">New Color</div>`;
+    html += `<div style="font-size: 8px; color: #666;">Create</div>`;
+    html += `</div>`;
+  }
+  
+  if (filteredMedia.length === 0 && query) {
+    display.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No media files</div>';
+    return;
+  }
+  
+  filteredMedia.forEach((media, index) => {
+    const actualIndex = allMedia.indexOf(media);
+    const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
+    const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
+    const isColor = media.type === 'COLOR';
+    
+    const displayName = media.name.length > 20 ? media.name.substring(0, 17) + '...' : media.name;
+    const isSelected = selectedMediaIndex === actualIndex;
+    
+    html += `<div class="media-item${isSelected ? ' selected' : ''}" data-index="${actualIndex}" draggable="true" tabindex="0" style="cursor: pointer; border: 1px solid ${isSelected ? '#0078d4' : 'transparent'}; border-radius: 6px; padding: 6px; text-align: center;">`;
+    
+    // Thumbnail
+    if (isColor) {
+      html += `<div style="width: 100%; height: 60px; background: ${media.color}; border-radius: 3px; margin-bottom: 6px;"></div>`;
+    } else {
+      const fileURL = media.path ? media.path.replace(/\\/g, '/') : '';
+      if (isImage) {
+      html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+        <img src="file:///${fileURL}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+      </div>`;
+    } else if (isVideo) {
+      html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+        <video src="file:///${fileURL}" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
+      </div>`;
+      } else {
+        html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+          <svg width="30" height="30" viewBox="0 0 16 16" fill="#666"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/></svg>
+        </div>`;
+      }
+    }
+    
+    // Labels
+    html += `<div style="font-size: 10px; font-weight: 500; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${media.name}">${displayName}</div>`;
+    html += `<div style="font-size: 8px; color: #666;">${media.type} • ${media.size}</div>`;
+    html += `</div>`;
+  });
+  
+  html += '</div>';
+  display.innerHTML = html;
+  
+  // Add event listeners
+  document.querySelectorAll('.media-item').forEach(item => {
+    const index = parseInt(item.getAttribute('data-index'));
+    
+    // Special handling for create color button
+    if (index === -1) {
+      item.addEventListener('click', () => {
+        openColorEditor();
+      });
+      item.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          openColorEditor();
+        }
+      });
+      return; // Skip other handlers for create button
+    }
+    
+    item.addEventListener('click', () => {
+      selectedMediaIndex = index;
+      const media = allMedia[index];
+      console.log('Media item clicked:', media);
+      if (media) {
+        displayMediaOnPreview(media);
+        renderMediaGrid(); // Re-render to show selection
+      }
+    });
+    
+    item.addEventListener('dblclick', () => {
+      selectedMediaIndex = index;
+      const media = allMedia[index];
+      if (media) {
+        displayMediaOnLive(media);
+      }
+    });
+    
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const media = allMedia[index];
+        if (media) {
+          displayMediaOnLive(media);
+        }
+      }
+    });
+    
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      selectedMediaIndex = index;
+      showMediaContextMenu(e.clientX, e.clientY);
+    });
+    
+    item.addEventListener('dragstart', (e) => {
+      const dragData = {
+        type: 'media',
+        mediaIndex: index
+      };
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', JSON.stringify(dragData));
+    });
+  });
+}
+
+function showMediaContextMenu(x, y) {
+  let menu = document.getElementById('media-context-menu');
+  
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'media-context-menu';
+    menu.innerHTML = `
+      <div class="context-menu-item" id="media-context-edit">Edit</div>
+      <div class="context-menu-item" id="media-context-bg-songs">Set as Default Background for Songs</div>
+      <div class="context-menu-item" id="media-context-bg-verses">Set as Default Background for Verses</div>
+      <div class="context-menu-item" id="media-context-reset-songs">Reset Song Background to Default</div>
+      <div class="context-menu-item" id="media-context-reset-verses">Reset Verse Background to Default</div>
+      <div class="context-menu-item" id="media-context-delete">Delete</div>
+    `;
+    document.body.appendChild(menu);
+    
+    // Add Edit handler
+    document.getElementById('media-context-edit').addEventListener('click', () => {
+      if (selectedMediaIndex !== null) {
+        const media = allMedia[selectedMediaIndex];
+        const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
+        const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
+        const isColor = media.type === 'COLOR';
+        
+        if (isImage) {
+          openImageEditor(selectedMediaIndex);
+        } else if (isVideo) {
+          openVideoEditor(selectedMediaIndex);
+        } else if (isColor) {
+          openColorEditor(selectedMediaIndex);
+        }
+        menu.style.display = 'none';
+      }
+    });
+    
+    // Add handlers
+    document.getElementById('media-context-bg-songs').addEventListener('click', async () => {
+      if (selectedMediaIndex !== null) {
+        // Store entire media object, not just path
+        defaultBackgrounds.songs = selectedMediaIndex;
+        await saveMedia();
+        menu.style.display = 'none';
+      }
+    });
+    
+    document.getElementById('media-context-bg-verses').addEventListener('click', async () => {
+      if (selectedMediaIndex !== null) {
+        // Store entire media object, not just path
+        defaultBackgrounds.verses = selectedMediaIndex;
+        await saveMedia();
+        menu.style.display = 'none';
+      }
+    });
+    
+    document.getElementById('media-context-reset-songs').addEventListener('click', async () => {
+      defaultBackgrounds.songs = null;
+      await saveMedia();
+      menu.style.display = 'none';
+    });
+    
+    document.getElementById('media-context-reset-verses').addEventListener('click', async () => {
+      defaultBackgrounds.verses = null;
+      await saveMedia();
+      menu.style.display = 'none';
+    });
+    
+    document.getElementById('media-context-delete').addEventListener('click', async () => {
+      if (selectedMediaIndex !== null) {
+        const media = allMedia[selectedMediaIndex];
+        if (confirm(`Delete "${media.name}"?`)) {
+          // Delete file
+          try {
+            if (fs.existsSync(media.path)) {
+              fs.unlinkSync(media.path);
+            }
+          } catch (err) {
+            console.error('Failed to delete file:', err);
+          }
+          
+          // Remove from list
+          allMedia.splice(selectedMediaIndex, 1);
+          await saveMedia();
+          renderMediaGrid();
+        }
+        menu.style.display = 'none';
+      }
+    });
+  }
+  
+  // Position menu
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.style.display = 'block';
+  
+  // Adjust if off-screen
+  setTimeout(() => {
+    const menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - menuRect.width - 5}px`;
+    }
+    if (menuRect.bottom > window.innerHeight) {
+      menu.style.top = `${Math.max(5, y - menuRect.height)}px`;
+    }
+  }, 0);
+}
+
+function openColorEditor(mediaIndex = null) {
+  editingMediaIndex = mediaIndex;
+  const modal = document.getElementById('color-editor-modal');
+  if (!modal) return;
+  
+  if (mediaIndex !== null) {
+    // Editing existing color item
+    const media = allMedia[mediaIndex];
+    const colorCSS = media.color;
+    
+    // Parse the color/gradient to populate form
+    if (colorCSS.startsWith('linear-gradient')) {
+      document.getElementById('bg-type').value = 'gradient';
+      document.getElementById('gradient-type').value = 'linear';
+      document.getElementById('solid-color-options').style.display = 'none';
+      document.getElementById('gradient-options').style.display = 'block';
+      
+      const match = colorCSS.match(/linear-gradient\((\d+)deg,\s*([^,]+),\s*(.+)\)/);
+      if (match) {
+        document.getElementById('gradient-angle').value = match[1];
+        document.getElementById('angle-value').textContent = match[1];
+        document.getElementById('gradient-color1').value = match[2].trim();
+        document.getElementById('gradient-color2').value = match[3].trim();
+      }
+    } else if (colorCSS.startsWith('radial-gradient')) {
+      document.getElementById('bg-type').value = 'gradient';
+      document.getElementById('gradient-type').value = 'radial';
+      document.getElementById('solid-color-options').style.display = 'none';
+      document.getElementById('gradient-options').style.display = 'block';
+      
+      const match = colorCSS.match(/radial-gradient\(circle,\s*([^,]+),\s*(.+)\)/);
+      if (match) {
+        document.getElementById('gradient-color1').value = match[1].trim();
+        document.getElementById('gradient-color2').value = match[2].trim();
+      }
+    } else {
+      // Solid color
+      document.getElementById('bg-type').value = 'solid';
+      document.getElementById('solid-color-options').style.display = 'block';
+      document.getElementById('gradient-options').style.display = 'none';
+      document.getElementById('bg-color').value = colorCSS;
+    }
+  } else {
+    // Creating new color - reset to defaults
+    document.getElementById('bg-type').value = 'solid';
+    document.getElementById('bg-color').value = '#000000';
+    document.getElementById('solid-color-options').style.display = 'block';
+    document.getElementById('gradient-options').style.display = 'none';
+  }
+  
+  modal.classList.add('active');
+  updateColorPreview();
+}
+
+function closeColorEditor() {
+  const modal = document.getElementById('color-editor-modal');
+  if (modal) {
+    modal.classList.remove('active');
+  }
+}
+
+function applyColorToCanvas(ctx, colorCSS, width, height) {
+  console.log('applyColorToCanvas called with:', colorCSS, 'size:', width, 'x', height);
+  // Check if it's a gradient
+  if (colorCSS.startsWith('linear-gradient')) {
+    // Parse linear-gradient(135deg, #667eea, #764ba2)
+    const match = colorCSS.match(/linear-gradient\((\d+)deg,\s*([^,]+),\s*(.+)\)/);
+    console.log('Linear gradient match:', match);
+    if (match) {
+      const angle = parseInt(match[1]);
+      const color1 = match[2].trim();
+      const color2 = match[3].trim();
+      console.log('Creating linear gradient:', angle, 'deg from', color1, 'to', color2);
+      
+      // Convert angle to radians and calculate gradient direction
+      const angleRad = (angle - 90) * Math.PI / 180;
+      const x1 = width / 2 + Math.cos(angleRad) * width / 2;
+      const y1 = height / 2 + Math.sin(angleRad) * height / 2;
+      const x2 = width / 2 - Math.cos(angleRad) * width / 2;
+      const y2 = height / 2 - Math.sin(angleRad) * height / 2;
+      
+      const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+      gradient.addColorStop(0, color1);
+      gradient.addColorStop(1, color2);
+      ctx.fillStyle = gradient;
+    }
+  } else if (colorCSS.startsWith('radial-gradient')) {
+    // Parse radial-gradient(circle, #667eea, #764ba2)
+    const match = colorCSS.match(/radial-gradient\(circle,\s*([^,]+),\s*(.+)\)/);
+    console.log('Radial gradient match:', match);
+    if (match) {
+      const color1 = match[1].trim();
+      const color2 = match[2].trim();
+      console.log('Creating radial gradient from', color1, 'to', color2);
+      
+      const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) / 2);
+      gradient.addColorStop(0, color1);
+      gradient.addColorStop(1, color2);
+      ctx.fillStyle = gradient;
+    }
+  } else {
+    // Solid color
+    console.log('Setting solid color:', colorCSS);
+    ctx.fillStyle = colorCSS;
+  }
+  ctx.fillRect(0, 0, width, height);
+  console.log('Color/gradient applied to canvas');
+}
+
+function drawImageWithSettings(ctx, img, canvasWidth, canvasHeight, settings = {}) {
+  const bgSize = settings.bgSize || 'cover';
+  const bgRepeat = settings.bgRepeat || 'no-repeat';
+  const bgPosition = settings.bgPosition || 'center';
+  
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  
+  let drawWidth, drawHeight, scale;
+  
+  // Calculate dimensions based on background-size
+  if (bgSize === 'cover') {
+    scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+    drawWidth = img.width * scale;
+    drawHeight = img.height * scale;
+  } else if (bgSize === 'contain') {
+    scale = Math.min(canvasWidth / img.width, canvasHeight / img.height);
+    drawWidth = img.width * scale;
+    drawHeight = img.height * scale;
+  } else if (bgSize === '100% 100%') {
+    drawWidth = canvasWidth;
+    drawHeight = canvasHeight;
+  } else { // 'auto' - original size
+    drawWidth = img.width;
+    drawHeight = img.height;
+  }
+  
+  // Calculate position
+  let startX = 0, startY = 0;
+  if (bgPosition.includes('center') || bgPosition === 'center') {
+    startX = (canvasWidth - drawWidth) / 2;
+    startY = (canvasHeight - drawHeight) / 2;
+  } else {
+    const positions = bgPosition.split(' ');
+    const posX = positions[0] || 'center';
+    const posY = positions[1] || 'center';
+    
+    if (posX === 'left') startX = 0;
+    else if (posX === 'right') startX = canvasWidth - drawWidth;
+    else if (posX === 'center') startX = (canvasWidth - drawWidth) / 2;
+    
+    if (posY === 'top') startY = 0;
+    else if (posY === 'bottom') startY = canvasHeight - drawHeight;
+    else if (posY === 'center') startY = (canvasHeight - drawHeight) / 2;
+  }
+  
+  // Handle repeat
+  if (bgRepeat === 'no-repeat') {
+    ctx.drawImage(img, startX, startY, drawWidth, drawHeight);
+  } else if (bgRepeat === 'repeat') {
+    for (let x = startX % drawWidth - drawWidth; x < canvasWidth; x += drawWidth) {
+      for (let y = startY % drawHeight - drawHeight; y < canvasHeight; y += drawHeight) {
+        ctx.drawImage(img, x, y, drawWidth, drawHeight);
+      }
+    }
+  } else if (bgRepeat === 'repeat-x') {
+    for (let x = startX % drawWidth - drawWidth; x < canvasWidth; x += drawWidth) {
+      ctx.drawImage(img, x, startY, drawWidth, drawHeight);
+    }
+  } else if (bgRepeat === 'repeat-y') {
+    for (let y = startY % drawHeight - drawHeight; y < canvasHeight; y += drawHeight) {
+      ctx.drawImage(img, startX, y, drawWidth, drawHeight);
+    }
+  }
+}
+
+function updateColorPreview() {
+  const preview = document.getElementById('bg-preview');
+  if (!preview) return;
+  
+  const type = document.getElementById('bg-type').value;
+  
+  if (type === 'solid') {
+    const color = document.getElementById('bg-color').value;
+    preview.style.background = color;
+  } else {
+    const gradType = document.getElementById('gradient-type').value;
+    const color1 = document.getElementById('gradient-color1').value;
+    const color2 = document.getElementById('gradient-color2').value;
+    const angle = document.getElementById('gradient-angle').value;
+    
+    if (gradType === 'linear') {
+      preview.style.background = `linear-gradient(${angle}deg, ${color1}, ${color2})`;
+    } else {
+      preview.style.background = `radial-gradient(circle, ${color1}, ${color2})`;
+    }
+  }
+}
+
+function saveColorBackground() {
+  const type = document.getElementById('bg-type').value;
+  let colorCSS;
+  let name;
+  
+  if (type === 'solid') {
+    const color = document.getElementById('bg-color').value;
+    colorCSS = color;
+    name = `Solid ${color}`;
+  } else {
+    const gradType = document.getElementById('gradient-type').value;
+    const color1 = document.getElementById('gradient-color1').value;
+    const color2 = document.getElementById('gradient-color2').value;
+    const angle = document.getElementById('gradient-angle').value;
+    
+    if (gradType === 'linear') {
+      colorCSS = `linear-gradient(${angle}deg, ${color1}, ${color2})`;
+      name = `Linear Gradient ${color1}-${color2}`;
+    } else {
+      colorCSS = `radial-gradient(circle, ${color1}, ${color2})`;
+      name = `Radial Gradient ${color1}-${color2}`;
+    }
+  }
+  
+  if (editingMediaIndex !== null) {
+    // Update existing color item
+    const media = allMedia[editingMediaIndex];
+    media.color = colorCSS;
+    media.name = name;
+    
+    saveMedia();
+    renderMediaGrid();
+    
+    // Refresh display if this media is currently shown
+    if (selectedMediaIndex === editingMediaIndex) {
+      displayMediaOnPreview(media);
+    }
+  } else {
+    // Add new color item
+    allMedia.push({
+      name: name,
+      path: null,
+      type: 'COLOR',
+      color: colorCSS,
+      size: '0 B',
+      addedDate: new Date().toISOString()
+    });
+    
+    saveMedia();
+    renderMediaGrid();
+  }
+  
+  closeColorEditor();
+  editingMediaIndex = null;
+}
+
+function initColorEditor() {
+  const modal = document.getElementById('color-editor-modal');
+  if (!modal) return;
+  
+  document.getElementById('color-editor-close').addEventListener('click', closeColorEditor);
+  document.getElementById('color-editor-cancel').addEventListener('click', closeColorEditor);
+  document.getElementById('color-editor-save').addEventListener('click', saveColorBackground);
+  
+  document.getElementById('bg-type').addEventListener('change', (e) => {
+    const solidOptions = document.getElementById('solid-color-options');
+    const gradientOptions = document.getElementById('gradient-options');
+    
+    if (e.target.value === 'solid') {
+      solidOptions.style.display = 'block';
+      gradientOptions.style.display = 'none';
+    } else {
+      solidOptions.style.display = 'none';
+      gradientOptions.style.display = 'block';
+    }
+    updateColorPreview();
+  });
+  
+  document.getElementById('gradient-type').addEventListener('change', (e) => {
+    const angleControl = document.getElementById('linear-angle');
+    angleControl.style.display = e.target.value === 'linear' ? 'block' : 'none';
+    updateColorPreview();
+  });
+  
+  document.getElementById('bg-color').addEventListener('input', updateColorPreview);
+  document.getElementById('gradient-color1').addEventListener('input', updateColorPreview);
+  document.getElementById('gradient-color2').addEventListener('input', updateColorPreview);
+  document.getElementById('gradient-angle').addEventListener('input', (e) => {
+    document.getElementById('angle-value').textContent = e.target.value;
+    updateColorPreview();
+  });
+  
+  // Close on backdrop click
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeColorEditor();
+    }
+  });
+}
+
+let editingMediaIndex = null;
+let imagePreviewImg = null;
+
+function getBackgroundMedia(backgroundIndex) {
+  if (backgroundIndex === null || backgroundIndex === undefined) return null;
+  if (typeof backgroundIndex === 'number') {
+    return allMedia[backgroundIndex] || null;
+  }
+  // Legacy: if it's a string path, try to find the media
+  if (typeof backgroundIndex === 'string') {
+    return allMedia.find(m => m.path === backgroundIndex) || null;
+  }
+  return null;
+}
+
+function updateImagePreview() {
+  if (editingMediaIndex === null || !imagePreviewImg) return;
+  
+  const canvas = document.getElementById('image-preview-canvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const bgSize = document.getElementById('image-bg-size').value;
+  const bgRepeat = document.getElementById('image-bg-repeat').value;
+  const bgPosition = document.getElementById('image-bg-position').value;
+  
+  drawImageWithSettings(ctx, imagePreviewImg, canvas.width, canvas.height, {
+    bgSize: bgSize,
+    bgRepeat: bgRepeat,
+    bgPosition: bgPosition
+  });
+}
+
+function openImageEditor(mediaIndex) {
+  editingMediaIndex = mediaIndex;
+  const media = allMedia[mediaIndex];
+  const modal = document.getElementById('image-editor-modal');
+  if (!modal) return;
+  
+  // Load existing settings or defaults
+  document.getElementById('image-bg-size').value = media.bgSize || 'cover';
+  document.getElementById('image-bg-repeat').value = media.bgRepeat || 'no-repeat';
+  document.getElementById('image-bg-position').value = media.bgPosition || 'center';
+  
+  // Load image for preview
+  imagePreviewImg = new Image();
+  imagePreviewImg.onload = () => {
+    updateImagePreview();
+  };
+  imagePreviewImg.src = pathToFileURL(media.path);
+  
+  modal.classList.add('active');
+}
+
+function closeImageEditor() {
+  const modal = document.getElementById('image-editor-modal');
+  if (modal) {
+    modal.classList.remove('active');
+  }
+  editingMediaIndex = null;
+  imagePreviewImg = null;
+}
+
+let videoPreviewElement = null;
+let videoPreviewAnimationId = null;
+
+function updateVideoPreview() {
+  if (editingMediaIndex === null || !videoPreviewElement) return;
+  
+  const canvas = document.getElementById('video-preview-canvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const objectFit = document.getElementById('video-object-fit').value;
+  
+  const drawFrame = () => {
+    if (!videoPreviewElement || videoPreviewElement.readyState < 2) {
+      videoPreviewAnimationId = requestAnimationFrame(drawFrame);
+      return;
+    }
+    
+    const width = canvas.width;
+    const height = canvas.height;
+    let scale, w, h, x, y;
+    
+    if (objectFit === 'fill') {
+      w = width;
+      h = height;
+      x = 0;
+      y = 0;
+    } else if (objectFit === 'cover') {
+      scale = Math.max(width / videoPreviewElement.videoWidth, height / videoPreviewElement.videoHeight);
+      w = videoPreviewElement.videoWidth * scale;
+      h = videoPreviewElement.videoHeight * scale;
+      x = (width - w) / 2;
+      y = (height - h) / 2;
+    } else if (objectFit === 'none') {
+      w = videoPreviewElement.videoWidth;
+      h = videoPreviewElement.videoHeight;
+      x = (width - w) / 2;
+      y = (height - h) / 2;
+    } else { // contain (default)
+      scale = Math.min(width / videoPreviewElement.videoWidth, height / videoPreviewElement.videoHeight);
+      w = videoPreviewElement.videoWidth * scale;
+      h = videoPreviewElement.videoHeight * scale;
+      x = (width - w) / 2;
+      y = (height - h) / 2;
+    }
+    
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(videoPreviewElement, x, y, w, h);
+    
+    videoPreviewAnimationId = requestAnimationFrame(drawFrame);
+  };
+  
+  // Cancel previous animation if any
+  if (videoPreviewAnimationId) {
+    cancelAnimationFrame(videoPreviewAnimationId);
+  }
+  
+  drawFrame();
+  imagePreviewImg = null;
+}
+
+function saveImageSettings() {
+  if (editingMediaIndex === null) return;
+  
+  const media = allMedia[editingMediaIndex];
+  media.bgSize = document.getElementById('image-bg-size').value;
+  media.bgRepeat = document.getElementById('image-bg-repeat').value;
+  media.bgPosition = document.getElementById('image-bg-position').value;
+  
+  saveMedia();
+  closeImageEditor();
+  
+  // Refresh display if this media is currently shown
+  if (selectedMediaIndex === editingMediaIndex) {
+    displayMediaOnPreview(media);
+  }
+}
+
+function openVideoEditor(mediaIndex) {
+  editingMediaIndex = mediaIndex;
+  const media = allMedia[mediaIndex];
+  const modal = document.getElementById('video-editor-modal');
+  if (!modal) return;
+  
+  // Load existing settings or defaults
+  document.getElementById('video-object-fit').value = media.objectFit || 'contain';
+  document.getElementById('video-loop').checked = media.loop !== false; // default true
+  document.getElementById('video-muted').checked = media.muted !== false; // default true
+  
+  // Load video for preview
+  videoPreviewElement = document.createElement('video');
+  videoPreviewElement.src = pathToFileURL(media.path);
+  videoPreviewElement.loop = true;
+  videoPreviewElement.muted = true;
+  videoPreviewElement.play();
+  
+  // Start preview rendering
+  updateVideoPreview();
+  
+  modal.classList.add('active');
+}
+
+function closeVideoEditor() {
+  const modal = document.getElementById('video-editor-modal');
+  if (modal) {
+    modal.classList.remove('active');
+  }
+  
+  // Clean up video preview
+  if (videoPreviewElement) {
+    videoPreviewElement.pause();
+    videoPreviewElement = null;
+  }
+  if (videoPreviewAnimationId) {
+    cancelAnimationFrame(videoPreviewAnimationId);
+    videoPreviewAnimationId = null;
+  }
+  
+  editingMediaIndex = null;
+}
+
+function saveVideoSettings() {
+  if (editingMediaIndex === null) return;
+  
+  const media = allMedia[editingMediaIndex];
+  media.objectFit = document.getElementById('video-object-fit').value;
+  media.loop = document.getElementById('video-loop').checked;
+  media.muted = document.getElementById('video-muted').checked;
+  
+  saveMedia();
+  closeVideoEditor();
+  
+  // Refresh display if this media is currently shown
+  if (selectedMediaIndex === editingMediaIndex) {
+    displayMediaOnLive(media);
+  }
+}
+
+function initImageEditor() {
+  const modal = document.getElementById('image-editor-modal');
+  if (!modal) return;
+  
+  document.getElementById('image-editor-close').addEventListener('click', closeImageEditor);
+  document.getElementById('image-editor-cancel').addEventListener('click', closeImageEditor);
+  document.getElementById('image-editor-save').addEventListener('click', saveImageSettings);
+  
+  // Update preview on setting changes
+  document.getElementById('image-bg-size').addEventListener('change', updateImagePreview);
+  document.getElementById('image-bg-repeat').addEventListener('change', updateImagePreview);
+  document.getElementById('image-bg-position').addEventListener('change', updateImagePreview);
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeImageEditor();
+    }
+  });
+}
+
+function initVideoEditor() {
+  const modal = document.getElementById('video-editor-modal');
+  if (!modal) return;
+  
+  document.getElementById('video-editor-close').addEventListener('click', closeVideoEditor);
+  document.getElementById('video-editor-cancel').addEventListener('click', closeVideoEditor);
+  document.getElementById('video-editor-save').addEventListener('click', saveVideoSettings);
+  
+  // Update preview on setting changes
+  document.getElementById('video-object-fit').addEventListener('change', updateVideoPreview);
+  
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeVideoEditor();
+    }
+  });
+}
+
+function displayMediaOnPreview(media) {
+  console.log('displayMediaOnPreview called with:', media);
+  const canvas = document.getElementById('preview-canvas');
+  console.log('Preview canvas element:', canvas);
+  if (!canvas) {
+    console.error('Preview canvas not found!');
+    return;
+  }
+  
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  console.log('Canvas cleared, size:', canvas.width, 'x', canvas.height);
+  
+  const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
+  const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
+  const isColor = media.type === 'COLOR';
+  console.log('Media type:', media.type, 'isImage:', isImage, 'isVideo:', isVideo, 'isColor:', isColor);
+  
+  if (isColor) {
+    applyColorToCanvas(ctx, media.color, canvas.width, canvas.height);
+    console.log('Color background drawn to preview canvas');
+  } else if (isImage) {
+    const img = new Image();
+    const fileURL = pathToFileURL(media.path);
+    console.log('Loading image from:', fileURL);
+    img.onload = () => {
+      console.log('Image loaded successfully, dimensions:', img.width, 'x', img.height);
+      drawImageWithSettings(ctx, img, canvas.width, canvas.height, {
+        bgSize: media.bgSize,
+        bgRepeat: media.bgRepeat,
+        bgPosition: media.bgPosition
+      });
+      console.log('Image drawn to preview canvas');
+    };
+    img.onerror = (e) => {
+      console.error('Failed to load image for preview:', media.path, e);
+    };
+    img.src = fileURL;
+  } else if (isVideo) {
+    const video = document.createElement('video');
+    video.src = pathToFileURL(media.path);
+    video.muted = true;
+    video.loop = true;
+    video.play();
+    
+    const drawFrame = () => {
+      if (video.readyState >= 2) {
+        const scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+        const w = video.videoWidth * scale;
+        const h = video.videoHeight * scale;
+        const x = (canvas.width - w) / 2;
+        const y = (canvas.height - h) / 2;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, x, y, w, h);
+      }
+      requestAnimationFrame(drawFrame);
+    };
+    drawFrame();
+  }
+}
+
+async function displayMediaOnLive(media) {
+  // Get external display dimensions
+  const settings = await ipcRenderer.invoke('load-settings');
+  const displays = await ipcRenderer.invoke('get-displays');
+  const defaultDisplayId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
+  const display = displays.find(d => d.id == defaultDisplayId) || displays[0];
+  const width = display ? display.bounds.width : 1920;
+  const height = display ? display.bounds.height : 1080;
+  
+  // Set window.currentContent for media type
+  window.currentContent = {
+    mediaPath: media.path,
+    mediaType: media.type,
+    mediaColor: media.color, // For color/gradient backgrounds
+    width: width,
+    height: height,
+    isMedia: true
+  };
+  
+  // Send to external live window
+  ipcRenderer.send('update-live-window', {
+    mediaPath: media.path,
+    mediaType: media.type,
+    mediaColor: media.color,
+    bgSize: media.bgSize,
+    bgRepeat: media.bgRepeat,
+    bgPosition: media.bgPosition,
+    objectFit: media.objectFit,
+    loop: media.loop,
+    muted: media.muted,
+    transitionIn: transitionSettings['fade-in'],
+    isMedia: true
+  });
+  
+  const previewCanvas = document.getElementById('preview-canvas');
+  const liveCanvas = document.getElementById('live-canvas');
+  
+  const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
+  const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
+  const isColor = media.type === 'COLOR';
+  
+  [previewCanvas, liveCanvas].forEach(canvas => {
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    if (isColor) {
+      // Render color/gradient
+      applyColorToCanvas(ctx, media.color, canvas.width, canvas.height);
+    } else if (isImage) {
+      const img = new Image();
+      img.onload = () => {
+        drawImageWithSettings(ctx, img, canvas.width, canvas.height, {
+          bgSize: media.bgSize,
+          bgRepeat: media.bgRepeat,
+          bgPosition: media.bgPosition
+        });
+      };
+      img.onerror = (e) => console.error('Failed to load image for live:', media.path, e);
+      img.src = pathToFileURL(media.path);
+    } else if (isVideo) {
+      const video = document.createElement('video');
+      video.src = pathToFileURL(media.path);
+      video.muted = media.muted !== false; // default true
+      video.loop = media.loop !== false; // default true
+      video.play();
+      
+      const objectFit = media.objectFit || 'contain';
+      
+      const drawFrame = () => {
+        if (video.readyState >= 2) {
+          let scale, w, h, x, y;
+          
+          if (objectFit === 'fill') {
+            w = canvas.width;
+            h = canvas.height;
+            x = 0;
+            y = 0;
+          } else if (objectFit === 'cover') {
+            scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+            w = video.videoWidth * scale;
+            h = video.videoHeight * scale;
+            x = (canvas.width - w) / 2;
+            y = (canvas.height - h) / 2;
+          } else if (objectFit === 'none') {
+            w = video.videoWidth;
+            h = video.videoHeight;
+            x = (canvas.width - w) / 2;
+            y = (canvas.height - h) / 2;
+          } else { // contain (default)
+            scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+            w = video.videoWidth * scale;
+            h = video.videoHeight * scale;
+            x = (canvas.width - w) / 2;
+            y = (canvas.height - h) / 2;
+          }
+          
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, x, y, w, h);
+        }
+        requestAnimationFrame(drawFrame);
+      };
+      drawFrame();
+    }
+  });
+}
+
+// ========== TRANSITION SYSTEM ==========
+
+let transitionSettings = {
+  'fade-in': { type: 'fade', duration: 1.0 },
+  'fade-out': { type: 'fade', duration: 1.0 }
+};
+
+// Load transition settings from config
+async function loadTransitionSettings() {
+  try {
+    const settings = await ipcRenderer.invoke('load-settings');
+    if (settings && settings.transitions) {
+      transitionSettings = { ...transitionSettings, ...settings.transitions };
+    }
+  } catch (err) {
+    console.error('Failed to load transition settings:', err);
+  }
+}
+
+function setupTransitionButtons() {
+  const fadeInBtn = document.getElementById('transition-in-btn');
+  const fadeOutBtn = document.getElementById('transition-out-btn');
+  
+  if (fadeInBtn) {
+    fadeInBtn.addEventListener('click', () => openTransitionEditor('fade-in'));
+  }
+  if (fadeOutBtn) {
+    fadeOutBtn.addEventListener('click', () => openTransitionEditor('fade-out'));
+  }
+}
+
+function openTransitionEditor(transitionType) {
+  const modal = document.getElementById('transition-editor-modal');
+  const titleEl = document.getElementById('transition-modal-title');
+  const durationInput = document.getElementById('transition-duration');
+  const typeSelect = document.getElementById('transition-type');
+  const previewCanvas = document.getElementById('transition-preview-canvas');
+  
+  if (!modal) return;
+  
+  const isIn = transitionType === 'fade-in';
+  titleEl.textContent = isIn ? 'Fade In Transition' : 'Fade Out Transition';
+  
+  const settings = transitionSettings[transitionType];
+  durationInput.value = settings.duration;
+  typeSelect.value = settings.type;
+  
+  modal.style.display = 'flex';
+  
+  // Start preview animation loop
+  let animationFrameId = null;
+  let startTime = Date.now();
+  
+  const ctx = previewCanvas.getContext('2d');
+  const previewWidth = previewCanvas.width;
+  const previewHeight = previewCanvas.height;
+  
+  const animatePreview = () => {
+    const elapsed = (Date.now() - startTime) / 1000;
+    const duration = parseFloat(durationInput.value) || 1.0;
+    const cycleProgress = (elapsed % (duration * 2)) / (duration * 2);
+    const isSecondHalf = cycleProgress > 0.5;
+    const progress = isSecondHalf ? 2 - (cycleProgress * 2) : cycleProgress * 2;
+    
+    // Clear canvas
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, previewWidth, previewHeight);
+    
+    // Draw sample text with transition based on selected type
+    const sampleText = 'Sample Text';
+    ctx.font = 'bold 72px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fff';
+    
+    const animType = typeSelect.value;
+    
+    if (animType === 'fade') {
+      // Fade in first half, fade out second half
+      if (isSecondHalf) {
+        ctx.globalAlpha = 1 - progress;
+      } else {
+        ctx.globalAlpha = progress;
+      }
+      ctx.fillText(sampleText, previewWidth / 2, previewHeight / 2);
+    } else if (animType === 'slide-left') {
+      // Slide in from right to left: start at +width, end at 0
+      const xOffset = isSecondHalf ? -previewWidth * (1 - progress) : previewWidth * (1 - progress);
+      ctx.globalAlpha = 1;
+      ctx.fillText(sampleText, previewWidth / 2 + xOffset, previewHeight / 2);
+    } else if (animType === 'slide-right') {
+      // Slide in from left to right: start at -width, end at 0
+      const xOffset = isSecondHalf ? previewWidth * (1 - progress) : -previewWidth * (1 - progress);
+      ctx.globalAlpha = 1;
+      ctx.fillText(sampleText, previewWidth / 2 + xOffset, previewHeight / 2);
+    } else if (animType === 'slide-up') {
+      // Slide in from bottom to top: start at +height, end at 0
+      const yOffset = isSecondHalf ? -previewHeight * (1 - progress) : previewHeight * (1 - progress);
+      ctx.globalAlpha = 1;
+      ctx.fillText(sampleText, previewWidth / 2, previewHeight / 2 + yOffset);
+    } else if (animType === 'slide-down') {
+      // Slide in from top to bottom: start at -height, end at 0
+      const yOffset = isSecondHalf ? previewHeight * (1 - progress) : -previewHeight * (1 - progress);
+      ctx.globalAlpha = 1;
+      ctx.fillText(sampleText, previewWidth / 2, previewHeight / 2 + yOffset);
+    }
+    
+    ctx.globalAlpha = 1;
+    
+    animationFrameId = requestAnimationFrame(animatePreview);
+  };
+  
+  animatePreview();
+  
+  // Update animation when type or duration changes
+  typeSelect.addEventListener('change', () => {
+    // Restart animation when type changes
+    startTime = Date.now();
+  });
+  
+  durationInput.addEventListener('input', () => {
+    // Restart animation when duration changes
+    startTime = Date.now();
+  });
+  
+  // Close handler
+  const closeHandler = () => {
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    modal.style.display = 'none';
+    typeSelect.removeEventListener('change', () => {});
+    durationInput.removeEventListener('input', () => {});
+  };
+  
+  const closeBtn = document.getElementById('transition-editor-close');
+  const cancelBtn = document.getElementById('transition-editor-cancel');
+  const saveBtn = document.getElementById('transition-editor-save');
+  
+  const cleanup = () => {
+    closeBtn.removeEventListener('click', closeHandler);
+    cancelBtn.removeEventListener('click', closeHandler);
+    saveBtn.removeEventListener('click', saveHandler);
+    modal.removeEventListener('click', backdropHandler);
+  };
+  
+  const saveHandler = async () => {
+    transitionSettings[transitionType] = {
+      type: typeSelect.value,
+      duration: parseFloat(durationInput.value) || 1.0
+    };
+    
+    // Save to config
+    try {
+      const settings = await ipcRenderer.invoke('load-settings');
+      if (!settings.transitions) settings.transitions = {};
+      settings.transitions[transitionType] = transitionSettings[transitionType];
+      await ipcRenderer.invoke('save-settings', settings);
+    } catch (err) {
+      console.error('Failed to save transition settings:', err);
+    }
+    
+    cleanup();
+    closeHandler();
+  };
+  
+  const backdropHandler = (e) => {
+    if (e.target === modal) {
+      cleanup();
+      closeHandler();
+    }
+  };
+  
+  closeBtn.addEventListener('click', closeHandler);
+  cancelBtn.addEventListener('click', () => {
+    cleanup();
+    closeHandler();
+  });
+  saveBtn.addEventListener('click', saveHandler);
+  modal.addEventListener('click', backdropHandler);
+}
+
+// Initialize transition buttons when DOM is ready
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadTransitionSettings();
+  setupTransitionButtons();
+});
+
+
