@@ -32,6 +32,8 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "keytar": "^8.0.0",
+    "node-fetch": "^2.6.7"
   }
 }

@@ -2,7 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, shell } = require('electron');
+const keytar = require('keytar');
+const fetch = require('node-fetch');
 const {
   ensureBibleJson,
   loadAllVersesFromDisk,
@@ -310,7 +312,7 @@ ipcRenderer.on('default-bible-changed', async (event, bible) => {
   }
 });
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   // Install renderer-side logging buffer
   try {
     window.appLogs = window.appLogs || [];
@@ -322,13 +324,20 @@ window.addEventListener('DOMContentLoaded', () => {
     console.error = function(...args) { try { window.appLogs.push({ ts: new Date().toISOString(), level: 'error', msg: args.join(' ') }); } catch (e) {} ; _rerr.apply(console, args); };
   } catch (e) {}
 
-  loadAndApplySettings();
+  await loadAndApplySettings();
+
+  // Check auth/license before showing main UI
+  await ensureAuthSetup();
+  
+  // Continue with initial render
+  loadCoreUI();
 
   const listContainer = document.getElementById('verse-list');
   if (!listContainer) return;
 
   // Initial render
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
+  // Other UI initialization moved into loadCoreUI so it only runs after auth check
 
   // Scroll handler
   listContainer.addEventListener('scroll', () => {
@@ -1490,6 +1499,167 @@ function updateLiveButtonState(isActive) {
     }
   }
 }
+
+// ------------------ License / Auth Integration ------------------
+const KEYTAR_SERVICE = 'Liturgia';
+const KEYTAR_ACCOUNT = 'auth-token';
+
+async function getSavedToken() {
+  try {
+    const t = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    if (t) return t;
+    // Fallback to settings (legacy)
+    try {
+      const s = await ipcRenderer.invoke('load-settings');
+      if (s && s.auth && s.auth.token) return s.auth.token;
+    } catch (e) {}
+    return null;
+  } catch (e) {
+    console.error('keytar get error', e);
+    return null;
+  }
+}
+
+async function saveToken(token) {
+  try {
+    await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token);
+    // Remove legacy from settings
+    await ipcRenderer.invoke('update-settings', { auth: null });
+  } catch (e) { console.error('keytar set error', e); }
+}
+
+async function clearToken() {
+  try {
+    await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+  } catch (e) { console.error('keytar delete error', e); }
+}
+
+function createSetupModal() {
+  // Create a full-screen overlay modal for initial setup
+  if (document.getElementById('setup-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'setup-modal';
+  modal.style = 'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.85);color:#fff;display:flex;align-items:center;justify-content:center;z-index:10000;';
+  modal.innerHTML = `
+    <div style="width:420px;padding:24px;background:var(--panel-bg,#111);border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);">
+      <h2>Welcome to Liturgia</h2>
+      <p id="setup-message">Sign in to validate ownership or subscribe.</p>
+      <div style="margin-top:12px;">
+        <label>Server URL</label>
+        <input id="setup-server" style="width:100%;padding:8px;margin-top:6px;" placeholder="https://yourdomain.com/licenses" />
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <input id="setup-email" type="email" placeholder="you@example.com" style="flex:1;padding:8px;" />
+        <button id="btn-magic" style="padding:8px 12px;">Send Magic Link</button>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button id="btn-enter-token" style="flex:1;padding:8px;">Enter Token</button>
+        <button id="btn-subscribe" style="flex:1;padding:8px;">Subscribe / Purchase</button>
+      </div>
+      <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
+        <button id="btn-continue-offline" style="padding:8px;">Continue Offline (grace)</button>
+        <div id="setup-status" style="opacity:0.9;font-size:12px;color:#aaa"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // Restore saved server if present
+  (async () => {
+    const settings = await ipcRenderer.invoke('load-settings');
+    if (settings && settings.licenseServer) document.getElementById('setup-server').value = settings.licenseServer;
+  })();
+
+  document.getElementById('btn-magic').onclick = async () => {
+    const email = document.getElementById('setup-email').value.trim();
+    const server = document.getElementById('setup-server').value.trim();
+    if (!email || !server) { alert('Enter server & email'); return; }
+    document.getElementById('setup-status').textContent = 'Sending magic link...';
+    try {
+      const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}`
+      });
+      const json = await res.json();
+      if (json.ok) {
+        document.getElementById('setup-status').textContent = 'Magic link sent — check your email and paste the token via "Enter Token".';
+        await ipcRenderer.invoke('update-settings', { licenseServer: server });
+      } else {
+        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json.error||'');
+      }
+    } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error sending magic link'; }
+  };
+
+  document.getElementById('btn-enter-token').onclick = async () => {
+    const server = document.getElementById('setup-server').value.trim();
+    const token = prompt('Paste the token from the magic link page:');
+    if (!token) return;
+    // Save token and validate
+    document.getElementById('setup-status').textContent = 'Validating token...';
+    await saveToken(token);
+    const ok = await validateTokenAndActivate(token, server);
+    if (ok) { document.getElementById('setup-status').textContent = 'Validated.'; closeSetupModal(); }
+    else { document.getElementById('setup-status').textContent = 'Validation failed. Please ensure the token is correct.'; }
+  };
+
+  document.getElementById('btn-subscribe').onclick = async () => {
+    const server = document.getElementById('setup-server').value.trim();
+    if (!server) { alert('Enter server URL first'); return; }
+    // Ask for email to create checkout and open in external browser
+    const email = document.getElementById('setup-email').value.trim();
+    if (!email) { alert('Enter an email'); return; }
+    document.getElementById('setup-status').textContent = 'Creating checkout...';
+    try {
+      const res = await fetch(server.replace(/\/$/, '') + '/create-checkout-session.php', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email: email, plan: 'monthly'}) });
+      const j = await res.json();
+      if (j.url) { shell.openExternal(j.url); document.getElementById('setup-status').textContent = 'Checkout opened in browser.'; }
+      else document.getElementById('setup-status').textContent = 'Failed to create checkout: ' + (j.error||'');
+    } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error creating checkout'; }
+  };
+
+  document.getElementById('btn-continue-offline').onclick = async () => { closeSetupModal(); };
+}
+
+function closeSetupModal() { const m = document.getElementById('setup-modal'); if (m) m.remove(); }
+
+async function validateTokenAndActivate(token, serverUrl) {
+  try {
+    const server = (serverUrl || (await ipcRenderer.invoke('load-settings')).licenseServer || '').replace(/\/$/, '');
+    if (!server) return false;
+    const res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 200) {
+      const j = await res.json();
+      if (j.active) {
+        await saveToken(token);
+        // store server url in settings
+        await ipcRenderer.invoke('update-settings', { licenseServer: server });
+        return true;
+      }
+      return false;
+    }
+    return false;
+  } catch (e) { console.error('validate error', e); return false; }
+}
+
+async function ensureAuthSetup() {
+  // Called on startup. If no token, show setup modal.
+  const token = await getSavedToken();
+  const settings = await ipcRenderer.invoke('load-settings') || {};
+  const server = settings.licenseServer || '';
+  if (token) {
+    const ok = await validateTokenAndActivate(token, server);
+    if (ok) return; // proceed
+    // invalid token: clear and show setup
+    await clearToken();
+  }
+  // Show setup modal
+  createSetupModal();
+}
+
+async function loadCoreUI() {
+  // This is where previous initiation code that expects license to be checked goes
+  // For now, do nothing special; the rest of DOMContentLoaded will continue.
+}
+
 
 async function saveLastSelectionToSettings() {
   try {
