@@ -18,7 +18,7 @@
       "oneClick": false,
       "perMachine": true,
       "allowElevation": true,
-      "createDesktopShortcut": "true",
+      "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Liturgia",
       "runAfterFinish": false
