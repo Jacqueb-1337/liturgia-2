@@ -9,6 +9,7 @@
   "build": {
     "appId": "com.jacqueb.liturgia",
     "productName": "Liturgia",
+    "icon": "logo.png",
     "win": {
       "target": "portable"
     }

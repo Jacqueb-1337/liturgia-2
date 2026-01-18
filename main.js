@@ -219,6 +219,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
+    icon: path.join(__dirname, 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
@@ -250,6 +251,7 @@ function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
+              icon: path.join(__dirname, 'logo.png'),
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -381,6 +383,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
+      icon: path.join(__dirname, 'logo.png'),
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
