@@ -73,10 +73,8 @@ document.querySelectorAll('.save-settings').forEach(btn => {
     const darkTheme = document.getElementById('dark-theme').checked;
     const defaultDisplay = document.getElementById('default-display').value;
     
-    // Load existing settings and merge to preserve other data like schedule
-    const existingSettings = await ipcRenderer.invoke('load-settings') || {};
-    const updatedSettings = { ...existingSettings, username, theme, darkTheme, defaultDisplay };
-    await ipcRenderer.invoke('save-settings', updatedSettings);
+    // Use server-side atomic update to avoid races
+    await ipcRenderer.invoke('update-settings', { username, theme, darkTheme, defaultDisplay });
     applyDarkTheme(darkTheme);
     // Show status only for the current panel
     const panel = btn.getAttribute('data-panel');
@@ -238,9 +236,7 @@ async function selectBible(bible) {
 
   // Persist the selection in the settings so it survives restarts
   try {
-    const settings = await ipcRenderer.invoke('load-settings') || {};
-    settings.defaultBible = bible;
-    await ipcRenderer.invoke('save-settings', settings);
+    await ipcRenderer.invoke('update-settings', { defaultBible: bible });
   } catch (err) {
     console.error('Failed to persist selected bible:', err);
   }

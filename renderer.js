@@ -128,9 +128,7 @@ function setupPopover() {
       previewStyles[currentElement] = btoa(css);
     }
     applyPreviewStyles();
-    const settings = await ipcRenderer.invoke('load-settings');
-    settings.previewStyles = previewStyles;
-    await ipcRenderer.invoke('save-settings', settings);
+    await ipcRenderer.invoke('update-settings', { previewStyles });
     popover.style.display = 'none';
   });
 
@@ -322,6 +320,17 @@ ipcRenderer.on('default-bible-changed', async (event, bible) => {
 });
 
 window.addEventListener('DOMContentLoaded', () => {
+  // Install renderer-side logging buffer
+  try {
+    window.appLogs = window.appLogs || [];
+    const _rlog = console.log;
+    const _rwarn = console.warn;
+    const _rerr = console.error;
+    console.log = function(...args) { try { window.appLogs.push({ ts: new Date().toISOString(), level: 'log', msg: args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') }); } catch (e) {} ; _rlog.apply(console, args); };
+    console.warn = function(...args) { try { window.appLogs.push({ ts: new Date().toISOString(), level: 'warn', msg: args.join(' ') }); } catch (e) {} ; _rwarn.apply(console, args); };
+    console.error = function(...args) { try { window.appLogs.push({ ts: new Date().toISOString(), level: 'error', msg: args.join(' ') }); } catch (e) {} ; _rerr.apply(console, args); };
+  } catch (e) {}
+
   loadAndApplySettings();
 
   const listContainer = document.getElementById('verse-list');
@@ -346,6 +355,92 @@ window.addEventListener('DOMContentLoaded', () => {
   initSchedule();
   initResizers();
   restoreDividerPositions();
+
+  // Re-validate divider positions after a window resize to avoid off-screen panels
+  let _dividerResizeTimeout = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_dividerResizeTimeout);
+    _dividerResizeTimeout = setTimeout(async () => {
+      // Re-clamp and save if needed
+      const scheduleSidebar = document.getElementById('schedule-sidebar');
+      const slidePreview = document.getElementById('slide-preview');
+      const slideContainer = document.getElementById('slide-container');
+      const versePanel = document.getElementById('verse-panel');
+      if (!scheduleSidebar || !slidePreview || !slideContainer || !versePanel) return;
+
+      const scheduleWidthPx = Math.round(scheduleSidebar.getBoundingClientRect().width);
+      const containerRect = slideContainer.getBoundingClientRect();
+      const previewPercent = Math.round((slidePreview.getBoundingClientRect().width / (containerRect.width || 1)) * 100);
+      const verseHeightPx = Math.round(versePanel.getBoundingClientRect().height);
+
+      // Clamp same as restore
+      const clampedSchedule = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
+      const clampedPreview = Math.max(10, Math.min(previewPercent, 90));
+      const clampedVerse = Math.max(50, Math.min(verseHeightPx, Math.max(100, window.innerHeight - 100)));
+
+      let changed = false;
+      if (clampedSchedule !== scheduleWidthPx) {
+        scheduleSidebar.style.width = clampedSchedule + 'px';
+        changed = true;
+      }
+      if (clampedPreview !== previewPercent) {
+        slidePreview.style.flex = `0 0 ${clampedPreview}%`;
+        document.getElementById('slide-live').style.flex = `0 0 ${100 - clampedPreview}%`;
+        changed = true;
+      }
+      if (clampedVerse !== verseHeightPx) {
+        document.getElementById('top-section').style.flex = `0 0 ${Math.max(50, window.innerHeight - clampedVerse - 16)}px`;
+        versePanel.style.flex = `0 0 ${clampedVerse}px`;
+        changed = true;
+      }
+
+      if (changed) await saveDividerPositions();
+    }, 150);
+  });
+
+  // Listen for report requests from main and prepare renderer payload
+  ipcRenderer.on('prepare-renderer-report', async () => {
+    try {
+      const docHtml = document.documentElement.outerHTML;
+      const previewCanvas = document.getElementById('preview-canvas');
+      let previewDataUrl = null;
+      let previewInfo = null;
+      if (previewCanvas) {
+        try {
+          previewDataUrl = previewCanvas.toDataURL('image/png');
+          previewInfo = { width: previewCanvas.width, height: previewCanvas.height };
+        } catch (e) {
+          previewInfo = { error: String(e) };
+        }
+      }
+
+      const settingsSnapshot = {
+        username: document.getElementById('username') ? document.getElementById('username').value : null,
+        darkTheme: document.getElementById('dark-theme') ? document.getElementById('dark-theme').checked : null,
+        theme: document.getElementById('theme') ? document.getElementById('theme').value : null,
+        dividerPositions: {
+          scheduleWidth: document.getElementById('schedule-sidebar') ? document.getElementById('schedule-sidebar').style.width : null,
+          previewFlex: document.getElementById('slide-preview') ? document.getElementById('slide-preview').style.flex : null,
+          verseHeight: document.getElementById('verse-panel') ? document.getElementById('verse-panel').style.flex : null
+        }
+      };
+
+      const rendererLogs = window.appLogs || [];
+      const settingsFile = await ipcRenderer.invoke('load-settings');
+
+      ipcRenderer.send('renderer-report', {
+        docHtml,
+        previewDataUrl,
+        previewInfo,
+        settingsSnapshot,
+        settingsFile,
+        rendererLogs
+      });
+    } catch (err) {
+      console.error('Failed to prepare renderer report:', err);
+      ipcRenderer.send('renderer-report', { error: String(err) });
+    }
+  });
 
   // Keyboard navigation when the verse selection is focused (or body) — allow left/right arrows
   window.addEventListener('keydown', (e) => {
@@ -1382,19 +1477,20 @@ function updateLiveButtonState(isActive) {
 
 async function saveLastSelectionToSettings() {
   try {
-    const settings = await ipcRenderer.invoke('load-settings') || {};
     if (!selectedIndices || selectedIndices.length === 0) {
-      delete settings.lastSelected;
+      // remove lastSelected by setting null (server will delete key)
+      await ipcRenderer.invoke('update-settings', { lastSelected: null });
     } else {
       const start = selectedIndices[0];
       const end = selectedIndices[selectedIndices.length - 1];
-      settings.lastSelected = {
-        startKey: allVerses[start].key,
-        endKey: (start === end) ? null : allVerses[end].key,
-        bible: currentBibleFile
-      };
+      await ipcRenderer.invoke('update-settings', {
+        lastSelected: {
+          startKey: allVerses[start].key,
+          endKey: (start === end) ? null : allVerses[end].key,
+          bible: currentBibleFile
+        }
+      });
     }
-    await ipcRenderer.invoke('save-settings', settings);
   } catch (err) {
     console.error('Failed to save last selection to settings:', err);
   }
@@ -2112,9 +2208,8 @@ function navigateScheduleSongVerse(direction) {
 
 async function saveScheduleToSettings() {
   try {
-    const settings = await ipcRenderer.invoke('load-settings') || {};
-    settings.schedule = scheduleItems;
-    await ipcRenderer.invoke('save-settings', settings);
+    // Use atomic update to avoid overwriting other settings
+    await ipcRenderer.invoke('update-settings', { schedule: scheduleItems });
   } catch (err) {
     console.error('Failed to save schedule to settings:', err);
   }
@@ -2137,9 +2232,7 @@ async function loadScheduleFromSettings() {
 
 async function saveSongViewMode() {
   try {
-    const settings = await ipcRenderer.invoke('load-settings') || {};
-    settings.songVerseViewMode = songVerseViewMode;
-    await ipcRenderer.invoke('save-settings', settings);
+    await ipcRenderer.invoke('update-settings', { songVerseViewMode });
   } catch (err) {
     console.error('Failed to save song view mode:', err);
   }
@@ -2294,15 +2387,36 @@ function initResizers() {
 async function saveDividerPositions() {
   const scheduleSidebar = document.getElementById('schedule-sidebar');
   const slidePreview = document.getElementById('slide-preview');
+  const slideContainer = document.getElementById('slide-container');
   const versePanel = document.getElementById('verse-panel');
   
   const settings = await ipcRenderer.invoke('load-settings') || {};
+
+  // Compute normalized numeric values
+  const scheduleWidthPx = Math.round(scheduleSidebar.getBoundingClientRect().width || parseInt(scheduleSidebar.style.width) || 250);
+  const containerRect = slideContainer.getBoundingClientRect();
+  const previewWidth = slidePreview.getBoundingClientRect().width || 0;
+  let previewPercent = containerRect.width > 0 ? Math.round((previewWidth / containerRect.width) * 100) : 50;
+  const verseHeightPx = Math.round(versePanel.getBoundingClientRect().height || parseInt(versePanel.style.flex) || 200);
+
+  // Clamp to sensible ranges
+  const clampedSchedule = Math.max(100, Math.min(scheduleWidthPx, window.innerWidth - 400));
+  previewPercent = Math.max(10, Math.min(90, previewPercent));
+  const clampedVerse = Math.max(50, Math.min(verseHeightPx, Math.max(100, window.innerHeight - 100)));
+
   settings.dividerPositions = {
-    scheduleWidth: scheduleSidebar.style.width || '250px',
-    previewFlex: slidePreview.style.flex || '0 0 50%',
-    verseHeight: versePanel.style.flex || '0 0 200px'
+    // new numeric representation (preferred)
+    scheduleWidthPx: clampedSchedule,
+    previewPercent: previewPercent,
+    verseHeightPx: clampedVerse,
+    // keep legacy strings for backward-compatibility
+    scheduleWidth: clampedSchedule + 'px',
+    previewFlex: `0 0 ${previewPercent}%`,
+    verseHeight: `0 0 ${clampedVerse}px`
   };
-  await ipcRenderer.invoke('save-settings', settings);
+
+  // Use update-settings to avoid races
+  await ipcRenderer.invoke('update-settings', { dividerPositions: settings.dividerPositions });
 }
 
 async function restoreDividerPositions() {
@@ -2314,30 +2428,47 @@ async function restoreDividerPositions() {
   const slideLive = document.getElementById('slide-live');
   const versePanel = document.getElementById('verse-panel');
   const topSection = document.getElementById('top-section');
-  
-  if (settings.dividerPositions.scheduleWidth) {
-    scheduleSidebar.style.width = settings.dividerPositions.scheduleWidth;
+
+  // Read numeric values first (new format), fall back to legacy strings
+  let scheduleWidthPx = settings.dividerPositions.scheduleWidthPx;
+  if (!scheduleWidthPx && settings.dividerPositions.scheduleWidth) {
+    scheduleWidthPx = parseInt(settings.dividerPositions.scheduleWidth, 10);
   }
-  
-  if (settings.dividerPositions.previewFlex) {
-    slidePreview.style.flex = settings.dividerPositions.previewFlex;
-    // Calculate the opposite flex for slide-live
+  if (!scheduleWidthPx) scheduleWidthPx = 250;
+
+  let previewPercent = settings.dividerPositions.previewPercent;
+  if (!previewPercent && settings.dividerPositions.previewFlex) {
     const match = settings.dividerPositions.previewFlex.match(/(\d+\.?\d*)%/);
-    if (match) {
-      const percentage = parseFloat(match[1]);
-      slideLive.style.flex = `0 0 ${100 - percentage}%`;
-    }
+    if (match) previewPercent = parseFloat(match[1]);
   }
-  
-  if (settings.dividerPositions.verseHeight) {
-    versePanel.style.flex = settings.dividerPositions.verseHeight;
-    // Calculate top section height
-    const match = settings.dividerPositions.verseHeight.match(/(\d+)px/);
-    if (match) {
-      const verseHeight = parseInt(match[1]);
-      const topHeight = window.innerHeight - verseHeight - 16; // 16px for resizer
-      topSection.style.flex = `0 0 ${topHeight}px`;
-    }
+  if (!previewPercent) previewPercent = 50;
+
+  let verseHeightPx = settings.dividerPositions.verseHeightPx;
+  if (!verseHeightPx && settings.dividerPositions.verseHeight) {
+    const m = settings.dividerPositions.verseHeight.match(/(\d+)px/);
+    if (m) verseHeightPx = parseInt(m[1], 10);
+  }
+  if (!verseHeightPx) verseHeightPx = 200;
+
+  // Validate and clamp to safe ranges based on current window size
+  scheduleWidthPx = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
+  previewPercent = Math.max(10, Math.min(previewPercent, 90));
+  verseHeightPx = Math.max(50, Math.min(verseHeightPx, Math.max(100, window.innerHeight - 100)));
+
+  // Apply computed layout
+  scheduleSidebar.style.width = scheduleWidthPx + 'px';
+  slidePreview.style.flex = `0 0 ${previewPercent}%`;
+  slideLive.style.flex = `0 0 ${100 - previewPercent}%`;
+
+  versePanel.style.flex = `0 0 ${verseHeightPx}px`;
+  const topHeight = Math.max(50, window.innerHeight - verseHeightPx - 16);
+  topSection.style.flex = `0 0 ${topHeight}px`;
+
+  // If any incoming values were out of bounds, warn and overwrite persisted values with clamped ones
+  const { scheduleWidth, previewFlex, verseHeight } = settings.dividerPositions;
+  if (parseInt(scheduleWidth, 10) !== scheduleWidthPx || (previewFlex && !previewFlex.includes(`${previewPercent}%`)) || (verseHeight && !verseHeight.includes(`${verseHeightPx}px`))) {
+    console.warn('[restoreDividerPositions] Clamped persisted divider positions to safe ranges. Overwriting saved values.');
+    await saveDividerPositions();
   }
 }
 
@@ -4398,10 +4529,9 @@ function openTransitionEditor(transitionType) {
     
     // Save to config
     try {
-      const settings = await ipcRenderer.invoke('load-settings');
-      if (!settings.transitions) settings.transitions = {};
-      settings.transitions[transitionType] = transitionSettings[transitionType];
-      await ipcRenderer.invoke('save-settings', settings);
+      const settings = await ipcRenderer.invoke('load-settings') || {};
+      const newTransitions = { ...(settings.transitions || {}), [transitionType]: transitionSettings[transitionType] };
+      await ipcRenderer.invoke('update-settings', { transitions: newTransitions });
     } catch (err) {
       console.error('Failed to save transition settings:', err);
     }

@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Liturgia Diagnostic Report Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: #2d2d30;
+      padding: 15px 20px;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    header h1 {
+      font-size: 18px;
+      font-weight: 500;
+      flex: 1;
+    }
+
+    .file-input-wrapper {
+      position: relative;
+    }
+
+    #file-input {
+      display: none;
+    }
+
+    .btn {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: #1177bb;
+    }
+
+    .btn-secondary {
+      background: #3c3c3c;
+    }
+
+    .btn-secondary:hover {
+      background: #505050;
+    }
+
+    .main-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 250px;
+      background: #252526;
+      border-right: 1px solid #3e3e42;
+      overflow-y: auto;
+    }
+
+    .nav-item {
+      padding: 10px 20px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: all 0.2s;
+      font-size: 13px;
+    }
+
+    .nav-item:hover {
+      background: #2a2d2e;
+    }
+
+    .nav-item.active {
+      background: #37373d;
+      border-left-color: #0e639c;
+      color: #fff;
+    }
+
+    .content-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .section {
+      display: none;
+      animation: fadeIn 0.2s;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .metadata-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .metadata-card {
+      background: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      padding: 15px;
+    }
+
+    .metadata-card h3 {
+      font-size: 12px;
+      color: #858585;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .metadata-card p {
+      font-size: 14px;
+      color: #d4d4d4;
+    }
+
+    .log-container {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      padding: 15px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid #2d2d30;
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-entry.error {
+      color: #f48771;
+    }
+
+    .log-entry.warn {
+      color: #dcdcaa;
+    }
+
+    .log-entry.info {
+      color: #4fc1ff;
+    }
+
+    .image-preview {
+      text-align: center;
+      padding: 20px;
+    }
+
+    .image-preview img {
+      max-width: 100%;
+      max-height: 70vh;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .code-viewer {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .code-header {
+      background: #2d2d30;
+      padding: 10px 15px;
+      border-bottom: 1px solid #3e3e42;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .code-header h3 {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .code-content {
+      padding: 15px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      overflow-x: auto;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .code-content pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #858585;
+    }
+
+    .empty-state svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 20px;
+      opacity: 0.3;
+    }
+
+    .empty-state h2 {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: #d4d4d4;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+    }
+
+    .filter-bar {
+      margin-bottom: 15px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .filter-bar input {
+      flex: 1;
+      background: #3c3c3c;
+      border: 1px solid #3e3e42;
+      color: #d4d4d4;
+      padding: 8px 12px;
+      border-radius: 3px;
+      font-size: 13px;
+    }
+
+    .filter-bar input:focus {
+      outline: none;
+      border-color: #0e639c;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .badge.success {
+      background: #1a7f37;
+      color: #fff;
+    }
+
+    .badge.warning {
+      background: #9e6a03;
+      color: #fff;
+    }
+
+    .badge.error {
+      background: #da3633;
+      color: #fff;
+    }
+
+    .json-viewer {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      padding: 15px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      overflow: auto;
+      max-height: 600px;
+    }
+
+    .json-key {
+      color: #9cdcfe;
+    }
+
+    .json-string {
+      color: #ce9178;
+    }
+
+    .json-number {
+      color: #b5cea8;
+    }
+
+    .json-boolean {
+      color: #569cd6;
+    }
+
+    .json-null {
+      color: #858585;
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e1e1e;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #424242;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4e4e4e;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📊 Liturgia Diagnostic Report Viewer</h1>
+    <div class="file-input-wrapper">
+      <input type="file" id="file-input" accept=".txt">
+      <button class="btn" onclick="document.getElementById('file-input').click()">
+        Open Report
+      </button>
+    </div>
+  </header>
+
+  <div class="main-container" id="main-container">
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
+      </svg>
+      <h2>No Report Loaded</h2>
+      <p>Click "Open Report" to load a diagnostic report file</p>
+    </div>
+  </div>
+
+  <script>
+    let reportData = {};
+
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const text = await file.text();
+      parseReport(text);
+      renderUI();
+    });
+
+    function parseReport(text) {
+      reportData = {
+        metadata: {},
+        mainLogs: [],
+        rendererLogs: [],
+        indexHtml: '',
+        liveHtml: '',
+        settingsFile: '',
+        rendererSettings: null,
+        previewCanvas: '',
+        liveScreenshot: ''
+      };
+
+      const sections = text.split(/^=== /m).filter(s => s.trim());
+
+      sections.forEach(section => {
+        const lines = section.split('\n');
+        const title = lines[0].replace(' ===', '').trim();
+        const content = lines.slice(1).join('\n').trim();
+
+        switch(title) {
+          case 'SYSTEM METADATA':
+            parseMetadata(content);
+            break;
+          case 'MAIN PROCESS LOGS':
+            reportData.mainLogs = parseLogs(content);
+            break;
+          case 'RENDERER PROCESS LOGS':
+            reportData.rendererLogs = parseLogs(content);
+            break;
+          case 'INDEX.HTML':
+            reportData.indexHtml = content;
+            break;
+          case 'LIVE.HTML':
+            reportData.liveHtml = content;
+            break;
+          case 'SETTINGS FILE (from disk)':
+            reportData.settingsFile = content;
+            break;
+          case 'RENDERER SETTINGS (in-memory)':
+            try {
+              reportData.rendererSettings = JSON.parse(content);
+            } catch(e) {
+              reportData.rendererSettings = { error: 'Failed to parse', raw: content };
+            }
+            break;
+          case 'PREVIEW CANVAS (base64 PNG)':
+            reportData.previewCanvas = content.trim();
+            break;
+          case 'LIVE WINDOW SCREENSHOT (base64 PNG)':
+            reportData.liveScreenshot = content.trim();
+            break;
+        }
+      });
+    }
+
+    function parseMetadata(content) {
+      content.split('\n').forEach(line => {
+        const [key, ...valueParts] = line.split(':');
+        if (key && valueParts.length) {
+          reportData.metadata[key.trim()] = valueParts.join(':').trim();
+        }
+      });
+    }
+
+    function parseLogs(content) {
+      return content.split('\n').filter(line => line.trim()).map(line => {
+        let type = 'info';
+        if (line.includes('[ERROR]') || line.toLowerCase().includes('error')) type = 'error';
+        else if (line.includes('[WARN]') || line.toLowerCase().includes('warning')) type = 'warn';
+        return { type, text: line };
+      });
+    }
+
+    function renderUI() {
+      const container = document.getElementById('main-container');
+      
+      const nav = [
+        { id: 'overview', label: 'Overview', icon: '📋' },
+        { id: 'main-logs', label: 'Main Logs', icon: '📝', badge: reportData.mainLogs.length },
+        { id: 'renderer-logs', label: 'Renderer Logs', icon: '📝', badge: reportData.rendererLogs.length },
+        { id: 'preview-canvas', label: 'Preview Canvas', icon: '🖼️' },
+        { id: 'live-screenshot', label: 'Live Screenshot', icon: '🖼️' },
+        { id: 'index-html', label: 'index.html', icon: '📄' },
+        { id: 'live-html', label: 'live.html', icon: '📄' },
+        { id: 'settings-file', label: 'Settings (disk)', icon: '⚙️' },
+        { id: 'settings-memory', label: 'Settings (memory)', icon: '⚙️' }
+      ];
+
+      container.innerHTML = `
+        <div class="sidebar">
+          ${nav.map(item => `
+            <div class="nav-item ${item.id === 'overview' ? 'active' : ''}" data-section="${item.id}">
+              ${item.icon} ${item.label}
+              ${item.badge ? `<span class="badge success">${item.badge}</span>` : ''}
+            </div>
+          `).join('')}
+        </div>
+        <div class="content-area">
+          ${renderOverview()}
+          ${renderLogs('main-logs', reportData.mainLogs, 'Main Process Logs')}
+          ${renderLogs('renderer-logs', reportData.rendererLogs, 'Renderer Process Logs')}
+          ${renderImage('preview-canvas', reportData.previewCanvas, 'Preview Canvas')}
+          ${renderImage('live-screenshot', reportData.liveScreenshot, 'Live Window Screenshot')}
+          ${renderCode('index-html', reportData.indexHtml, 'index.html')}
+          ${renderCode('live-html', reportData.liveHtml, 'live.html')}
+          ${renderCode('settings-file', reportData.settingsFile, 'Settings File (from disk)', 'json')}
+          ${renderJson('settings-memory', reportData.rendererSettings, 'Renderer Settings (in-memory)')}
+        </div>
+      `;
+
+      // Add click handlers
+      document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+          document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+          item.classList.add('active');
+          document.getElementById(item.dataset.section).classList.add('active');
+        });
+      });
+
+      // Add log filtering
+      setupLogFiltering('main-logs', reportData.mainLogs);
+      setupLogFiltering('renderer-logs', reportData.rendererLogs);
+    }
+
+    function renderOverview() {
+      const errors = [...reportData.mainLogs, ...reportData.rendererLogs].filter(l => l.type === 'error').length;
+      const warnings = [...reportData.mainLogs, ...reportData.rendererLogs].filter(l => l.type === 'warn').length;
+      
+      return `
+        <div id="overview" class="section active">
+          <h2 style="margin-bottom: 20px; font-size: 20px;">System Overview</h2>
+          <div class="metadata-grid">
+            <div class="metadata-card">
+              <h3>Platform</h3>
+              <p>${reportData.metadata.Platform || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Electron Version</h3>
+              <p>${reportData.metadata['Electron Version'] || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Node Version</h3>
+              <p>${reportData.metadata['Node Version'] || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Chrome Version</h3>
+              <p>${reportData.metadata['Chrome Version'] || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>CPU</h3>
+              <p>${reportData.metadata['CPU Cores'] || 'Unknown'} cores</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Memory</h3>
+              <p>${reportData.metadata['Total Memory'] || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Report Generated</h3>
+              <p>${reportData.metadata['Report Generated'] || 'Unknown'}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>App Version</h3>
+              <p>${reportData.metadata['App Version'] || 'Unknown'}</p>
+            </div>
+          </div>
+          
+          <h2 style="margin: 30px 0 20px; font-size: 20px;">Diagnostics Summary</h2>
+          <div class="metadata-grid">
+            <div class="metadata-card">
+              <h3>Total Logs</h3>
+              <p>${reportData.mainLogs.length + reportData.rendererLogs.length} entries</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Errors</h3>
+              <p style="color: ${errors > 0 ? '#f48771' : '#6a9955'};">${errors}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Warnings</h3>
+              <p style="color: ${warnings > 0 ? '#dcdcaa' : '#6a9955'};">${warnings}</p>
+            </div>
+            <div class="metadata-card">
+              <h3>Screenshots</h3>
+              <p>${(reportData.previewCanvas ? 1 : 0) + (reportData.liveScreenshot ? 1 : 0)} captured</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLogs(id, logs, title) {
+      return `
+        <div id="${id}" class="section">
+          <h2 style="margin-bottom: 15px; font-size: 20px;">${title}</h2>
+          <div class="filter-bar">
+            <input type="text" id="${id}-filter" placeholder="Filter logs..." />
+            <button class="btn btn-secondary" onclick="filterLogs('${id}', 'all')">All</button>
+            <button class="btn btn-secondary" onclick="filterLogs('${id}', 'error')">Errors</button>
+            <button class="btn btn-secondary" onclick="filterLogs('${id}', 'warn')">Warnings</button>
+          </div>
+          <div class="log-container" id="${id}-container">
+            ${logs.map(log => `<div class="log-entry ${log.type}" data-type="${log.type}">${escapeHtml(log.text)}</div>`).join('')}
+            ${logs.length === 0 ? '<div style="color: #858585; text-align: center; padding: 20px;">No logs recorded</div>' : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderImage(id, base64Data, title) {
+      return `
+        <div id="${id}" class="section">
+          <h2 style="margin-bottom: 15px; font-size: 20px;">${title}</h2>
+          ${base64Data ? `
+            <div class="image-preview">
+              <img src="data:image/png;base64,${base64Data}" alt="${title}" />
+            </div>
+          ` : `
+            <div style="text-align: center; padding: 60px; color: #858585;">
+              No screenshot available
+            </div>
+          `}
+        </div>
+      `;
+    }
+
+    function renderCode(id, code, title, language = 'html') {
+      return `
+        <div id="${id}" class="section">
+          <div class="code-viewer">
+            <div class="code-header">
+              <h3>${title}</h3>
+              <button class="btn btn-secondary" onclick="copyToClipboard('${id}')">Copy</button>
+            </div>
+            <div class="code-content">
+              <pre id="${id}-code">${escapeHtml(code)}</pre>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderJson(id, data, title) {
+      const formatted = data ? syntaxHighlightJson(data) : '<span style="color: #858585;">No data available</span>';
+      return `
+        <div id="${id}" class="section">
+          <h2 style="margin-bottom: 15px; font-size: 20px;">${title}</h2>
+          <div class="json-viewer" id="${id}-json">
+            ${formatted}
+          </div>
+        </div>
+      `;
+    }
+
+    function syntaxHighlightJson(json) {
+      if (typeof json !== 'string') {
+        json = JSON.stringify(json, null, 2);
+      }
+      json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+        let cls = 'json-number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'json-key';
+          } else {
+            cls = 'json-string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'json-boolean';
+        } else if (/null/.test(match)) {
+          cls = 'json-null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+      });
+    }
+
+    function setupLogFiltering(id, logs) {
+      const input = document.getElementById(`${id}-filter`);
+      if (!input) return;
+      
+      input.addEventListener('input', () => {
+        const filter = input.value.toLowerCase();
+        const entries = document.querySelectorAll(`#${id}-container .log-entry`);
+        entries.forEach(entry => {
+          const visible = entry.textContent.toLowerCase().includes(filter);
+          entry.style.display = visible ? 'block' : 'none';
+        });
+      });
+    }
+
+    function filterLogs(id, type) {
+      const entries = document.querySelectorAll(`#${id}-container .log-entry`);
+      entries.forEach(entry => {
+        if (type === 'all') {
+          entry.style.display = 'block';
+        } else {
+          entry.style.display = entry.dataset.type === type ? 'block' : 'none';
+        }
+      });
+    }
+
+    function copyToClipboard(id) {
+      const code = document.getElementById(`${id}-code`);
+      if (!code) return;
+      
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        alert('Copied to clipboard!');
+      });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
