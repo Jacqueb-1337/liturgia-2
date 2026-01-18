@@ -167,58 +167,49 @@ function validateCSS(css) {
 }
 
 function toggleClear() {
+  // If black mode is active, switch directly to clear on the live window (avoid flashing normal)
   if (blackMode) {
-    // First clear the display, then exit black mode
-    ipcRenderer.send('clear-live-text');
-    const liveCanvas = document.getElementById('live-canvas');
-    if (liveCanvas) {
-      const width = window.currentContent ? window.currentContent.width : liveCanvas.width;
-      const height = window.currentContent ? window.currentContent.height : liveCanvas.height;
-      liveCanvas.width = width;
-      liveCanvas.height = height;
-      const ctx = liveCanvas.getContext('2d');
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-    }
-    
-    // Small delay to ensure clear happens before reset
-    setTimeout(() => {
-      blackMode = false;
-      if (window.currentContent) {
-        const liveCanvas = document.getElementById('live-canvas');
-        if (liveCanvas) {
-          renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
-        }
-      }
-      ipcRenderer.send('reset-live-canvas');
-    }, 50);
-    return;
-  }
-  
-  clearMode = !clearMode;
-  if (clearMode) {
-    // Clear text from preview canvas (keep black background)
-    const liveCanvas = document.getElementById('live-canvas');
-    if (liveCanvas) {
-      const width = window.currentContent ? window.currentContent.width : liveCanvas.width;
-      const height = window.currentContent ? window.currentContent.height : liveCanvas.height;
-      liveCanvas.width = width;
-      liveCanvas.height = height;
-      const ctx = liveCanvas.getContext('2d');
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-    }
-    // Clear text from live window (keep black background)
-    ipcRenderer.send('clear-live-text');
-  } else {
-    // Restore text on both canvases
+    blackMode = false;
+    clearMode = true;
+
+    // Update preview to show background without text
     if (window.currentContent) {
       const liveCanvas = document.getElementById('live-canvas');
       if (liveCanvas) {
-        renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
+        const width = window.currentContent.width;
+        const height = window.currentContent.height;
+        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '' };
+        renderToCanvas(liveCanvas, contentWithoutText, width, height);
       }
     }
-    ipcRenderer.send('show-live-text');
+
+    // Directly instruct live window to enter clear mode
+    ipcRenderer.send('set-live-mode', 'clear');
+    return;
+  }
+
+  clearMode = !clearMode;
+
+  if (clearMode) {
+    // Update preview to show background without text
+    if (window.currentContent) {
+      const liveCanvas = document.getElementById('live-canvas');
+      if (liveCanvas) {
+        const width = window.currentContent.width;
+        const height = window.currentContent.height;
+        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '' };
+        renderToCanvas(liveCanvas, contentWithoutText, width, height);
+      }
+    }
+    // Tell live window to enter clear mode
+    ipcRenderer.send('set-live-mode', 'clear');
+  } else {
+    // Turn off clear: restore preview and tell live window to return to normal
+    if (window.currentContent) {
+      const liveCanvas = document.getElementById('live-canvas');
+      if (liveCanvas) renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
+    }
+    ipcRenderer.send('set-live-mode', 'normal');
   }
 }
 
@@ -1170,7 +1161,26 @@ async function updateLive(verseOrIndices) {
       height: height,
       backgroundMedia: backgroundMedia
     };
-    renderToCanvas(liveCanvas, window.currentContent, width, height);
+    // If preview is in black or clear mode, reflect that in the preview canvas
+    if (blackMode) {
+      // Render solid black preview
+      const ctx = liveCanvas.getContext('2d');
+      liveCanvas.width = width;
+      liveCanvas.height = height;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+    } else if (clearMode) {
+      // Render background without text in preview
+      const contentWithoutText = {
+        ...window.currentContent,
+        number: '',
+        text: '',
+        reference: ''
+      };
+      renderToCanvas(liveCanvas, contentWithoutText, width, height);
+    } else {
+      renderToCanvas(liveCanvas, window.currentContent, width, height);
+    }
     
     // Text fade-in animation is applied only on external display (live.html)
     // Preview canvas shows instantly at full opacity
@@ -1186,7 +1196,8 @@ async function updateLive(verseOrIndices) {
     showingCount: indicesToShow.length,
     totalSelected: indices.length,
     backgroundMedia: backgroundMedia,
-    transitionIn: transitionSettings['fade-in']
+    transitionIn: transitionSettings['fade-in'],
+    transitionOut: transitionSettings['fade-out']
   });
 }
 
@@ -1305,6 +1316,9 @@ async function handleVerseDoubleClick(i) {
   // Check if we're in songs tab
   if (currentTab === 'songs') {
     if (selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+      // Respect current clear/black mode when going live from songs - do not force exit here
+      // (mode stays as user set it)
+      
       await updateLiveFromSongVerse(selectedSongVerseIndex);
       
       // Turn on the live display when going live
@@ -1331,6 +1345,8 @@ async function handleVerseDoubleClick(i) {
   } else {
     return; // nothing to do
   }
+
+  // Do not change clear/black mode here - respect user's current display mode
 
   await updateLive(indicesToGo);
   
@@ -1497,12 +1513,12 @@ async function saveLastSelectionToSettings() {
 }
 
 function toggleBlack() {
+  // If clear mode is active, switch directly to black on the live window (avoid flashing normal)
   if (clearMode) {
     clearMode = false;
-  }
-  blackMode = !blackMode;
-  if (blackMode) {
-    // Make preview canvas completely black
+    blackMode = true;
+
+    // Update preview to solid black
     const liveCanvas = document.getElementById('live-canvas');
     if (liveCanvas) {
       const width = window.currentContent ? window.currentContent.width : liveCanvas.width;
@@ -1513,17 +1529,37 @@ function toggleBlack() {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
     }
-    // Make live window completely black
-    ipcRenderer.send('set-live-black');
+
+    // Directly instruct live window to enter black mode
+    ipcRenderer.send('set-live-mode', 'black');
+    return;
+  }
+
+  blackMode = !blackMode;
+
+  if (blackMode) {
+    // Update preview to solid black
+    const liveCanvas = document.getElementById('live-canvas');
+    if (liveCanvas) {
+      const width = window.currentContent ? window.currentContent.width : liveCanvas.width;
+      const height = window.currentContent ? window.currentContent.height : liveCanvas.height;
+      liveCanvas.width = width;
+      liveCanvas.height = height;
+      const ctx = liveCanvas.getContext('2d');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+    }
+    // Tell live window to enter black mode
+    ipcRenderer.send('set-live-mode', 'black');
   } else {
-    // Restore content on both canvases
+    // Exit black: restore preview and tell live window to return to normal
     if (window.currentContent) {
       const liveCanvas = document.getElementById('live-canvas');
       if (liveCanvas) {
         renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
       }
     }
-    ipcRenderer.send('reset-live-canvas');
+    ipcRenderer.send('set-live-mode', 'normal');
   }
 }
 
@@ -2006,6 +2042,10 @@ function handleScheduleItemClick(itemIndex, event) {
 function handleScheduleItemDoubleClick(itemIndex) {
   const item = scheduleItems[itemIndex];
   const itemType = item.type || 'verses';
+  
+  // Disable clear/black mode when going live
+  if (clearMode) clearMode = false;
+  if (blackMode) blackMode = false;
   
   if (itemType === 'song') {
     // For songs, switch to songs tab and select the song
@@ -2856,7 +2896,8 @@ async function updateLiveFromSongVerse(verseIndex) {
     showingCount: 1,
     totalSelected: 1,
     backgroundMedia: backgroundMedia,
-    transitionIn: transitionSettings['fade-in']
+    transitionIn: transitionSettings['fade-in'],
+    transitionOut: transitionSettings['fade-out']
   });
 }
 
@@ -3110,56 +3151,160 @@ function exportSongs(songIndices) {
 function importSongs() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json';
+  input.accept = '.json,.txt,.rtf';
+  input.multiple = true;
   
-  input.onchange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  input.onchange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
     
-    const reader = new FileReader();
-    reader.onload = async (e) => {
+    let addedCount = 0;
+    
+    for (const file of files) {
+      const fileName = file.name;
+      const fileExt = path.extname(fileName).toLowerCase();
+      
       try {
-        const importedSongs = JSON.parse(e.target.result);
+        const fileContent = await file.text();
         
-        if (!Array.isArray(importedSongs)) {
-          alert('Invalid song file format');
-          return;
-        }
-        
-        // Add imported songs to allSongs
-        let addedCount = 0;
-        importedSongs.forEach(song => {
-          if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
-            // Check for duplicates
-            const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+        if (fileExt === '.json') {
+          // JSON import - array of songs
+          const importedSongs = JSON.parse(fileContent);
+          
+          if (!Array.isArray(importedSongs)) {
+            console.warn(`Skipping ${fileName}: not an array`);
+            continue;
+          }
+          
+          importedSongs.forEach(song => {
+            if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
+              const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+              if (!exists) {
+                allSongs.push(song);
+                addedCount++;
+              }
+            }
+          });
+        } else if (fileExt === '.txt' || fileExt === '.rtf') {
+          // Plain text or RTF import - one song per file
+          let plainText = fileContent;
+          
+          // Strip RTF formatting if RTF file
+          if (fileExt === '.rtf') {
+            plainText = stripRTF(fileContent);
+          }
+          
+          // Parse song using same logic as song editor
+          const songTitle = path.basename(fileName, fileExt);
+          const parsedSong = parseSongText(songTitle, plainText);
+          
+          if (parsedSong) {
+            const exists = allSongs.some(s => s.title === parsedSong.title && s.author === parsedSong.author);
             if (!exists) {
-              allSongs.push(song);
+              allSongs.push(parsedSong);
               addedCount++;
             }
           }
-        });
-        
-        if (addedCount > 0) {
-          // Save to file
-          const userData = await ipcRenderer.invoke('get-user-data-path');
-          const songsPath = path.join(userData, 'songs.json');
-          fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
-          
-          // Refresh display
-          renderSongList(allSongs);
-          alert(`Imported ${addedCount} song(s)`);
         } else {
-          alert('No new songs to import (duplicates skipped)');
+          console.warn(`Skipping ${fileName}: unsupported file type`);
         }
       } catch (err) {
-        console.error('Failed to import songs:', err);
-        alert('Failed to import songs: Invalid file format');
+        console.error(`Failed to import ${fileName}:`, err);
       }
-    };
-    reader.readAsText(file);
+    }
+    
+    if (addedCount > 0) {
+      // Save to file
+      try {
+        const userData = await ipcRenderer.invoke('get-user-data-path');
+        const songsPath = path.join(userData, 'songs.json');
+        fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+        
+        // Refresh display
+        renderSongList(allSongs);
+        alert(`Imported ${addedCount} song(s)`);
+      } catch (err) {
+        console.error('Failed to save imported songs:', err);
+        alert('Failed to save imported songs');
+      }
+    } else {
+      alert('No new songs to import (duplicates skipped or invalid files)');
+    }
   };
   
   input.click();
+}
+
+// Helper function to strip RTF formatting and extract plain text
+function stripRTF(rtfContent) {
+  // Basic RTF stripper - removes control words and groups
+  let text = rtfContent;
+  
+  // Remove RTF header and control groups
+  text = text.replace(/\{\\rtf1[^}]*\}/g, '');
+  
+  // Remove control words like \par, \pard, \tab, etc.
+  text = text.replace(/\\[a-z]+\d*/g, ' ');
+  
+  // Remove control symbols
+  text = text.replace(/\\[^a-z\s]/g, '');
+  
+  // Remove curly braces
+  text = text.replace(/[{}]/g, '');
+  
+  // Replace multiple spaces with single space
+  text = text.replace(/\s+/g, ' ');
+  
+  // Replace \par and similar with newlines
+  text = text.replace(/\\par\s*/g, '\n');
+  
+  // Clean up extra whitespace
+  text = text.trim();
+  
+  return text;
+}
+
+// Helper function to parse song text using same logic as song editor
+function parseSongText(title, lyricsText) {
+  const trimmedLyrics = lyricsText.trim();
+  
+  if (!trimmedLyrics) {
+    return null;
+  }
+  
+  // Parse sections from plaintext (same as saveSongFromEditor)
+  const sectionTexts = trimmedLyrics.split(/\n\n+/).filter(v => v.trim());
+  const sections = [];
+  
+  sectionTexts.forEach((text) => {
+    let sectionLabel = '';
+    let sectionContent = text.trim();
+    
+    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
+    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
+    if (tagMatch) {
+      sectionLabel = tagMatch[1].trim();
+      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+    } else {
+      // Default to "Verse" if no tag
+      sectionLabel = 'Verse';
+    }
+    
+    sections.push({
+      section: sectionLabel,
+      text: sectionContent
+    });
+  });
+  
+  if (sections.length === 0) {
+    return null;
+  }
+  
+  return {
+    title: title,
+    author: '',
+    lyrics: sections
+  };
 }
 
 // ========== SONG EDITOR ==========
@@ -4306,6 +4451,7 @@ async function displayMediaOnLive(media) {
     loop: media.loop,
     muted: media.muted,
     transitionIn: transitionSettings['fade-in'],
+    transitionOut: transitionSettings['fade-out'],
     isMedia: true
   });
   
@@ -4388,8 +4534,8 @@ async function displayMediaOnLive(media) {
 // ========== TRANSITION SYSTEM ==========
 
 let transitionSettings = {
-  'fade-in': { type: 'fade', duration: 1.0 },
-  'fade-out': { type: 'fade', duration: 1.0 }
+  'fade-in': { type: 'fade', duration: 0.4 },
+  'fade-out': { type: 'fade', duration: 0.4 }
 };
 
 // Load transition settings from config

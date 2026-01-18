@@ -364,7 +364,8 @@ ipcMain.handle('load-all-verses', async (event, baseDir) => {
 
 ipcMain.handle('create-live-window', async () => {
   if (liveWindow) {
-    liveWindow.showInactive();
+    liveWindow.show();
+    liveWindow.focus();
     return;
   }
   const settingsPath = path.join(app.getPath('userData'), 'settings.json');
@@ -378,6 +379,8 @@ ipcMain.handle('create-live-window', async () => {
   const display = displays.find(d => d.id == defaultDisplayId) || displays[0];
   if (display) {
     liveWindow = new BrowserWindow({
+      parent: null,
+      title: 'Liturgia Live',
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
@@ -385,14 +388,24 @@ ipcMain.handle('create-live-window', async () => {
       fullscreen: true,
       frame: false,
       show: false,
+      skipTaskbar: false,
+      alwaysOnTop: false,
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false
       }
     });
+    
+    // Set a different app user model ID for Windows to force separate taskbar icon
+    if (process.platform === 'win32') {
+      liveWindow.setAppDetails({
+        appId: 'com.liturgia.live'
+      });
+    }
+    
     liveWindow.loadFile('live.html');
     liveWindow.once('ready-to-show', () => {
-      liveWindow.showInactive();
+      liveWindow.show();
     });
     liveWindow.on('closed', () => {
       liveWindow = null;
@@ -426,4 +439,9 @@ ipcMain.on('set-live-black', () => {
 
 ipcMain.on('reset-live-canvas', () => {
   if (liveWindow) liveWindow.webContents.send('reset-live-canvas');
+});
+
+// Forward unified mode messages to live window
+ipcMain.on('set-live-mode', (event, mode) => {
+  if (liveWindow) liveWindow.webContents.send('set-live-mode', mode);
 });

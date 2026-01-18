@@ -242,9 +242,9 @@
     /**
      * Apply fade-out animation to remove current text
      */
-    function applyTextFadeOutAnimation(duration = 1, animationType = 'fade', callback) {
+    function applyTextFadeOutAnimation(oldContent, duration = 1, animationType = 'fade', callback) {
       // Check if there's actually content to fade out
-      if (!currentRenderContent || !currentRenderContent.text) {
+      if (!oldContent || !oldContent.text) {
         if (callback) callback();
         return;
       }
@@ -253,52 +253,144 @@
       const width = currentRenderWidth;
       const height = currentRenderHeight;
       
-      // Capture the current canvas state before fading out
-      const currentImageData = ctx.getImageData(0, 0, width, height);
-      const currentData = new Uint8ClampedArray(currentImageData.data);
+      // Capture the current BACKGROUND only (we'll fade out text separately)
+      const backgroundImageData = ctx.getImageData(0, 0, width, height);
+      
+      // Pre-render the OLD text to an off-screen canvas (use same logic as fade-in)
+      const textCanvas = document.createElement('canvas');
+      textCanvas.width = width;
+      textCanvas.height = height;
+      const textCtx = textCanvas.getContext('2d');
+      textCtx.clearRect(0, 0, width, height);
+      
+      // Render OLD text to off-screen canvas using proper wrapping
+      textCtx.fillStyle = '#fff';
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+      
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      let baseFontSize = height * 0.08;
+      
+      // Render verse number (top left)
+      if (oldContent.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
+      }
+      
+      // Render verse text (center) - use proper wrapping logic
+      if (oldContent.text) {
+        textCtx.textAlign = 'center';
+        const textY = height / 2;
+        const textLines = oldContent.text.split('\n');
+        const allLines = [];
+        
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          textCtx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          allLines.push(...wrappedLines);
+        });
+        
+        let lines = allLines;
+        
+        // Size adjustment - grow font if space allows
+        while (true) {
+          const testSize = baseFontSize + 4;
+          textCtx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else {
+            break;
+          }
+        }
+        
+        // Shrink font if needed
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          textCtx.font = `${baseFontSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
+        }
+        
+        // Render lines with proper positioning
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+        
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+        });
+      }
+      
+      // Render reference (bottom right)
+      if (oldContent.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillText(oldContent.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+
+      // Easing helper (smooth acceleration/deceleration)
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
       const animate = () => {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / (duration * 1000), 1);
-        const reverseProgress = 1 - progress; // For fade-out, reverse the progress
+        const eased = easeInOutCubic(progress);
+        const reverseEased = 1 - eased; // For fade-out easing
 
-        // Don't re-render background during fade-out, just animate the existing content
-        // Apply fade-out effect
+        // Restore background first
+        ctx.putImageData(backgroundImageData, 0, 0);
+
+        // Ensure smooth sub-pixel rendering
+        ctx.imageSmoothingEnabled = true;
+
+        // Apply fade-out effect to TEXT ONLY (use eased values)
         if (animationType === 'fade') {
-          // Fade out: gradually reduce alpha
-          const data = currentImageData.data;
-          for (let i = 3; i < data.length; i += 4) {
-            data[i] = Math.round(currentData[i] * reverseProgress);
-          }
-          ctx.putImageData(currentImageData, 0, 0);
+          ctx.globalAlpha = reverseEased;
+          ctx.drawImage(textCanvas, 0, 0);
+          ctx.globalAlpha = 1;
         } else if (animationType === 'slide-left') {
-          // Slide out to left
-          const offset = Math.round((progress) * width);
-          ctx.putImageData(currentImageData, -offset, 0);
+          // Slide out to left using fractional offset
+          const offset = eased * width;
+          ctx.drawImage(textCanvas, -offset, 0);
         } else if (animationType === 'slide-right') {
-          // Slide out to right
-          const offset = Math.round((progress) * width);
-          ctx.putImageData(currentImageData, offset, 0);
+          // Slide out to right using fractional offset
+          const offset = eased * width;
+          ctx.drawImage(textCanvas, offset, 0);
         } else if (animationType === 'slide-up') {
-          // Slide out upward
-          const offset = Math.round((progress) * height);
-          ctx.putImageData(currentImageData, 0, -offset);
+          const offset = eased * height;
+          ctx.drawImage(textCanvas, 0, -offset);
         } else if (animationType === 'slide-down') {
-          // Slide out downward
-          const offset = Math.round((progress) * height);
-          ctx.putImageData(currentImageData, 0, offset);
+          const offset = eased * height;
+          ctx.drawImage(textCanvas, 0, offset);
         }
 
         if (progress < 1) {
-          requestAnimationFrame(animate);
+          currentAnimationFrameId = requestAnimationFrame(animate);
         } else {
           // Animation complete
+          currentAnimationFrameId = null;
           if (callback) callback();
         }
       };
 
       // Run first frame synchronously to start animation immediately
-      animate();
+      currentAnimationFrameId = requestAnimationFrame(animate);
     }
     
     /**
@@ -403,10 +495,14 @@
       
       let backgroundImageData = null; // Will be captured on first animate call
       
+      // Easing helper (smooth acceleration/deceleration)
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
       const animate = () => {
         const elapsed = (Date.now() - startTime) / 1000;
         const progress = Math.min(elapsed / duration, 1);
-        
+        const eased = easeInOutCubic(progress);
+
         // Capture background on first frame (when it's guaranteed to be properly rendered)
         if (!backgroundImageData) {
           backgroundImageData = ctx.getImageData(0, 0, width, height);
@@ -414,46 +510,47 @@
         
         // Restore the captured background each frame
         ctx.putImageData(backgroundImageData, 0, 0);
+
+        // Ensure smooth sub-pixel rendering
+        ctx.imageSmoothingEnabled = true;
         
-        // Apply animation based on type
+        // Apply animation based on type (use eased progress)
         if (animationType === 'fade') {
-          // Fade in: use drawImage with globalAlpha to respect transparency
-          ctx.globalAlpha = progress;
+          ctx.globalAlpha = eased;
           ctx.drawImage(textCanvas, 0, 0);
           ctx.globalAlpha = 1;
         } else if (animationType === 'slide-left') {
-          // Slide in from right to left - use drawImage for transparency support
-          const offset = Math.round((1 - progress) * width);
+          // Slide in from right to left - fractional offset
+          const offset = (1 - eased) * width;
           ctx.globalAlpha = 1;
           ctx.drawImage(textCanvas, offset, 0);
         } else if (animationType === 'slide-right') {
-          // Slide in from left to right - use drawImage for transparency support
-          const offset = Math.round((progress - 1) * width);
+          // Slide in from left to right - fractional offset
+          const offset = (eased - 1) * width;
           ctx.globalAlpha = 1;
           ctx.drawImage(textCanvas, offset, 0);
         } else if (animationType === 'slide-up') {
-          // Slide in from bottom to top - use drawImage for transparency support
-          const offset = Math.round((1 - progress) * height);
+          const offset = (1 - eased) * height;
           ctx.globalAlpha = 1;
           ctx.drawImage(textCanvas, 0, offset);
         } else if (animationType === 'slide-down') {
-          // Slide in from top to bottom - use drawImage for transparency support
-          const offset = Math.round((progress - 1) * height);
+          const offset = (eased - 1) * height;
           ctx.globalAlpha = 1;
           ctx.drawImage(textCanvas, 0, offset);
         }
         
         if (progress < 1) {
-          requestAnimationFrame(animate);
+          currentAnimationFrameId = requestAnimationFrame(animate);
         } else {
           // Animation complete - draw final text using drawImage to respect transparency
+          currentAnimationFrameId = null;
           ctx.globalAlpha = 1;
           ctx.drawImage(textCanvas, 0, 0);
           if (callback) callback();
         }
       };
       
-      animate();
+      currentAnimationFrameId = requestAnimationFrame(animate);
     }
     
     /**
@@ -462,18 +559,13 @@
     function renderContent(renderContent_content) {
       window.currentContent = renderContent_content;
       
-      // Set transitionOut based on transitionIn settings (same type/duration) for verse content
-      if (renderContent_content.isMedia === false && renderContent_content.transitionIn && !renderContent_content.transitionOut) {
-        renderContent_content.transitionOut = {
-          type: renderContent_content.transitionIn.type || 'fade',
-          duration: renderContent_content.transitionIn.duration || 1
-        };
-      }
-      
       console.log('Live window renderContent called with:', renderContent_content);
       
       const width = canvas.width;
       const height = canvas.height;
+      
+      // IMPORTANT: Store OLD content before updating currentRenderContent
+      const oldContent = currentRenderContent ? { ...currentRenderContent } : null;
       
       // Store in module-level variables for helper functions
       currentRenderContent = renderContent_content;
@@ -589,11 +681,15 @@
                                    renderContent_content.text && 
                                    window.previousContent !== renderContent_content;
         
-        if (hasPreviousContent && renderContent_content.transitionOut) {
+        if (hasPreviousContent) {
+          // Use previous content's transitionOut if provided, otherwise fall back to transitionIn
+          const transitionOut = window.previousContent.transitionOut || window.previousContent.transitionIn || { duration: 0.4, type: 'fade' };
+          
           // Fade out old content, then fade in new content
           applyTextFadeOutAnimation(
-            renderContent_content.transitionOut.duration,
-            renderContent_content.transitionOut.type || 'fade',
+            oldContent,
+            transitionOut.duration,
+            transitionOut.type || 'fade',
             () => {
               // After fade-out completes, re-render the background before fade-in
               // Black background is the fallback - render it first
@@ -946,28 +1042,214 @@
      * Render content to canvas
      */
     
-    ipcRenderer.on('update-content', (event, data) => {
+    // Unified mode setter for clear/black/normal; centralizes transitions and avoids IPC races
+    function setLiveMode(mode) {
+      console.debug('[live] setLiveMode ->', mode);
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+
+      if (mode === 'black') {
+        console.debug('[live] entering black mode');
+        isClearMode = false;
+        isBlackMode = true;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+        return;
+      }
+
+      if (mode === 'clear') {
+        // If already clear, no-op
+        if (isClearMode) return;
+        isClearMode = true;
+        isBlackMode = false;
+
+        // If there's visible text on screen, fade it out; otherwise just show background
+        const hasVisibleText = currentRenderContent && currentRenderContent.text;
+        const width = canvas.width;
+        const height = canvas.height;
+        const transitionSettings = window.currentContent && window.currentContent.transitionIn ? window.currentContent.transitionIn : { duration: 0.4, type: 'fade' };
+
+        const renderBackground = () => {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          if (window.currentContent && window.currentContent.backgroundMedia) {
+            const media = window.currentContent.backgroundMedia;
+            if (media.type === 'COLOR') {
+              applyColorToCanvas(ctx, media.color, width, height);
+            } else if (media.type === 'JPG' || media.type === 'PNG') {
+              const bgImg = new Image();
+              bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: media.bgSize || 'cover', bgRepeat: media.bgRepeat || 'no-repeat', bgPosition: media.bgPosition || 'center' });
+              const fileURL = media.path.replace(/\\/g, '/');
+              bgImg.src = `file:///${fileURL}`;
+            }
+          }
+        };
+
+        if (hasVisibleText) {
+          const oldContent = { ...currentRenderContent };
+          renderBackground();
+          applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
+            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+          });
+        } else {
+          renderBackground();
+          currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+        }
+
+        return;
+      }
+
+      // mode === 'normal'
       isClearMode = false;
       isBlackMode = false;
+      if (window.currentContent) renderContent(window.currentContent);
+    }
+
+    ipcRenderer.on('update-content', (event, data) => {
+      // Update underlying content data
+      window.currentContent = data;
+
+      // Respect current mode: keep screen black or cleared if those modes are active
+      if (isBlackMode) {
+        // Keep black screen; currentRenderContent should reflect no text
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        currentRenderContent = {
+          ...window.currentContent,
+          number: '',
+          text: '',
+          reference: ''
+        };
+        return;
+      }
+
+      if (isClearMode) {
+        // Keep background visible but no text
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        if (window.currentContent && window.currentContent.backgroundMedia) {
+          const media = window.currentContent.backgroundMedia;
+          if (media.type === 'COLOR') {
+            applyColorToCanvas(ctx, media.color, width, height);
+          } else if (media.type === 'JPG' || media.type === 'PNG') {
+            const bgImg = new Image();
+            bgImg.onload = () => {
+              drawImageWithSettings(ctx, bgImg, width, height, {
+                bgSize: media.bgSize || 'cover',
+                bgRepeat: media.bgRepeat || 'no-repeat',
+                bgPosition: media.bgPosition || 'center'
+              });
+            };
+            const fileURL = media.path.replace(/\\/g, '/');
+            bgImg.src = `file:///${fileURL}`;
+          }
+        }
+        currentRenderContent = {
+          ...window.currentContent,
+          number: '',
+          text: '',
+          reference: ''
+        };
+        return;
+      }
+
+      // Default: render normally
       renderContent(data);
     });
     
-    ipcRenderer.on('clear-live-text', () => {
-      isClearMode = true;
-      isBlackMode = false;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    });
+    // Legacy handler delegates to setLiveMode
+    ipcRenderer.on('clear-live-text', () => setLiveMode('clear'));
+
+    // Legacy set-live-black delegates to setLiveMode
+    ipcRenderer.on('set-live-black', () => setLiveMode('black'));
+
+    // Legacy reset-live-canvas delegates to normal mode
+    ipcRenderer.on('reset-live-canvas', () => setLiveMode('normal'));
+
+    // New unified mode handler
+    ipcRenderer.on('set-live-mode', (event, mode) => setLiveMode(mode));
     
     ipcRenderer.on('show-live-text', () => {
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
       isClearMode = false;
       isBlackMode = false;
+      
       if (window.currentContent) {
-        renderContent(window.currentContent);
+        // Restore content with fade-in transition
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Update currentRenderContent first
+        currentRenderContent = window.currentContent;
+        currentRenderWidth = width;
+        currentRenderHeight = height;
+        
+        // Render background first
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        if (window.currentContent.backgroundMedia) {
+          const media = window.currentContent.backgroundMedia;
+          if (media.type === 'COLOR') {
+            applyColorToCanvas(ctx, media.color, width, height);
+            // Then fade in text
+            if (window.currentContent.transitionIn) {
+              applyTextFadeInAnimation(
+                window.currentContent.transitionIn.duration,
+                window.currentContent.transitionIn.type || 'fade'
+              );
+            }
+          } else if (media.type === 'JPG' || media.type === 'PNG') {
+            const bgImg = new Image();
+            bgImg.onload = () => {
+              drawImageWithSettings(ctx, bgImg, width, height, {
+                bgSize: media.bgSize || 'cover',
+                bgRepeat: media.bgRepeat || 'no-repeat',
+                bgPosition: media.bgPosition || 'center'
+              });
+              // Then fade in text
+              if (window.currentContent.transitionIn) {
+                applyTextFadeInAnimation(
+                  window.currentContent.transitionIn.duration,
+                  window.currentContent.transitionIn.type || 'fade'
+                );
+              }
+            };
+            const fileURL = media.path.replace(/\\/g, '/');
+            bgImg.src = `file:///${fileURL}`;
+          }
+        } else {
+          // No background media, just fade in text
+          if (window.currentContent.transitionIn) {
+            applyTextFadeInAnimation(
+              window.currentContent.transitionIn.duration,
+              window.currentContent.transitionIn.type || 'fade'
+            );
+          }
+        }
       }
     });
     
     ipcRenderer.on('set-live-black', () => {
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
       isClearMode = false;
       isBlackMode = true;
       ctx.fillStyle = '#000';
@@ -975,6 +1257,12 @@
     });
     
     ipcRenderer.on('reset-live-canvas', () => {
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
       isClearMode = false;
       isBlackMode = false;
       if (window.currentContent) {
