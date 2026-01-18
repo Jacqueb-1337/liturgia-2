@@ -553,6 +553,212 @@
       currentAnimationFrameId = requestAnimationFrame(animate);
     }
     
+    // Helper: compare backgrounds (supports backgroundMedia and legacy backgroundPath)
+    function backgroundsEqual(a, b) {
+      if (!a && !b) return true;
+      if (!a || !b) return false;
+      // If media objects
+      if (a.backgroundMedia || b.backgroundMedia) {
+        const am = a.backgroundMedia || a;
+        const bm = b.backgroundMedia || b;
+        if (am.type !== bm.type) return false;
+        if (am.type === 'COLOR') return am.color === bm.color;
+        // For images/videos compare path
+        if (am.path && bm.path) return am.path === bm.path;
+        return false;
+      }
+      // Legacy backgroundPath or color
+      if (a.backgroundPath || b.backgroundPath) {
+        return (a.backgroundPath || '') === (b.backgroundPath || '');
+      }
+      return false;
+    }
+
+    // Helper: render only the background portion of content to an offscreen canvas
+    function renderBackgroundToCanvas(content, canvas) {
+      return new Promise((resolve) => {
+        const ctxLocal = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        ctxLocal.fillStyle = '#000';
+        ctxLocal.fillRect(0, 0, width, height);
+
+        const media = content && (content.backgroundMedia || null);
+        if (media && media.type === 'COLOR') {
+          applyColorToCanvas(ctxLocal, media.color, width, height);
+          resolve();
+          return;
+        }
+
+        // Legacy backgroundPath handling
+        const pathToImg = content && (content.backgroundPath || (media && media.path));
+        if (pathToImg) {
+          const img = new Image();
+          img.onload = () => {
+            drawImageWithSettings(ctxLocal, img, width, height, {
+              bgSize: (media && media.bgSize) || 'cover',
+              bgRepeat: (media && media.bgRepeat) || 'no-repeat',
+              bgPosition: (media && media.bgPosition) || 'center'
+            });
+            resolve();
+          };
+          img.onerror = () => {
+            // Fallback to black
+            ctxLocal.fillStyle = '#000';
+            ctxLocal.fillRect(0, 0, width, height);
+            resolve();
+          };
+          img.src = pathToImg.replace(/\\/g, '/').replace(/^\//, '');
+          return;
+        }
+
+        // No media: nothing else to draw
+        resolve();
+      });
+    }
+
+    // Helper: render text-only to an offscreen canvas (same layout logic used elsewhere)
+    function renderTextToCanvas(content) {
+      const canvas = document.createElement('canvas');
+      canvas.width = currentRenderWidth || window.innerWidth;
+      canvas.height = currentRenderHeight || window.innerHeight;
+      const textCtx = canvas.getContext('2d');
+      textCtx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!content || !content.text) return canvas;
+
+      textCtx.fillStyle = '#fff';
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+      const padding = canvas.width * 0.02;
+      const availableWidth = canvas.width - (padding * 2);
+      const availableHeight = canvas.height - (padding * 2);
+      let baseFontSize = canvas.height * 0.08;
+
+      // Verse number
+      if (content.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+
+      // Render verse text
+      const textY = canvas.height / 2;
+      const textLines = content.text.split('\n');
+      const allLines = [];
+      textLines.forEach(textLine => {
+        const segments = parseVerseSegments(textLine);
+        textCtx.font = `${baseFontSize}px Arial`;
+        const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+        allLines.push(...wrappedLines);
+      });
+
+      let lines = allLines;
+      // Grow font if space
+      while (true) {
+        const testSize = baseFontSize + 4;
+        textCtx.font = `${testSize}px Arial`;
+        const testLines = [];
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+          testLines.push(...wrappedLines);
+        });
+        if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < canvas.height * 0.15) {
+          baseFontSize = testSize;
+          lines = testLines;
+        } else break;
+      }
+
+      while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+        baseFontSize -= 2;
+        textCtx.font = `${baseFontSize}px Arial`;
+        const testLines = [];
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          testLines.push(...wrappedLines);
+        });
+        lines = testLines;
+      }
+
+      // Draw lines
+      const lineHeight = baseFontSize * 1.2;
+      const totalHeight = lines.length * lineHeight;
+      const startY = textY - (totalHeight / 2);
+      lines.forEach((line, i) => {
+        renderLineWithSubscripts(line, canvas.width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+      });
+
+      // Reference
+      if (content.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillText(content.reference, canvas.width - padding, canvas.height - padding - baseFontSize * 0.3);
+      }
+
+      return canvas;
+    }
+
+    // Apply a simple background cross-fade between two contents (text remains on top)
+    async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4) {
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      const oldBgCanvas = document.createElement('canvas');
+      oldBgCanvas.width = width; oldBgCanvas.height = height;
+      const newBgCanvas = document.createElement('canvas');
+      newBgCanvas.width = width; newBgCanvas.height = height;
+
+      // Render both backgrounds (await images to load when necessary)
+      await Promise.all([
+        renderBackgroundToCanvas(oldContent, oldBgCanvas),
+        renderBackgroundToCanvas(newContent, newBgCanvas)
+      ]);
+
+      // Pre-render text from newContent (keep text stable during background fade)
+      const textCanvas = renderTextToCanvas(newContent);
+
+      const startTime = Date.now();
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / (duration * 1000), 1);
+        const eased = easeInOutCubic(progress);
+
+        // Draw blended backgrounds
+        ctx.clearRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+
+        // Draw old bg with (1 - eased)
+        if (eased < 1) {
+          ctx.globalAlpha = 1 - eased;
+          ctx.drawImage(oldBgCanvas, 0, 0);
+        }
+        // Draw new bg with eased
+        ctx.globalAlpha = eased;
+        ctx.drawImage(newBgCanvas, 0, 0);
+        ctx.globalAlpha = 1;
+
+        // Draw text on top
+        if (textCanvas) ctx.drawImage(textCanvas, 0, 0);
+
+        if (progress < 1) {
+          currentAnimationFrameId = requestAnimationFrame(animate);
+        } else {
+          currentAnimationFrameId = null;
+        }
+      };
+
+      currentAnimationFrameId = requestAnimationFrame(animate);
+    }
+
     /**
      * Render verse content to canvas
      */
@@ -571,6 +777,16 @@
       currentRenderContent = renderContent_content;
       currentRenderWidth = width;
       currentRenderHeight = height;
+      
+      // If only the background changed, perform a background-only crossfade and keep text
+      if (oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
+        const dur = (renderContent_content && renderContent_content.transitionIn && renderContent_content.transitionIn.duration) ? renderContent_content.transitionIn.duration : 0.4;
+        applyBackgroundCrossfade(oldContent, renderContent_content, dur);
+        // Don't continue with normal rendering (crossfade draws the backgrounds and text)
+        // Store previous content for future out transitions
+        window.previousContent = renderContent_content;
+        return;
+      }
       
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
