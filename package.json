@@ -9,9 +9,19 @@
   "build": {
     "appId": "com.jacqueb.liturgia",
     "productName": "Liturgia",
-    "icon": "logo.png",
+    "icon": "build/icon.ico",
     "win": {
-      "target": "portable"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "true",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Liturgia",
+      "runAfterFinish": false
     }
   },
   "devDependencies": {
