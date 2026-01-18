@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Live Display</title>
+  <title>Liturgia Live Display</title>
   <style>
     html, body {
       margin: 0;
@@ -53,6 +53,9 @@
       align-items: center;
       justify-content: center;
     }
+    /* Inline verse number style for live multi-verse passages */
+    #live-text p { margin: 0; }
+    #live-text p sub.verse-num { font-size: 0.65em; vertical-align: sub; margin-right: 6px; opacity: 0.9; }
     #live-reference {
       font-size: 0.8em;
       align-self: flex-end;
@@ -61,58 +64,1213 @@
   </style>
 </head>
 <body>
-  <div id="live-container">
-    <div id="live-content">
-      <div id="live-number"></div>
-      <div id="live-text"></div>
-      <div id="live-reference"></div>
-    </div>
-  </div>
+  <canvas id="live-canvas" style="width: 100vw; height: 100vh; display: block;"></canvas>
   <script>
     const { ipcRenderer } = require('electron');
-    ipcRenderer.on('update-content', (event, data) => {
-      document.getElementById('live-number').textContent = data.number;
-      document.getElementById('live-text').textContent = data.text;
-      document.getElementById('live-reference').textContent = data.reference;
-      if (data.styles) {
-        // apply styles first
-        Object.keys(data.styles).forEach(key => {
-          const el = document.getElementById('live-' + key.toLowerCase().replace('verse', ''));
-          if (el && data.styles[key] && data.styles[key] !== '') {
-            try {
-              el.style.cssText = atob(data.styles[key]);
-            } catch (e) {
-              console.error('Error decoding style:', e);
-            }
+    
+    const canvas = document.getElementById('live-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Track state for clear/black modes
+    let isClearMode = false;
+    let isBlackMode = false;
+    
+    // Set canvas to actual display resolution
+    function resizeCanvas() {
+      canvas.width = window.screen.width;
+      canvas.height = window.screen.height;
+      // Redraw based on current mode
+      if (isBlackMode || isClearMode) {
+        // Just fill with black
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      } else if (window.currentContent) {
+        renderContent(window.currentContent);
+      }
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    function drawImageWithSettings(ctx, img, canvasWidth, canvasHeight, settings = {}) {
+      const bgSize = settings.bgSize || 'cover';
+      const bgRepeat = settings.bgRepeat || 'no-repeat';
+      const bgPosition = settings.bgPosition || 'center';
+      
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      
+      let drawWidth, drawHeight, scale;
+      
+      // Calculate dimensions based on background-size
+      if (bgSize === 'cover') {
+        scale = Math.max(canvasWidth / img.width, canvasHeight / img.height);
+        drawWidth = img.width * scale;
+        drawHeight = img.height * scale;
+      } else if (bgSize === 'contain') {
+        scale = Math.min(canvasWidth / img.width, canvasHeight / img.height);
+        drawWidth = img.width * scale;
+        drawHeight = img.height * scale;
+      } else if (bgSize === '100% 100%') {
+        drawWidth = canvasWidth;
+        drawHeight = canvasHeight;
+      } else { // 'auto' - original size
+        drawWidth = img.width;
+        drawHeight = img.height;
+      }
+      
+      // Calculate position
+      let startX = 0, startY = 0;
+      if (bgPosition.includes('center') || bgPosition === 'center') {
+        startX = (canvasWidth - drawWidth) / 2;
+        startY = (canvasHeight - drawHeight) / 2;
+      } else {
+        const positions = bgPosition.split(' ');
+        const posX = positions[0] || 'center';
+        const posY = positions[1] || 'center';
+        
+        if (posX === 'left') startX = 0;
+        else if (posX === 'right') startX = canvasWidth - drawWidth;
+        else if (posX === 'center') startX = (canvasWidth - drawWidth) / 2;
+        
+        if (posY === 'top') startY = 0;
+        else if (posY === 'bottom') startY = canvasHeight - drawHeight;
+        else if (posY === 'center') startY = (canvasHeight - drawHeight) / 2;
+      }
+      
+      // Handle repeat
+      if (bgRepeat === 'no-repeat') {
+        ctx.drawImage(img, startX, startY, drawWidth, drawHeight);
+      } else if (bgRepeat === 'repeat') {
+        for (let x = startX % drawWidth - drawWidth; x < canvasWidth; x += drawWidth) {
+          for (let y = startY % drawHeight - drawHeight; y < canvasHeight; y += drawHeight) {
+            ctx.drawImage(img, x, y, drawWidth, drawHeight);
           }
+        }
+      } else if (bgRepeat === 'repeat-x') {
+        for (let x = startX % drawWidth - drawWidth; x < canvasWidth; x += drawWidth) {
+          ctx.drawImage(img, x, startY, drawWidth, drawHeight);
+        }
+      } else if (bgRepeat === 'repeat-y') {
+        for (let y = startY % drawHeight - drawHeight; y < canvasHeight; y += drawHeight) {
+          ctx.drawImage(img, startX, y, drawWidth, drawHeight);
+        }
+      }
+    }
+    
+    function applyColorToCanvas(ctx, colorCSS, width, height) {
+      // Check if it's a gradient
+      if (colorCSS.startsWith('linear-gradient')) {
+        // Parse linear-gradient(135deg, #667eea, #764ba2)
+        const match = colorCSS.match(/linear-gradient\((\d+)deg,\s*([^,]+),\s*(.+)\)/);
+        if (match) {
+          const angle = parseInt(match[1]);
+          const color1 = match[2].trim();
+          const color2 = match[3].trim();
+          
+          // Convert angle to radians and calculate gradient direction
+          const angleRad = (angle - 90) * Math.PI / 180;
+          const x1 = width / 2 + Math.cos(angleRad) * width / 2;
+          const y1 = height / 2 + Math.sin(angleRad) * height / 2;
+          const x2 = width / 2 - Math.cos(angleRad) * width / 2;
+          const y2 = height / 2 - Math.sin(angleRad) * height / 2;
+          
+          const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+          gradient.addColorStop(0, color1);
+          gradient.addColorStop(1, color2);
+          ctx.fillStyle = gradient;
+        }
+      } else if (colorCSS.startsWith('radial-gradient')) {
+        // Parse radial-gradient(circle, #667eea, #764ba2)
+        const match = colorCSS.match(/radial-gradient\(circle,\s*([^,]+),\s*(.+)\)/);
+        if (match) {
+          const color1 = match[1].trim();
+          const color2 = match[2].trim();
+          
+          const gradient = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) / 2);
+          gradient.addColorStop(0, color1);
+          gradient.addColorStop(1, color2);
+          ctx.fillStyle = gradient;
+        }
+      } else {
+        // Solid color
+        ctx.fillStyle = colorCSS;
+      }
+      ctx.fillRect(0, 0, width, height);
+    }
+    
+    /**
+     * Apply fade-in animation to canvas
+     */
+    function applyFadeInAnimation(duration = 1.0, callback = null) {
+      const startTime = Date.now();
+      const originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      const animate = () => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Create a copy of the image data with adjusted alpha
+        const imageData = ctx.createImageData(originalImageData);
+        const data = imageData.data;
+        const originalData = originalImageData.data;
+        
+        // Adjust alpha channel for all pixels
+        for (let i = 3; i < data.length; i += 4) {
+          data[i] = Math.round(originalData[i] * progress);
+        }
+        
+        // Clear canvas and redraw with faded image
+        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.putImageData(imageData, 0, 0);
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          ctx.putImageData(originalImageData, 0, 0);
+          if (callback) callback();
+        }
+      };
+      
+      animate();
+    }
+    
+    let currentRenderContent = null;
+    let currentRenderWidth = 0;
+    let currentRenderHeight = 0;
+    
+    /**
+     * Apply fade-out animation to remove current text
+     */
+    function applyTextFadeOutAnimation(oldContent, duration = 1, animationType = 'fade', callback) {
+      // Check if there's actually content to fade out
+      if (!oldContent || !oldContent.text) {
+        if (callback) callback();
+        return;
+      }
+
+      const startTime = Date.now();
+      const width = currentRenderWidth;
+      const height = currentRenderHeight;
+      
+      // Capture the current BACKGROUND only (we'll fade out text separately)
+      const backgroundImageData = ctx.getImageData(0, 0, width, height);
+      
+      // Pre-render the OLD text to an off-screen canvas (use same logic as fade-in)
+      const textCanvas = document.createElement('canvas');
+      textCanvas.width = width;
+      textCanvas.height = height;
+      const textCtx = textCanvas.getContext('2d');
+      textCtx.clearRect(0, 0, width, height);
+      
+      // Render OLD text to off-screen canvas using proper wrapping
+      textCtx.fillStyle = '#fff';
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+      
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      let baseFontSize = height * 0.08;
+      
+      // Render verse number (top left)
+      if (oldContent.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
+      }
+      
+      // Render verse text (center) - use proper wrapping logic
+      if (oldContent.text) {
+        textCtx.textAlign = 'center';
+        const textY = height / 2;
+        const textLines = oldContent.text.split('\n');
+        const allLines = [];
+        
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          textCtx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          allLines.push(...wrappedLines);
+        });
+        
+        let lines = allLines;
+        
+        // Size adjustment - grow font if space allows
+        while (true) {
+          const testSize = baseFontSize + 4;
+          textCtx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else {
+            break;
+          }
+        }
+        
+        // Shrink font if needed
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          textCtx.font = `${baseFontSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
+        }
+        
+        // Render lines with proper positioning
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+        
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
         });
       }
-      // then set font sizes
-      if (data.numberFontSize) document.getElementById('live-number').style.fontSize = data.numberFontSize;
-      if (data.textFontSize) document.getElementById('live-text').style.fontSize = data.textFontSize;
+      
+      // Render reference (bottom right)
+      if (oldContent.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillText(oldContent.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+
+      // Easing helper (smooth acceleration/deceleration)
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / (duration * 1000), 1);
+        const eased = easeInOutCubic(progress);
+        const reverseEased = 1 - eased; // For fade-out easing
+
+        // Restore background first
+        ctx.putImageData(backgroundImageData, 0, 0);
+
+        // Ensure smooth sub-pixel rendering
+        ctx.imageSmoothingEnabled = true;
+
+        // Apply fade-out effect to TEXT ONLY (use eased values)
+        if (animationType === 'fade') {
+          ctx.globalAlpha = reverseEased;
+          ctx.drawImage(textCanvas, 0, 0);
+          ctx.globalAlpha = 1;
+        } else if (animationType === 'slide-left') {
+          // Slide out to left using fractional offset
+          const offset = eased * width;
+          ctx.drawImage(textCanvas, -offset, 0);
+        } else if (animationType === 'slide-right') {
+          // Slide out to right using fractional offset
+          const offset = eased * width;
+          ctx.drawImage(textCanvas, offset, 0);
+        } else if (animationType === 'slide-up') {
+          const offset = eased * height;
+          ctx.drawImage(textCanvas, 0, -offset);
+        } else if (animationType === 'slide-down') {
+          const offset = eased * height;
+          ctx.drawImage(textCanvas, 0, offset);
+        }
+
+        if (progress < 1) {
+          currentAnimationFrameId = requestAnimationFrame(animate);
+        } else {
+          // Animation complete
+          currentAnimationFrameId = null;
+          if (callback) callback();
+        }
+      };
+
+      // Run first frame synchronously to start animation immediately
+      currentAnimationFrameId = requestAnimationFrame(animate);
+    }
+    
+    /**
+     * Apply text animation with support for fade and slide effects
+     */
+    function applyTextFadeInAnimation(duration = 1.0, animationType = 'fade', callback = null) {
+      const startTime = Date.now();
+      const content = currentRenderContent;
+      const width = currentRenderWidth;
+      const height = currentRenderHeight;
+      
+      // Pre-render text to an off-screen canvas
+      const textCanvas = document.createElement('canvas');
+      textCanvas.width = width;
+      textCanvas.height = height;
+      const textCtx = textCanvas.getContext('2d');
+      
+      // Clear canvas to TRANSPARENT (not black) so only white text shows
+      textCtx.clearRect(0, 0, width, height);
+      
+      // Render text to off-screen canvas
+      textCtx.fillStyle = '#fff';
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+      
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      let baseFontSize = height * 0.08;
+      
+      // Render verse number (top left)
+      if (content.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+      
+      // Render verse text (center) - simplified for off-screen rendering
+      if (content.text) {
+        textCtx.textAlign = 'center';
+        const textY = height / 2;
+        const textLines = content.text.split('\n');
+        const allLines = [];
+        
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          textCtx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          allLines.push(...wrappedLines);
+        });
+        
+        let lines = allLines;
+        
+        // Size adjustment
+        while (true) {
+          const testSize = baseFontSize + 4;
+          textCtx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else {
+            break;
+          }
+        }
+        
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          textCtx.font = `${baseFontSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
+        }
+        
+        // Render lines
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+        
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+        });
+      }
+      
+      // Render reference (bottom right)
+      if (content.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+      
+      const textImageData = textCtx.getImageData(0, 0, width, height);
+      
+      let backgroundImageData = null; // Will be captured on first animate call
+      
+      // Easing helper (smooth acceleration/deceleration)
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+      const animate = () => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = easeInOutCubic(progress);
+
+        // Capture background on first frame (when it's guaranteed to be properly rendered)
+        if (!backgroundImageData) {
+          backgroundImageData = ctx.getImageData(0, 0, width, height);
+        }
+        
+        // Restore the captured background each frame
+        ctx.putImageData(backgroundImageData, 0, 0);
+
+        // Ensure smooth sub-pixel rendering
+        ctx.imageSmoothingEnabled = true;
+        
+        // Apply animation based on type (use eased progress)
+        if (animationType === 'fade') {
+          ctx.globalAlpha = eased;
+          ctx.drawImage(textCanvas, 0, 0);
+          ctx.globalAlpha = 1;
+        } else if (animationType === 'slide-left') {
+          // Slide in from right to left - fractional offset
+          const offset = (1 - eased) * width;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(textCanvas, offset, 0);
+        } else if (animationType === 'slide-right') {
+          // Slide in from left to right - fractional offset
+          const offset = (eased - 1) * width;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(textCanvas, offset, 0);
+        } else if (animationType === 'slide-up') {
+          const offset = (1 - eased) * height;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(textCanvas, 0, offset);
+        } else if (animationType === 'slide-down') {
+          const offset = (eased - 1) * height;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(textCanvas, 0, offset);
+        }
+        
+        if (progress < 1) {
+          currentAnimationFrameId = requestAnimationFrame(animate);
+        } else {
+          // Animation complete - draw final text using drawImage to respect transparency
+          currentAnimationFrameId = null;
+          ctx.globalAlpha = 1;
+          ctx.drawImage(textCanvas, 0, 0);
+          if (callback) callback();
+        }
+      };
+      
+      currentAnimationFrameId = requestAnimationFrame(animate);
+    }
+    
+    /**
+     * Render verse content to canvas
+     */
+    function renderContent(renderContent_content) {
+      window.currentContent = renderContent_content;
+      
+      console.log('Live window renderContent called with:', renderContent_content);
+      
+      const width = canvas.width;
+      const height = canvas.height;
+      
+      // IMPORTANT: Store OLD content before updating currentRenderContent
+      const oldContent = currentRenderContent ? { ...currentRenderContent } : null;
+      
+      // Store in module-level variables for helper functions
+      currentRenderContent = renderContent_content;
+      currentRenderWidth = width;
+      currentRenderHeight = height;
+      
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+      
+      // Handle media content
+      if (renderContent_content.isMedia) {
+        console.log('Rendering media - type:', renderContent_content.mediaType);
+        const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(renderContent_content.mediaType);
+        const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(renderContent_content.mediaType);
+        const isColor = renderContent_content.mediaType === 'COLOR';
+        
+        console.log('Media flags - isImage:', isImage, 'isVideo:', isVideo, 'isColor:', isColor);
+        
+        if (isColor) {
+          console.log('Applying color:', renderContent_content.mediaColor);
+          // Apply color or gradient
+          applyColorToCanvas(ctx, renderContent_content.mediaColor, width, height);
+          // Media content appears instantly, no text fade needed
+        } else if (isImage) {
+          console.log('Loading image with settings:', {
+            bgSize: renderContent_content.bgSize,
+            bgRepeat: renderContent_content.bgRepeat,
+            bgPosition: renderContent_content.bgPosition
+          });
+          const img = new Image();
+          img.onload = () => {
+            // Black is fallback - render first
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            
+            drawImageWithSettings(ctx, img, width, height, {
+              bgSize: renderContent_content.bgSize,
+              bgRepeat: renderContent_content.bgRepeat,
+              bgPosition: renderContent_content.bgPosition
+            });
+            // Media content appears instantly, no text fade needed
+          };
+          img.onerror = (e) => console.error('Failed to load image:', content.mediaPath, e);
+          const fileURL = renderContent_content.mediaPath.replace(/\\/g, '/');
+          img.src = `file:///${fileURL}`;
+        } else if (isVideo) {
+          // Stop any existing video first
+          if (window.currentVideo) {
+            window.currentVideo.pause();
+            window.currentVideo = null;
+          }
+          
+          const video = document.createElement('video');
+          const fileURL = renderContent_content.mediaPath.replace(/\\/g, '/');
+          video.src = `file:///${fileURL}`;
+          video.loop = renderContent_content.loop !== false; // default true
+          video.muted = renderContent_content.muted !== false; // default true
+          video.play();
+          window.currentVideo = video;
+          
+          const objectFit = renderContent_content.objectFit || 'contain';
+          
+          const drawFrame = () => {
+            if (window.currentVideo !== video) return; // Stop if video changed
+            if (video.readyState >= 2) {
+              let scale, w, h, x, y;
+              
+              if (objectFit === 'fill') {
+                w = width;
+                h = height;
+                x = 0;
+                y = 0;
+              } else if (objectFit === 'cover') {
+                scale = Math.max(width / video.videoWidth, height / video.videoHeight);
+                w = video.videoWidth * scale;
+                h = video.videoHeight * scale;
+                x = (width - w) / 2;
+                y = (height - h) / 2;
+              } else if (objectFit === 'none') {
+                w = video.videoWidth;
+                h = video.videoHeight;
+                x = (width - w) / 2;
+                y = (height - h) / 2;
+              } else { // contain (default)
+                scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+                w = video.videoWidth * scale;
+                h = video.videoHeight * scale;
+                x = (width - w) / 2;
+                y = (height - h) / 2;
+              }
+              
+              ctx.fillStyle = '#000';
+              ctx.fillRect(0, 0, width, height);
+              ctx.drawImage(video, x, y, w, h);
+            }
+            requestAnimationFrame(drawFrame);
+          };
+          drawFrame();
+        }
+        return;
+      }
+      
+      // Verse/text content rendering
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      // Function to render background and show text
+      const showTextWithAnimation = () => {
+        // Store previous content for transition-out animation on next call
+        const hasPreviousContent = window.previousContent && 
+                                   window.previousContent.text && 
+                                   renderContent_content.text && 
+                                   window.previousContent !== renderContent_content;
+        
+        if (hasPreviousContent) {
+          // Use previous content's transitionOut if provided, otherwise fall back to transitionIn
+          const transitionOut = window.previousContent.transitionOut || window.previousContent.transitionIn || { duration: 0.4, type: 'fade' };
+          
+          // Fade out old content, then fade in new content
+          applyTextFadeOutAnimation(
+            oldContent,
+            transitionOut.duration,
+            transitionOut.type || 'fade',
+            () => {
+              // After fade-out completes, re-render the background before fade-in
+              // Black background is the fallback - render it first
+              ctx.fillStyle = '#000';
+              ctx.fillRect(0, 0, width, height);
+              
+              if (renderContent_content.backgroundMedia) {
+                const media = renderContent_content.backgroundMedia;
+                if (media.type === 'COLOR') {
+                  applyColorToCanvas(ctx, media.color, width, height);
+                } else if (media.type === 'JPG' || media.type === 'PNG') {
+                  // Image background - redraw it
+                  const bgImg = new Image();
+                  bgImg.onload = () => {
+                    drawImageWithSettings(ctx, bgImg, width, height, {
+                      bgSize: media.bgSize || 'cover',
+                      bgRepeat: media.bgRepeat || 'no-repeat',
+                      bgPosition: media.bgPosition || 'center'
+                    });
+                    
+                    // Now start fade-in with background in place
+                    if (renderContent_content.transitionIn) {
+                      applyTextFadeInAnimation(
+                        renderContent_content.transitionIn.duration,
+                        renderContent_content.transitionIn.type || 'fade'
+                      );
+                    }
+                  };
+                  const fileURL = media.path.replace(/\\/g, '/');
+                  bgImg.src = `file:///${fileURL}`;
+                  return; // Don't call fade-in below
+                }
+              }
+              
+              // Apply fade-in after background is ready
+              if (renderContent_content.transitionIn) {
+                applyTextFadeInAnimation(
+                  renderContent_content.transitionIn.duration,
+                  renderContent_content.transitionIn.type || 'fade'
+                );
+              }
+            }
+          );
+        } else {
+          // No fade-out needed, just apply fade-in
+          if (renderContent_content.transitionIn) {
+            applyTextFadeInAnimation(
+              renderContent_content.transitionIn.duration,
+              renderContent_content.transitionIn.type || 'fade'
+            );
+          }
+        }
+      };
+      
+      // Handle background media (object with type, path, color, and settings)
+      if (renderContent_content.backgroundMedia) {
+        const media = renderContent_content.backgroundMedia;
+        
+        if (media.type === 'COLOR') {
+          // Black is fallback - render first
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          
+          applyColorToCanvas(ctx, media.color, width, height);
+          showTextWithAnimation();
+        } else if (media.type === 'JPG' || media.type === 'PNG') {
+          console.log('Live window: Loading image background with settings:', media);
+          const bgImg = new Image();
+          bgImg.onload = () => {
+            // Black is fallback - render first
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            
+            drawImageWithSettings(ctx, bgImg, width, height, {
+              bgSize: media.bgSize || 'cover',
+              bgRepeat: media.bgRepeat || 'no-repeat',
+              bgPosition: media.bgPosition || 'center'
+            });
+            
+            showTextWithAnimation();
+          };
+          bgImg.onerror = (e) => {
+            console.error('Live window failed to load background:', media.path, e);
+            showTextWithAnimation();
+          };
+          const fileURL = media.path.replace(/\\/g, '/');
+          bgImg.src = `file:///${fileURL}`;
+        } else {
+          // Video or unknown type - just show text with animation
+          showTextWithAnimation();
+        }
+      } else if (renderContent_content.backgroundPath) {
+        // Legacy path string support
+        console.log('Live window: Background path provided:', renderContent_content.backgroundPath);
+        const bgImg = new Image();
+        const fileURL = renderContent_content.backgroundPath.replace(/\\/g, '/');
+        console.log('Live window: Loading background from:', fileURL);
+        bgImg.onload = () => {
+          console.log('Live window: Background loaded successfully');
+          const scale = Math.min(width / bgImg.width, height / bgImg.height);
+          const w = bgImg.width * scale;
+          const h = bgImg.height * scale;
+          const x = (width - w) / 2;
+          const y = (height - h) / 2;
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(bgImg, x, y, w, h);
+          console.log('Live window: Background drawn, no overlay darkening');
+          
+          // Show text with animation
+          console.log('Live window: Showing text with animation');
+          showTextWithAnimation();
+        };
+        bgImg.onerror = (e) => {
+          console.error('Live window failed to load background:', renderContent_content.backgroundPath, e);
+          showTextWithAnimation();
+        };
+        bgImg.src = `file:///${fileURL}`;
+      } else {
+        console.log('Live window: No background, rendering text only');
+        showTextWithAnimation();
+      }
+      
+      // Store this content for transition-out on next call
+      window.previousContent = renderContent_content;
+    }
+    
+    /**
+     * Parse text into segments of verse numbers and text
+     */
+    function parseVerseSegments(text) {
+      const segments = [];
+      const regex = /(\d+)\s{2}/g;
+      let lastIndex = 0;
+      let match;
+      
+      while ((match = regex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          const textBefore = text.substring(lastIndex, match.index).trim();
+          if (textBefore) segments.push({ isNumber: false, text: textBefore });
+        }
+        segments.push({ isNumber: true, text: match[1] });
+        lastIndex = regex.lastIndex;
+      }
+      
+      if (lastIndex < text.length) {
+        const remaining = text.substring(lastIndex).trim();
+        if (remaining) segments.push({ isNumber: false, text: remaining });
+      }
+      
+      return segments;
+    }
+    
+    /**
+     * Wrap text with subscript segments
+     */
+    function wrapTextWithSubscripts(segments, maxWidth, baseFontSize, context = ctx) {
+      const lines = [];
+      let currentLine = [];
+      let currentWidth = 0;
+      
+      const subscriptSize = baseFontSize * 0.6;
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          context.font = `${subscriptSize}px Arial`;
+          const width = context.measureText(seg.text + ' ').width;
+          
+          if (currentWidth + width > maxWidth && currentLine.length > 0) {
+            lines.push(currentLine);
+            currentLine = [];
+            currentWidth = 0;
+          }
+          
+          currentLine.push(seg);
+          currentWidth += width;
+          context.font = `${baseFontSize}px Arial`;
+        } else {
+          const words = seg.text.split(' ');
+          words.forEach((word, idx) => {
+            const testWord = word + (idx < words.length - 1 ? ' ' : '');
+            const width = context.measureText(testWord).width;
+            
+            if (currentWidth + width > maxWidth && currentLine.length > 0) {
+              lines.push(currentLine);
+              currentLine = [];
+              currentWidth = 0;
+            }
+            
+            currentLine.push({ isNumber: false, text: testWord });
+            currentWidth += width;
+          });
+        }
+      });
+      
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+      }
+      
+      return lines;
+    }
+    
+    /**
+     * Render a line with subscript verse numbers
+     */
+    function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx) {
+      const subscriptSize = baseFontSize * 0.6;
+      let totalWidth = 0;
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          context.font = `${subscriptSize}px Arial`;
+          totalWidth += context.measureText(seg.text + ' ').width;
+        } else {
+          context.font = `${baseFontSize}px Arial`;
+          totalWidth += context.measureText(seg.text).width;
+        }
+      });
+      
+      let x = centerX - (totalWidth / 2);
+      
+      context.textBaseline = 'alphabetic';  // Use alphabetic baseline for consistent rendering
+      
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          context.font = `${subscriptSize}px Arial`;
+          context.fillStyle = '#ddd';
+          context.textAlign = 'left';
+          context.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
+          x += context.measureText(seg.text + ' ').width;
+          context.fillStyle = '#fff';
+        } else {
+          context.font = `${baseFontSize}px Arial`;
+          context.textAlign = 'left';
+          context.fillText(seg.text, x, y);
+          x += context.measureText(seg.text).width;
+        }
+      });
+      
+      context.textBaseline = 'middle';  // Reset to middle
+    }
+    
+    /**
+     * Render text content to canvas
+     */
+    function renderTextOnCanvas() {
+      const width = currentRenderWidth;
+      const height = currentRenderHeight;
+      const content = currentRenderContent;
+      
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+    
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      
+      // Calculate font sizes
+      let baseFontSize = height * 0.08;
+      
+      // Render verse number (top left)
+      if (content.number) {
+        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+      
+      // Render verse text (center)
+      if (content.text) {
+        ctx.textAlign = 'center';
+        const textY = height / 2;
+        
+        // Split text by explicit newlines first (for songs), then handle verse numbers
+        const textLines = content.text.split('\n');
+        const allLines = [];
+        
+        textLines.forEach(textLine => {
+          // Parse text to handle verse numbers as subscripts
+          const segments = parseVerseSegments(textLine);
+          
+          // Auto-size font to fill vertical space optimally
+          ctx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+          allLines.push(...wrappedLines);
+        });
+        
+        let lines = allLines;
+        
+        // Grow font size to fill available vertical space
+        while (true) {
+          const testSize = baseFontSize + 4;
+          ctx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else {
+            break;
+          }
+        }
+        
+        // If we overshot, shrink back down
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          ctx.font = `${baseFontSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
+        }
+        
+        // Render lines with subscript numbers
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+        
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
+        });
+      }
+      
+      // Render reference (bottom right)
+      if (content.reference) {
+        ctx.font = `${baseFontSize * 0.7}px Arial`;
+        ctx.textAlign = 'right';
+        ctx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+      
+      // Render hint (if showing clipped verses)
+      if (content.showingCount && content.totalSelected && content.showingCount < content.totalSelected) {
+        const hint = `Showing ${content.showingCount} of ${content.totalSelected} selected`;
+        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.fillStyle = '#ddd';
+        ctx.textAlign = 'right';
+        ctx.fillText(hint, width - padding, height - padding - baseFontSize * 1.1);
+        ctx.fillStyle = '#fff';
+      }
+    }
+    
+    /**
+     * Render content to canvas
+     */
+    
+    // Unified mode setter for clear/black/normal; centralizes transitions and avoids IPC races
+    function setLiveMode(mode) {
+      console.debug('[live] setLiveMode ->', mode);
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+
+      if (mode === 'black') {
+        console.debug('[live] entering black mode');
+        isClearMode = false;
+        isBlackMode = true;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+        return;
+      }
+
+      if (mode === 'clear') {
+        // If already clear, no-op
+        if (isClearMode) return;
+        isClearMode = true;
+        isBlackMode = false;
+
+        // If there's visible text on screen, fade it out; otherwise just show background
+        const hasVisibleText = currentRenderContent && currentRenderContent.text;
+        const width = canvas.width;
+        const height = canvas.height;
+        const transitionSettings = window.currentContent && window.currentContent.transitionIn ? window.currentContent.transitionIn : { duration: 0.4, type: 'fade' };
+
+        const renderBackground = () => {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          if (window.currentContent && window.currentContent.backgroundMedia) {
+            const media = window.currentContent.backgroundMedia;
+            if (media.type === 'COLOR') {
+              applyColorToCanvas(ctx, media.color, width, height);
+            } else if (media.type === 'JPG' || media.type === 'PNG') {
+              const bgImg = new Image();
+              bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: media.bgSize || 'cover', bgRepeat: media.bgRepeat || 'no-repeat', bgPosition: media.bgPosition || 'center' });
+              const fileURL = media.path.replace(/\\/g, '/');
+              bgImg.src = `file:///${fileURL}`;
+            }
+          }
+        };
+
+        if (hasVisibleText) {
+          const oldContent = { ...currentRenderContent };
+          renderBackground();
+          applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
+            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+          });
+        } else {
+          renderBackground();
+          currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+        }
+
+        return;
+      }
+
+      // mode === 'normal'
+      isClearMode = false;
+      isBlackMode = false;
+      if (window.currentContent) renderContent(window.currentContent);
+    }
+
+    ipcRenderer.on('update-content', (event, data) => {
+      // Update underlying content data
+      window.currentContent = data;
+
+      // Respect current mode: keep screen black or cleared if those modes are active
+      if (isBlackMode) {
+        // Keep black screen; currentRenderContent should reflect no text
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        currentRenderContent = {
+          ...window.currentContent,
+          number: '',
+          text: '',
+          reference: ''
+        };
+        return;
+      }
+
+      if (isClearMode) {
+        // Keep background visible but no text
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        if (window.currentContent && window.currentContent.backgroundMedia) {
+          const media = window.currentContent.backgroundMedia;
+          if (media.type === 'COLOR') {
+            applyColorToCanvas(ctx, media.color, width, height);
+          } else if (media.type === 'JPG' || media.type === 'PNG') {
+            const bgImg = new Image();
+            bgImg.onload = () => {
+              drawImageWithSettings(ctx, bgImg, width, height, {
+                bgSize: media.bgSize || 'cover',
+                bgRepeat: media.bgRepeat || 'no-repeat',
+                bgPosition: media.bgPosition || 'center'
+              });
+            };
+            const fileURL = media.path.replace(/\\/g, '/');
+            bgImg.src = `file:///${fileURL}`;
+          }
+        }
+        currentRenderContent = {
+          ...window.currentContent,
+          number: '',
+          text: '',
+          reference: ''
+        };
+        return;
+      }
+
+      // Default: render normally
+      renderContent(data);
     });
-    ipcRenderer.on('clear-live-text', () => {
-      document.getElementById('live-number').style.display = 'none';
-      document.getElementById('live-text').style.display = 'none';
-      document.getElementById('live-reference').style.display = 'none';
-    });
+    
+    // Legacy handler delegates to setLiveMode
+    ipcRenderer.on('clear-live-text', () => setLiveMode('clear'));
+
+    // Legacy set-live-black delegates to setLiveMode
+    ipcRenderer.on('set-live-black', () => setLiveMode('black'));
+
+    // Legacy reset-live-canvas delegates to normal mode
+    ipcRenderer.on('reset-live-canvas', () => setLiveMode('normal'));
+
+    // New unified mode handler
+    ipcRenderer.on('set-live-mode', (event, mode) => setLiveMode(mode));
+    
     ipcRenderer.on('show-live-text', () => {
-      document.getElementById('live-number').style.display = '';
-      document.getElementById('live-text').style.display = '';
-      document.getElementById('live-reference').style.display = '';
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
+      isClearMode = false;
+      isBlackMode = false;
+      
+      if (window.currentContent) {
+        // Restore content with fade-in transition
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Update currentRenderContent first
+        currentRenderContent = window.currentContent;
+        currentRenderWidth = width;
+        currentRenderHeight = height;
+        
+        // Render background first
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+        
+        if (window.currentContent.backgroundMedia) {
+          const media = window.currentContent.backgroundMedia;
+          if (media.type === 'COLOR') {
+            applyColorToCanvas(ctx, media.color, width, height);
+            // Then fade in text
+            if (window.currentContent.transitionIn) {
+              applyTextFadeInAnimation(
+                window.currentContent.transitionIn.duration,
+                window.currentContent.transitionIn.type || 'fade'
+              );
+            }
+          } else if (media.type === 'JPG' || media.type === 'PNG') {
+            const bgImg = new Image();
+            bgImg.onload = () => {
+              drawImageWithSettings(ctx, bgImg, width, height, {
+                bgSize: media.bgSize || 'cover',
+                bgRepeat: media.bgRepeat || 'no-repeat',
+                bgPosition: media.bgPosition || 'center'
+              });
+              // Then fade in text
+              if (window.currentContent.transitionIn) {
+                applyTextFadeInAnimation(
+                  window.currentContent.transitionIn.duration,
+                  window.currentContent.transitionIn.type || 'fade'
+                );
+              }
+            };
+            const fileURL = media.path.replace(/\\/g, '/');
+            bgImg.src = `file:///${fileURL}`;
+          }
+        } else {
+          // No background media, just fade in text
+          if (window.currentContent.transitionIn) {
+            applyTextFadeInAnimation(
+              window.currentContent.transitionIn.duration,
+              window.currentContent.transitionIn.type || 'fade'
+            );
+          }
+        }
+      }
     });
+    
     ipcRenderer.on('set-live-black', () => {
-      document.getElementById('live-container').style.background = '#000';
-      document.getElementById('live-number').style.display = 'none';
-      document.getElementById('live-text').style.display = 'none';
-      document.getElementById('live-reference').style.display = 'none';
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
+      isClearMode = false;
+      isBlackMode = true;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     });
+    
     ipcRenderer.on('reset-live-canvas', () => {
-      document.getElementById('live-container').style.background = '#000';
-      document.getElementById('live-number').style.display = '';
-      document.getElementById('live-text').style.display = '';
-      document.getElementById('live-reference').style.display = '';
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+      
+      isClearMode = false;
+      isBlackMode = false;
+      if (window.currentContent) {
+        renderContent(window.currentContent);
+      }
     });
   </script>
 </body>
 </html>
+
+

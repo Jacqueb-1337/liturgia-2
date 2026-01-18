@@ -1,1 +1,5 @@
 node_modules/
+dist/
+
+# Copilot instructions
+.github/copilot-instructions.md

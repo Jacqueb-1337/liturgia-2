@@ -2,8 +2,8 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
-  <title>EasyWorship MVP</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';" />
+  <title>Liturgia</title>
 
   <!-- Your existing global styles -->
   <link rel="stylesheet" href="style.css" />
@@ -35,9 +35,6 @@
       padding: 0;
       box-sizing: border-box;
       position: relative;
-    }
-    #slide-preview {
-      border-right: 1px solid #ccc;
     }
 
     /* Preview content with aspect ratio */
@@ -81,6 +78,14 @@
       display: flex;
       align-items: center;
       justify-content: center;
+    }
+    /* Style for inline verse numbers when concatenating passages */
+    #verse-text p, #verse-display p { margin: 0; }
+    #verse-text p sub.verse-num, #verse-display p sub.verse-num {
+      font-size: 0.65em;
+      vertical-align: sub;
+      margin-right: 6px;
+      opacity: 0.85;
     }
     #verse-reference {
       font-size: 0.8em;
@@ -139,7 +144,6 @@
     #verse-panel {
       flex: 0 0 200px; /* fixed 200px tall */
       display: flex;
-      border-top: 1px solid #ccc;
       height: 200px;
       flex-direction: column;
     }
@@ -148,7 +152,6 @@
       flex: 0 0 auto;
       width: var(--verse-list-width, 150px);
       overflow-y: auto;
-      border-right: 1px solid #ccc;
       background: #fff;
     }
     /* Verse display on right: scrollable */
@@ -171,38 +174,129 @@
   </style>
 </head>
 <body>
-  <!-- Slide preview + live view -->
-  <div id="slide-container">
-    <div id="slide-preview">
-      <div id="preview-container">
-        <div id="preview-content">
-          <div id="verse-number"></div>
-          <div id="verse-text">Select a verse to preview</div>
-          <div id="verse-reference"></div>
+  <div style="display: flex; flex-direction: column; height: 100vh;">
+    <!-- Top section: Schedule sidebar + Preview canvases -->
+    <div id="top-section" style="display: flex; flex: 0 0 calc(100vh - 216px); overflow: hidden; min-height: 0;">
+      <!-- Schedule Sidebar -->
+      <div id="schedule-sidebar" style="width: 250px; display: flex; flex-direction: column;">
+        <div id="schedule-header" style="padding: 10px; font-weight: bold;">
+          Schedule
+        </div>
+        <div id="schedule-list" style="flex: 1; overflow-y: auto; padding: 5px;">
+          <!-- Schedule items will be added here -->
+        </div>
+      </div>
+      
+      <!-- Resizer between schedule and previews -->
+      <div class="resizer resizer-x" id="schedule-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
+      
+      <!-- Slide preview + live view -->
+      <div id="slide-container" style="flex: 1; display: flex; min-width: 0;">
+        <div id="slide-preview" style="flex: 1; overflow: hidden; min-width: 0; position: relative;">
+          <canvas id="preview-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+          <button id="transition-in-btn" class="transition-overlay-btn" title="Fade In Transition" style="position: absolute; top: 50%; left: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
+          <button id="transition-out-btn" class="transition-overlay-btn" title="Fade Out Transition" style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
+        </div>
+        
+        <!-- Resizer between preview and live -->
+        <div class="resizer resizer-x" id="preview-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
+        
+        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0; padding-right: 25px;">
+          <canvas id="live-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
         </div>
       </div>
     </div>
-    <div id="slide-live">
-      <div id="live-container">
-        <div id="live-content">
-          <div id="live-number"></div>
-          <div id="live-text"></div>
-          <div id="live-reference"></div>
+
+    <!-- Resizer between previews and verse panel -->
+    <div class="resizer resizer-y" id="verse-resizer" style="height: 16px; cursor: row-resize; flex-shrink: 0;"></div>
+
+    <!-- Bottom verse selection and display -->
+    <div id="verse-panel" style="flex: 0 0 200px; min-height: 0;">
+      <!-- Control buttons (persist across tabs) -->
+      <div id="control-buttons-container" style="display: flex; gap: 5px; padding: 8px; border-bottom: 1px solid #ccc; background: #f5f5f5; justify-content: flex-end;"></div>
+      
+      <!-- Tabs -->
+      <div id="bottom-tabs" style="display: flex; border-bottom: 1px solid #ccc;">
+        <button class="bottom-tab active" data-tab="verses" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid #0078d4;">Verses</button>
+        <button class="bottom-tab" data-tab="songs" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer;">Songs</button>
+        <button class="bottom-tab" data-tab="media" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer;">Media</button>
+      </div>
+      
+      <!-- Verses Tab Content -->
+      <div id="verses-tab-content" class="tab-content" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
+        <div id="scripture-search" style="flex-shrink: 0;">
+          <div id="search-box-container" style="width:100%"></div>
+        </div>
+        <div id="verse-content-row" style="display: flex; flex: 1; min-height: 0;">
+          <div id="verse-list">
+            <div id="virtual-list"></div>
+          </div>
+          <div id="verse-display"></div>
+        </div>
+      </div>
+      
+      <!-- Songs Tab Content -->
+      <div id="songs-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+        <div id="song-search" style="flex-shrink: 0; padding: 1em; display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 6px; box-sizing: border-box;" />
+          <button id="song-view-toggle" style="padding: 6px 12px; white-space: nowrap;" title="Toggle between full song and verse blocks">Verse Blocks</button>
+          <button id="song-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Create new song">+</button>
+        </div>
+        <div style="display: flex; flex: 1; min-height: 0;">
+          <div id="song-list" style="flex: 0 0 200px; overflow-y: auto; position: relative; border: 1px solid #ccc;">
+            <div id="song-virtual-list" style="position: relative;"></div>
+          </div>
+          <div id="song-display" style="flex: 1; padding: 10px; border: 1px solid #ccc; border-left: none; overflow-y: auto;">
+            <!-- Selected song details will be shown here -->
+          </div>
+        </div>
+      </div>
+      
+      <!-- Media Tab Content -->
+      <div id="media-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
+        <div style="padding: 1em; display: flex; gap: 8px; align-items: center;">
+          <input type="text" id="media-search-input" placeholder="Search media files..." style="flex: 1; padding: 8px; box-sizing: border-box;" />
+          <button id="media-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Add media file">+</button>
+        </div>
+        <div id="media-display" style="flex: 1; padding: 10px; overflow-y: auto;">
+          <!-- Media content will be shown here -->
         </div>
       </div>
     </div>
   </div>
-
-  <!-- Bottom verse selection and display -->
-  <div id="verse-panel">
-    <div id="scripture-search">
-      <div id="search-box-container" style="width:100%"></div>
-    </div>
-    <div id="verse-content-row" style="display: flex; flex: 1;">
-      <div id="verse-list" style="overflow-y:auto; height:400px; width: 200px">
-        <div id="virtual-list"></div>
+  <!-- Song context menu -->
+  <div id="song-context-menu">
+    <div class="context-menu-item" id="song-context-edit">Edit Song</div>
+    <div class="context-menu-item" id="song-context-delete">Delete</div>
+    <div class="context-menu-item" id="song-context-export">Export</div>
+    <div class="context-menu-item" id="song-context-import">Import Songs</div>
+  </div>
+  <!-- Song Editor Modal -->
+  <div id="song-editor-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">
+    <div id="song-editor-panel" style="border-radius: 8px; width: 80%; max-width: 900px; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+      <div class="song-editor-header" style="padding: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin: 0;">New Song</h2>
+        <button id="song-editor-close" style="padding: 4px 12px; cursor: pointer; font-size: 24px; border: none;">&times;</button>
       </div>
-      <div id="verse-display" style="flex: 1 1 auto;"></div>
+      <div style="padding: 16px; overflow-y: auto; flex: 1;">
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Title:</label>
+          <input type="text" id="song-editor-title" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Song Title" />
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Author:</label>
+          <input type="text" id="song-editor-author" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Author (optional)" />
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 4px; font-weight: bold;">Lyrics:</label>
+          <div class="song-editor-help" style="font-size: 0.85em; margin-bottom: 8px;">Use ** or __ for bold, * or _ for italics. Separate verses with blank lines.</div>
+          <div id="song-editor-lyrics" contenteditable="true" style="width: 100%; min-height: 400px; padding: 16px; box-sizing: border-box; border-radius: 4px; font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.6; overflow-y: auto; white-space: pre-wrap;" data-placeholder="Enter lyrics here...\n\nSeparate verses with blank lines"></div>
+        </div>
+      </div>
+      <div class="song-editor-footer" style="padding: 16px; display: flex; justify-content: flex-end; gap: 8px;">
+        <button id="song-editor-cancel" style="padding: 8px 16px; border-radius: 4px; cursor: pointer;">Cancel</button>
+        <button id="song-editor-save" style="padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer;">Save Song</button>
+      </div>
     </div>
   </div>
 
@@ -230,5 +324,201 @@
   <button id="css-cancel">Cancel</button>
   <div id="css-error" style="color:red; margin-top:10px;"></div>
 </div>
+
+<!-- Color Editor Modal -->
+<div id="color-editor-modal" class="color-editor-backdrop">
+  <div class="color-editor-content">
+    <div class="color-editor-header">
+      <h3>Create Background</h3>
+      <button id="color-editor-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Type:</label>
+      <select id="bg-type" class="color-editor-select">
+        <option value="solid">Solid Color</option>
+        <option value="gradient">Gradient</option>
+      </select>
+    </div>
+    
+    <div id="solid-color-options">
+      <label class="color-editor-label">Color:</label>
+      <input type="color" id="bg-color" value="#000000" class="color-editor-color-input color-editor-large">
+    </div>
+    
+    <div id="gradient-options" style="display: none;">
+      <label class="color-editor-label">Gradient Type:</label>
+      <select id="gradient-type" class="color-editor-select" style="margin-bottom: 15px;">
+        <option value="linear">Linear</option>
+        <option value="radial">Radial</option>
+      </select>
+      
+      <label class="color-editor-label">Start Color:</label>
+      <input type="color" id="gradient-color1" value="#667eea" class="color-editor-color-input" style="margin-bottom: 15px;">
+      
+      <label class="color-editor-label">End Color:</label>
+      <input type="color" id="gradient-color2" value="#764ba2" class="color-editor-color-input" style="margin-bottom: 15px;">
+      
+      <div id="linear-angle" style="display: block;">
+        <label class="color-editor-label">Angle: <span id="angle-value">135</span>°</label>
+        <input type="range" id="gradient-angle" min="0" max="360" value="135" class="color-editor-slider">
+      </div>
+    </div>
+    
+    <div style="margin: 20px 0;">
+      <label class="color-editor-label">Preview:</label>
+      <div id="bg-preview" class="color-editor-preview"></div>
+    </div>
+    
+    <div class="color-editor-buttons">
+      <button id="color-editor-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="color-editor-save" class="color-editor-btn color-editor-btn-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image Editor Modal -->
+<div id="image-editor-modal" class="color-editor-backdrop">
+  <div class="color-editor-content">
+    <div class="color-editor-header">
+      <h3>Edit Image Display</h3>
+      <button id="image-editor-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Display Mode:</label>
+      <select id="image-bg-size" class="color-editor-select">
+        <option value="cover">Cover (fill, may crop)</option>
+        <option value="contain">Contain (fit, may letterbox)</option>
+        <option value="100% 100%">Stretch (fill exactly)</option>
+        <option value="auto">Original Size</option>
+      </select>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Repeat:</label>
+      <select id="image-bg-repeat" class="color-editor-select">
+        <option value="no-repeat">No Repeat</option>
+        <option value="repeat">Repeat Both</option>
+        <option value="repeat-x">Repeat Horizontally</option>
+        <option value="repeat-y">Repeat Vertically</option>
+      </select>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Position:</label>
+      <select id="image-bg-position" class="color-editor-select">
+        <option value="center">Center</option>
+        <option value="top">Top</option>
+        <option value="bottom">Bottom</option>
+        <option value="left">Left</option>
+        <option value="right">Right</option>
+        <option value="top left">Top Left</option>
+        <option value="top right">Top Right</option>
+        <option value="bottom left">Bottom Left</option>
+        <option value="bottom right">Bottom Right</option>
+      </select>
+    </div>
+    
+    <div style="margin: 20px 0;">
+      <label class="color-editor-label">Preview:</label>
+      <div style="background: #000; padding: 10px; border-radius: 4px;">
+        <canvas id="image-preview-canvas" width="1920" height="1080" style="width: 100%; height: auto; display: block; border-radius: 2px;"></canvas>
+      </div>
+    </div>
+    
+    <div class="color-editor-buttons">
+      <button id="image-editor-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="image-editor-save" class="color-editor-btn color-editor-btn-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Video Editor Modal -->
+<div id="video-editor-modal" class="color-editor-backdrop">
+  <div class="color-editor-content">
+    <div class="color-editor-header">
+      <h3>Edit Video Display</h3>
+      <button id="video-editor-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Display Mode:</label>
+      <select id="video-object-fit" class="color-editor-select">
+        <option value="contain">Contain (fit with letterbox)</option>
+        <option value="cover">Cover (fill, may crop)</option>
+        <option value="fill">Fill (stretch to fit)</option>
+        <option value="none">Original Size</option>
+      </select>
+    </div>
+    
+    <div class="color-editor-field">
+      <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="video-loop" checked>
+        Loop video
+      </label>
+    </div>
+    
+    <div class="color-editor-field">
+      <label style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="video-muted" checked>
+        Muted
+      </label>
+    </div>
+    
+    <div style="margin: 20px 0;">
+      <label class="color-editor-label">Preview:</label>
+      <div style="background: #000; padding: 10px; border-radius: 4px;">
+        <canvas id="video-preview-canvas" width="1920" height="1080" style="width: 100%; height: auto; display: block; border-radius: 2px;"></canvas>
+      </div>
+    </div>
+    
+    <div class="color-editor-buttons">
+      <button id="video-editor-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="video-editor-save" class="color-editor-btn color-editor-btn-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transition Editor Modal -->
+<div id="transition-editor-modal" class="color-editor-backdrop">
+  <div class="color-editor-content">
+    <div class="color-editor-header">
+      <h3 id="transition-modal-title">Transition Settings</h3>
+      <button id="transition-editor-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Duration (seconds):</label>
+      <input type="number" id="transition-duration" min="0.1" max="10" step="0.1" value="1.0" class="color-editor-select" style="width: 100%;">
+    </div>
+    
+    <div class="color-editor-field">
+      <label>Animation Type:</label>
+      <select id="transition-type" class="color-editor-select">
+        <option value="fade">Fade</option>
+        <option value="slide-left">Slide Left</option>
+        <option value="slide-right">Slide Right</option>
+        <option value="slide-up">Slide Up</option>
+        <option value="slide-down">Slide Down</option>
+      </select>
+    </div>
+    
+    <div style="margin: 20px 0;">
+      <label class="color-editor-label">Preview:</label>
+      <div style="background: #000; padding: 10px; border-radius: 4px; position: relative; overflow: hidden;">
+        <canvas id="transition-preview-canvas" width="1920" height="1080" style="width: 100%; height: auto; display: block; border-radius: 2px;"></canvas>
+      </div>
+      <div style="margin-top: 8px; text-align: center; color: #666; font-size: 12px;">Animation loops automatically</div>
+    </div>
+    
+    <div class="color-editor-buttons">
+      <button id="transition-editor-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="transition-editor-save" class="color-editor-btn color-editor-btn-save">Save</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
+
+

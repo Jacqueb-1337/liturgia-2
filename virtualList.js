@@ -31,14 +31,29 @@ function renderWindow(allVerses, scrollTop, selectedIndices, handleVerseClick) {
     const div = document.createElement('div');
     div.className = 'verse-item' + (selectedIndices.includes(i) ? ' selected' : '');
     div.textContent = verse.key;
+    div.tabIndex = 0; // make focusable so keyboard navigation feels natural
+    div.setAttribute('data-index', i);
+    div.setAttribute('draggable', 'true'); // Make draggable
     div.style.position = 'absolute';
     div.style.top = `${i * ITEM_HEIGHT}px`;
     div.style.left = '0';
     div.style.right = '0';
     div.style.width = '100%';
     div.style.height = `${ITEM_HEIGHT}px`;
-    div.addEventListener('click', () => handleVerseClick(i));
+    div.addEventListener('click', (e) => {
+      handleVerseClick(i, e);
+      // focus the clicked item so subsequent arrow keys in the window clearly reflect selection
+      div.focus();
+    });
     div.addEventListener('dblclick', () => handleVerseDoubleClick(i));
+    div.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // Use the current selection for Enter, so multi-selected ranges go live
+        // even when the user is focused on a single item.
+        handleVerseDoubleClick();
+      }
+    });
     wrapper.appendChild(div);
   }
 }
