@@ -2536,8 +2536,16 @@ async function loadSongs() {
   try {
     const userData = await ipcRenderer.invoke('get-user-data-path');
     const songsPath = path.join(userData, 'songs.json');
-    const data = fs.readFileSync(songsPath, 'utf8');
-    allSongs = JSON.parse(data);
+    
+    // Create songs.json with empty array if it doesn't exist
+    if (!fs.existsSync(songsPath)) {
+      fs.writeFileSync(songsPath, JSON.stringify([], null, 2), 'utf8');
+      allSongs = [];
+    } else {
+      const data = fs.readFileSync(songsPath, 'utf8');
+      allSongs = JSON.parse(data);
+    }
+    
     renderSongList(allSongs);
     
     // Add scroll handler for virtual scrolling
