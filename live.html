@@ -793,8 +793,10 @@
         renderBackgroundToCanvas(newContent, newBgCanvas)
       ]);
 
-      // Pre-render text from newContent (keep text stable during background fade)
-      const textCanvas = renderTextToCanvas(newContent);
+      // Pre-render text: keep the currently visible text stable during the background fade.
+      // If old content has visible text, prefer that; otherwise fall back to newContent.
+      const textSource = (oldContent && oldContent.text) ? oldContent : newContent;
+      const textCanvas = renderTextToCanvas(textSource);
 
       const startTime = Date.now();
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
