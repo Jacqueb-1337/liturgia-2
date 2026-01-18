@@ -4,7 +4,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "make-icon": "node scripts/make-icon.js"
   },
   "build": {
     "appId": "com.jacqueb.liturgia",
@@ -26,7 +27,8 @@
   },
   "devDependencies": {
     "electron": "^25.9.8",
-    "electron-builder": "^26.4.0"
+    "electron-builder": "^26.4.0",
+    "png-to-ico": "^3.0.1"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
