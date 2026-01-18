@@ -557,20 +557,24 @@
     function backgroundsEqual(a, b) {
       if (!a && !b) return true;
       if (!a || !b) return false;
-      // If media objects
-      if (a.backgroundMedia || b.backgroundMedia) {
-        const am = a.backgroundMedia || a;
-        const bm = b.backgroundMedia || b;
+
+      // Handle explicit backgroundMedia first
+      const am = a.backgroundMedia || (a.isMedia ? { type: a.mediaType, path: a.mediaPath, color: a.mediaColor } : null);
+      const bm = b.backgroundMedia || (b.isMedia ? { type: b.mediaType, path: b.mediaPath, color: b.mediaColor } : null);
+
+      if (am || bm) {
+        if (!am || !bm) return false;
         if (am.type !== bm.type) return false;
         if (am.type === 'COLOR') return am.color === bm.color;
-        // For images/videos compare path
         if (am.path && bm.path) return am.path === bm.path;
         return false;
       }
+
       // Legacy backgroundPath or color
       if (a.backgroundPath || b.backgroundPath) {
         return (a.backgroundPath || '') === (b.backgroundPath || '');
       }
+
       return false;
     }
 
@@ -583,16 +587,85 @@
         ctxLocal.fillStyle = '#000';
         ctxLocal.fillRect(0, 0, width, height);
 
-        const media = content && (content.backgroundMedia || null);
+        // Prefer backgroundMedia, but also accept media fields from isMedia payloads
+        let media = null;
+        if (content) {
+          media = content.backgroundMedia || null;
+          if (!media && content.isMedia) {
+            media = {
+              type: content.mediaType,
+              path: content.mediaPath,
+              color: content.mediaColor,
+              bgSize: content.bgSize,
+              bgRepeat: content.bgRepeat,
+              bgPosition: content.bgPosition
+            };
+          }
+        }
+
         if (media && media.type === 'COLOR') {
           applyColorToCanvas(ctxLocal, media.color, width, height);
           resolve();
           return;
         }
 
-        // Legacy backgroundPath handling
-        const pathToImg = content && (content.backgroundPath || (media && media.path));
+        // Image or video background handling
+        const pathToImg = media && media.path ? media.path : (content && content.backgroundPath ? content.backgroundPath : null);
         if (pathToImg) {
+          // Determine if this is likely an image or video by extension (simple heuristic)
+          const ext = (pathToImg.split('.').pop() || '').toLowerCase();
+          const imageExts = ['jpg','jpeg','png','gif','webp','bmp'];
+          const videoExts = ['mp4','webm','ogg','mov','avi'];
+
+          if (imageExts.includes(ext)) {
+            const img = new Image();
+            img.onload = () => {
+              drawImageWithSettings(ctxLocal, img, width, height, {
+                bgSize: (media && media.bgSize) || 'cover',
+                bgRepeat: (media && media.bgRepeat) || 'no-repeat',
+                bgPosition: (media && media.bgPosition) || 'center'
+              });
+              resolve();
+            };
+            img.onerror = (e) => {
+              console.warn('[live] renderBackgroundToCanvas image load failed:', pathToImg, e);
+              // Fallback to black
+              ctxLocal.fillStyle = '#000';
+              ctxLocal.fillRect(0, 0, width, height);
+              resolve();
+            };
+            // Ensure file:// URL for absolute paths
+            img.src = `file:///${pathToImg.replace(/\\/g, '/')}`;
+            return;
+          }
+
+          if (videoExts.includes(ext)) {
+            const video = document.createElement('video');
+            video.preload = 'auto';
+            video.muted = true;
+            video.src = `file:///${pathToImg.replace(/\\/g, '/')}`;
+            // Wait for a frame to be available
+            video.addEventListener('loadeddata', () => {
+              try {
+                // Draw current frame
+                ctxLocal.drawImage(video, 0, 0, width, height);
+              } catch (e) {
+                // Drawing may fail on some codecs; fallback to black
+                ctxLocal.fillStyle = '#000';
+                ctxLocal.fillRect(0, 0, width, height);
+              }
+              resolve();
+            });
+            video.addEventListener('error', (e) => {
+              console.warn('[live] renderBackgroundToCanvas video load failed:', pathToImg, e);
+              ctxLocal.fillStyle = '#000';
+              ctxLocal.fillRect(0, 0, width, height);
+              resolve();
+            });
+            return;
+          }
+
+          // Unknown extension: try as image first
           const img = new Image();
           img.onload = () => {
             drawImageWithSettings(ctxLocal, img, width, height, {
@@ -603,12 +676,11 @@
             resolve();
           };
           img.onerror = () => {
-            // Fallback to black
             ctxLocal.fillStyle = '#000';
             ctxLocal.fillRect(0, 0, width, height);
             resolve();
           };
-          img.src = pathToImg.replace(/\\/g, '/').replace(/^\//, '');
+          img.src = `file:///${pathToImg.replace(/\\/g, '/')}`;
           return;
         }
 
