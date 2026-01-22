@@ -162,6 +162,9 @@ function setupPopover() {
     popover.style.display = 'block';
   }
 
+  // Expose showPopover globally so external UI (menus/buttons) can call it
+  window.showPopover = showPopover;
+
   saveBtn.addEventListener('click', async () => {
     let css = '';
     if (currentElement === 'verseReference') {
@@ -415,7 +418,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initImageEditor();
   initVideoEditor();
   initTabs();
-  // setupPopover(); // Disabled - not needed with canvas rendering
+  setupPopover(); // Enabled: required so style buttons and menus can open the CSS popover
   initSchedule();
   initResizers();
   restoreDividerPositions();
@@ -965,6 +968,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     if (content.text) {
       ctx.textAlign = 'center';
       const textY = displayHeight / 2;
+      const textLines = content.text.split('\n');
+      const allLines = [];
       // Default text color
       const normalTextColor = (textStyle && textStyle.color) ? textStyle.color : '#fff';
       // Subscript color uses a lighter tone or provided (derive if not given)
@@ -973,6 +978,10 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     textLines.forEach(textLine => {
       // Parse text to handle verse numbers as subscripts
       const segments = parseVerseSegments(textLine);
+      // For each non-number segment, parse inline Markdown to preserve bold/italic per word
+      segments.forEach(s => {
+        if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text);
+      });
       
       // Auto-size font to fill vertical space optimally
       ctx.font = `${baseFontSize}px Arial`;
@@ -989,6 +998,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const testLines = [];
       textLines.forEach(textLine => {
         const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown is parsed for measurement
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
         const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, testSize);
         testLines.push(...wrappedLines);
       });
@@ -1007,6 +1018,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const testLines = [];
       textLines.forEach(textLine => {
         const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown is parsed for measurement
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
         const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
         testLines.push(...wrappedLines);
       });
@@ -1100,10 +1113,18 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
       currentWidth += width;
       ctx.font = `${baseFontSize}px Arial`;
     } else {
-      // Split text into words
-      const words = seg.text.split(' ');
-      words.forEach((word, idx) => {
-        const testWord = word + (idx < words.length - 1 ? ' ' : '');
+      // If seg.words exists (parsed with inline markdown), use those styled words
+      const words = seg.words ? seg.words : seg.text.split(' ');
+      words.forEach((wordObj, idx) => {
+        const wordText = typeof wordObj === 'string' ? wordObj : wordObj.text;
+        const testWord = wordText + (idx < words.length - 1 ? ' ' : '');
+        // Set font according to inline style for accurate measurement
+        if (typeof wordObj !== 'string') {
+          const styleFont = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          ctx.font = styleFont;
+        } else {
+          ctx.font = `${baseFontSize}px Arial`;
+        }
         const width = ctx.measureText(testWord).width;
         
         if (currentWidth + width > maxWidth && currentLine.length > 0) {
@@ -1112,7 +1133,12 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
           currentWidth = 0;
         }
         
-        currentLine.push({ isNumber: false, text: testWord });
+        // Preserve style info in pushed segment
+        if (typeof wordObj === 'string') {
+          currentLine.push({ isNumber: false, text: testWord });
+        } else {
+          currentLine.push({ isNumber: false, text: testWord, bold: !!wordObj.bold, italic: !!wordObj.italic });
+        }
         currentWidth += width;
       });
     }
@@ -1128,7 +1154,7 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
 /**
  * Render a line with subscript verse numbers
  */
-function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
+function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize, colors = {}) {
   // Calculate total width
   const subscriptSize = baseFontSize * 0.6;
   let totalWidth = 0;
@@ -1138,7 +1164,9 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
       ctx.font = `${subscriptSize}px Arial`;
       totalWidth += ctx.measureText(seg.text + ' ').width;
     } else {
-      ctx.font = `${baseFontSize}px Arial`;
+      // Determine font for measurement if style flags exist
+      const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+      ctx.font = fontStr;
       totalWidth += ctx.measureText(seg.text).width;
     }
   });
@@ -1158,9 +1186,11 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
       x += ctx.measureText(seg.text + ' ').width;
       ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
     } else {
-      // Render normal text
-      ctx.font = `${baseFontSize}px Arial`;
+      // Render normal text, honoring bold/italic flags if present
+      const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+      ctx.font = fontStr;
       ctx.textAlign = 'left';
+      ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
       ctx.fillText(seg.text, x, y);
       x += ctx.measureText(seg.text).width;
     }
@@ -1191,6 +1221,63 @@ function wrapText(ctx, text, maxWidth) {
   
   if (currentLine) lines.push(currentLine);
   return lines;
+}
+
+/**
+ * Parse inline Markdown in a string into an array of word objects with style flags
+ * Supports: **bold**, __bold__, *italic*, _italic_
+ */
+function parseInlineMarkdownWords(s) {
+  const out = [];
+  if (!s) return out;
+
+  const tokenRegex = /(\*\*|__)([\s\S]+?)\1|(\*|_)([\s\S]+?)\3/g;
+  let lastIndex = 0;
+  let m;
+
+  while ((m = tokenRegex.exec(s)) !== null) {
+    if (m.index > lastIndex) {
+      // Plain text before this token
+      const plain = s.substring(lastIndex, m.index);
+      plain.split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: false, italic: false });
+      });
+    }
+
+    if (m[1] && m[2]) {
+      // Bold using ** or __
+      m[2].split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: true, italic: false });
+      });
+    } else if (m[3] && m[4]) {
+      // Italic using * or _
+      m[4].split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: false, italic: true });
+      });
+    }
+
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < s.length) {
+    const rest = s.substring(lastIndex);
+    rest.split(' ').forEach((w, i, arr) => {
+      if (w === '') return;
+      const add = i < arr.length - 1 ? w + ' ' : w;
+      out.push({ text: add, bold: false, italic: false });
+    });
+  }
+
+  // If nothing matched, but s has no spaces, ensure we return it
+  if (out.length === 0 && s.trim() !== '') out.push({ text: s, bold: false, italic: false });
+
+  return out;
 }
 
 async function updatePreview(verseOrIndices) {

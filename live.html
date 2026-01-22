@@ -130,6 +130,7 @@
 
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           textCtx.font = `${baseFontSize}px Arial`;
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
           allLines.push(...wrappedLines);
@@ -144,6 +145,7 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -160,6 +162,8 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            // Ensure inline markdown is parsed for measurement
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -479,6 +483,7 @@
         
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           textCtx.font = `${baseFontSize}px Arial`;
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
           allLines.push(...wrappedLines);
@@ -493,6 +498,7 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -511,6 +517,8 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            // Ensure inline markdown is parsed for measurement
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -627,6 +635,7 @@
 
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           offCtx.font = `${baseFontSize}px Arial`;
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
           allLines.push(...wrappedLines);
@@ -639,6 +648,7 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, offCtx);
             testLines.push(...wrappedLines);
           });
@@ -654,6 +664,7 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
             testLines.push(...wrappedLines);
           });
@@ -885,6 +896,8 @@
       const allLines = [];
       textLines.forEach(textLine => {
         const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown parsed for measurement/render
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
         textCtx.font = `${baseFontSize}px Arial`;
         const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
         allLines.push(...wrappedLines);
@@ -898,6 +911,8 @@
         const testLines = [];
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          // Ensure inline markdown is parsed for measurement
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
           testLines.push(...wrappedLines);
         });
@@ -913,6 +928,8 @@
         const testLines = [];
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          // Ensure inline markdown is parsed for measurement
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
           testLines.push(...wrappedLines);
         });
@@ -1318,6 +1335,58 @@
       
       return segments;
     }
+
+    // Parse inline Markdown in a string into an array of word objects with style flags
+    // Supports: **bold**, __bold__, *italic*, _italic_
+    function parseInlineMarkdownWords(s) {
+      const out = [];
+      if (!s) return out;
+
+      const tokenRegex = /(\*\*|__)([\s\S]+?)\1|(\*|_)([\s\S]+?)\3/g;
+      let lastIndex = 0;
+      let m;
+
+      while ((m = tokenRegex.exec(s)) !== null) {
+        if (m.index > lastIndex) {
+          const plain = s.substring(lastIndex, m.index);
+          plain.split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: false, italic: false });
+          });
+        }
+
+        if (m[1] && m[2]) {
+          // Bold
+          m[2].split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: true, italic: false });
+          });
+        } else if (m[3] && m[4]) {
+          // Italic
+          m[4].split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: false, italic: true });
+          });
+        }
+
+        lastIndex = tokenRegex.lastIndex;
+      }
+
+      if (lastIndex < s.length) {
+        const rest = s.substring(lastIndex);
+        rest.split(' ').forEach((w, i, arr) => {
+          if (w === '') return;
+          const add = i < arr.length - 1 ? w + ' ' : w;
+          out.push({ text: add, bold: false, italic: false });
+        });
+      }
+
+      if (out.length === 0 && s.trim() !== '') out.push({ text: s, bold: false, italic: false });
+      return out;
+    }
     
     /**
      * Wrap text with subscript segments
@@ -1344,18 +1413,32 @@
           currentWidth += width;
           context.font = `${baseFontSize}px Arial`;
         } else {
-          const words = seg.text.split(' ');
-          words.forEach((word, idx) => {
-            const testWord = word + (idx < words.length - 1 ? ' ' : '');
+          // Use parsed words (with bold/italic flags) if available
+          const words = seg.words ? seg.words : seg.text.split(' ');
+          words.forEach((wordObj, idx) => {
+            const wordText = typeof wordObj === 'string' ? wordObj : wordObj.text;
+            const testWord = wordText + (idx < words.length - 1 ? ' ' : '');
+
+            // Measure using style-aware font if available
+            if (typeof wordObj !== 'string') {
+              const fontStr = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+              context.font = fontStr;
+            } else {
+              context.font = `${baseFontSize}px Arial`;
+            }
+
             const width = context.measureText(testWord).width;
-            
             if (currentWidth + width > maxWidth && currentLine.length > 0) {
               lines.push(currentLine);
               currentLine = [];
               currentWidth = 0;
             }
-            
-            currentLine.push({ isNumber: false, text: testWord });
+
+            if (typeof wordObj === 'string') {
+              currentLine.push({ isNumber: false, text: testWord });
+            } else {
+              currentLine.push({ isNumber: false, text: testWord, bold: !!wordObj.bold, italic: !!wordObj.italic });
+            }
             currentWidth += width;
           });
         }
@@ -1398,7 +1481,9 @@
           x += context.measureText(seg.text + ' ').width;
           context.fillStyle = colors.textColor || '#fff';
         } else {
-          context.font = `${baseFontSize}px Arial`;
+          // Honor per-segment bold/italic flags when rendering
+          const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          context.font = fontStr;
           context.textAlign = 'left';
           context.fillStyle = colors.textColor || '#fff';
           context.fillText(seg.text, x, y);
@@ -1453,12 +1538,14 @@
         const allLines = [];
         
         textLines.forEach(textLine => {
-          // Parse text to handle verse numbers as subscripts
+                // Parse text to handle verse numbers as subscripts
           const segments = parseVerseSegments(textLine);
+          // Parse inline markdown for each non-number segment so we can render bold/italic on canvas
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           
           // Auto-size font to fill vertical space optimally
           ctx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, ctx);
           allLines.push(...wrappedLines);
         });
         
@@ -1470,7 +1557,8 @@
           ctx.font = `${testSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
+              const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize);
             testLines.push(...wrappedLines);
           });
@@ -1489,6 +1577,8 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
             testLines.push(...wrappedLines);
           });
