@@ -2,6 +2,9 @@ node_modules/
 dist/
 .vscode/
 /liturgia/*
+/payload.json
+/release_body*
+tmp*
 
 # Copilot instructions
 .github/copilot-instructions.md
