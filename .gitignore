@@ -8,3 +8,6 @@ tmp*
 
 # Copilot instructions
 .github/copilot-instructions.md
+
+# Local upload helper (contains credentials)
+upload.py
