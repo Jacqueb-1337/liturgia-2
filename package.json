@@ -5,7 +5,8 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
-    "make-icon": "node scripts/make-icon.js"
+    "make-icon": "node scripts/make-icon.js",
+    "rebuild-native": "npx electron-rebuild -f -w keytar --module-dir ."
   },
   "build": {
     "appId": "com.jacqueb.liturgia",
@@ -28,12 +29,13 @@
   "devDependencies": {
     "electron": "^25.9.8",
     "electron-builder": "^26.4.0",
-    "png-to-ico": "^3.0.1"
+    "png-to-ico": "^3.0.1",
+    "electron-rebuild": "^3.2.5"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
     "http-server": "^14.1.1",
-    "keytar": "^8.0.0",
+    "keytar": "^7.7.0",
     "node-fetch": "^2.6.7"
   }
 }

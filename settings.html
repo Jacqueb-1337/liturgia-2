@@ -204,8 +204,15 @@
       <div class="settings-panel active" id="panel-general">
         <h2>General Settings</h2>
         <div class="form-row">
-          <label for="username">Username</label>
-          <input id="username" type="text" />
+          <label>Account</label>
+          <div id="account-info" style="padding:8px;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;">Not signed in</div>
+          <div id="subscription-info" style="margin-top:8px;color:#666;font-size:0.95em;"></div>
+          <div style="margin-top:8px;display:flex;gap:8px;">
+            <button id="btn-sign-in">Sign in</button>
+            <button id="btn-sign-out">Sign out</button>
+            <button id="btn-view-subscription" style="display:none;">View Subscription</button>
+            <button id="btn-purchase-subscription" style="display:none;">Purchase Subscription</button>
+          </div>
         </div>
         <button class="save-settings" data-panel="general">Save</button>
         <span class="save-status" data-panel="general"></span>

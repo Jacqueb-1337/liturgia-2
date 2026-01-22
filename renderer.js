@@ -3,8 +3,23 @@
 const fs = require('fs');
 const path = require('path');
 const { ipcRenderer, shell } = require('electron');
-const keytar = require('keytar');
-const fetch = require('node-fetch');
+// Secure storage API using IPC to main (uses keytar in main if available)
+const secure = {
+  async getToken() { try { return await ipcRenderer.invoke('secure-get-token'); } catch (e) { console.error('secure get token error', e); return null; } },
+  async setToken(token) { try { return await ipcRenderer.invoke('secure-set-token', token); } catch (e) { console.error('secure set token error', e); return false; } },
+  async deleteToken() { try { return await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('secure delete token error', e); return false; } }
+};
+let fetch;
+try {
+  fetch = require('node-fetch');
+} catch (e) {
+  if (typeof window !== 'undefined' && window.fetch) {
+    fetch = window.fetch.bind(window);
+    console.warn('node-fetch not available, using window.fetch fallback');
+  } else {
+    throw e; // rethrow if no fallback available
+  }
+}
 const {
   ensureBibleJson,
   loadAllVersesFromDisk,
@@ -252,63 +267,70 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
   }
 });
 
+// Allow other windows (Settings) to request the setup modal
+ipcRenderer.on('show-setup-modal', () => {
+  try { createSetupModal(); } catch (e) { console.error('Failed to open setup modal from IPC', e); }
+});
+// Handle default-bible updates from main process
 ipcRenderer.on('default-bible-changed', async (event, bible) => {
-  const userData = await ipcRenderer.invoke('get-user-data-path');
-  const baseName = bible.endsWith('.json') ? bible.replace('.json','') : bible;
-  const biblePath = path.join(userData, BIBLE_STORAGE_DIR, baseName);
-  const localBibleFile = path.join(biblePath, 'bible.json');
-  const legacyFile = path.join(userData, BIBLE_STORAGE_DIR, bible);
-
-  // Update current bible tracking
-  currentBibleFile = bible;
-
-  // Migrate legacy single-file download into the expected per-version folder
-  if (!fs.existsSync(localBibleFile) && fs.existsSync(legacyFile)) {
-    try {
-      await fs.promises.mkdir(biblePath, { recursive: true });
-      const txt = await fs.promises.readFile(legacyFile, 'utf8');
-      await fs.promises.writeFile(localBibleFile, txt, 'utf8');
-    } catch (err) {
-      console.error('Failed to migrate legacy bible file:', err);
-    }
-  }
-
   try {
-    allVerses = await loadAllVersesFromDisk(biblePath);
-  } catch (err) {
-    safeStatus('Failed to load selected Bible.');
-    console.error('Failed to load selected bible:', err);
-    return;
-  }
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const baseName = bible.endsWith('.json') ? bible.replace('.json','') : bible;
+    const biblePath = path.join(userData, 'bibles', baseName);
+    const localBibleFile = path.join(biblePath, 'bible.json');
+    const legacyFile = path.join(userData, BIBLE_STORAGE_DIR, bible);
 
-  document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
-  renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
-  safeStatus(`Switched to ${baseName.replace('_', ' ')}.`);
-  
-  // Re-render schedule with new verse data
-  if (scheduleItems.length > 0) {
-    renderSchedule();
-  }
+    // Update current bible tracking
+    currentBibleFile = bible;
 
-  // Restore last selection if it belongs to this bible
-  try {
-    const settings = await ipcRenderer.invoke('load-settings');
-    if (settings && settings.lastSelected && settings.lastSelected.bible === currentBibleFile) {
-      const start = allVerses.findIndex(v => v.key === settings.lastSelected.startKey);
-      const end = settings.lastSelected.endKey ? allVerses.findIndex(v => v.key === settings.lastSelected.endKey) : start;
-      if (start !== -1) {
-        const realEnd = (end !== -1) ? end : start;
-        selectedIndices = [];
-        for (let k = Math.min(start, realEnd); k <= Math.max(start, realEnd); k++) selectedIndices.push(k);
-        anchorIndex = selectedIndices[0];
-        updateVerseDisplay();
-        updatePreview(allVerses[selectedIndices[0]]);
-        jumpToVerse(selectedIndices[0]);
-        renderWindow(allVerses, document.getElementById('verse-list').scrollTop, selectedIndices, handleVerseClick);
+    // Migrate legacy single-file download into the expected per-version folder
+    if (!fs.existsSync(localBibleFile) && fs.existsSync(legacyFile)) {
+      try {
+        await fs.promises.mkdir(biblePath, { recursive: true });
+        const txt = await fs.promises.readFile(legacyFile, 'utf8');
+        await fs.promises.writeFile(localBibleFile, txt, 'utf8');
+      } catch (err) {
+        console.error('Failed to migrate legacy bible file:', err);
       }
     }
+
+    try {
+      allVerses = await loadAllVersesFromDisk(biblePath);
+    } catch (err) {
+      safeStatus('Failed to load selected Bible.');
+      console.error('Failed to load selected bible:', err);
+      return;
+    }
+
+    document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
+    renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
+    safeStatus(`Switched to ${baseName.replace('_', ' ')}.`);
+    
+    // Re-render schedule with new verse data
+    if (scheduleItems.length > 0) {
+      renderSchedule();
+    }
+
+    // Restore last selection if it belongs to this bible
+    try {
+      const settings = await ipcRenderer.invoke('load-settings');
+      if (settings && settings.lastSelected && settings.lastSelected.bible === currentBibleFile) {
+        const start = allVerses.findIndex(v => v.key === settings.lastSelected.startKey);
+        const end = settings.lastSelected.endKey ? allVerses.findIndex(v => v.key === settings.lastSelected.endKey) : start;
+        if (start !== -1) {
+          const realEnd = (end !== -1) ? end : start;
+          selectedIndices = [];
+          for (let k = Math.min(start, realEnd); k <= Math.max(start, realEnd); k++) selectedIndices.push(k);
+          anchorIndex = selectedIndices[0];
+          updateVerseDisplay();
+          updatePreview(allVerses[selectedIndices[0]]);
+          jumpToVerse(selectedIndices[0]);
+          renderWindow(allVerses, document.getElementById('verse-list').scrollTop, selectedIndices, handleVerseClick);
+        }
+      }
+    } catch (err) { console.error('Failed to restore last selection after bible change:', err); }
   } catch (err) {
-    console.error('Failed to restore last selection:', err);
+    console.error('Error handling default-bible-changed:', err);
   }
 });
 
@@ -334,6 +356,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const listContainer = document.getElementById('verse-list');
   if (!listContainer) return;
+
+  // Track last known inner height so we can expand/shrink verse area proportionally on resize
+  let _lastWindowInnerHeight = window.innerHeight;
 
   // Initial render
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
@@ -373,10 +398,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       const previewPercent = Math.round((slidePreview.getBoundingClientRect().width / (containerRect.width || 1)) * 100);
       const verseHeightPx = Math.round(versePanel.getBoundingClientRect().height);
 
-      // Clamp same as restore
+      // Clamp same as restore for schedule/preview
       const clampedSchedule = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
       const clampedPreview = Math.max(10, Math.min(previewPercent, 90));
-      const clampedVerse = Math.max(50, Math.min(verseHeightPx, Math.max(100, window.innerHeight - 100)));
+
+      // Allow verse panel to expand/shrink when window height changes.
+      const heightDelta = window.innerHeight - (_lastWindowInnerHeight || window.innerHeight);
+      const windowMaxVerse = Math.max(100, window.innerHeight - 100);
+      let desiredVerse = verseHeightPx;
+      if (heightDelta > 0) {
+        // Window grew: add delta to verse height but don't exceed window available area
+        desiredVerse = Math.min(windowMaxVerse, verseHeightPx + heightDelta);
+      } else if (heightDelta < 0) {
+        // Window shrunk: reduce verse height but respect minimums
+        desiredVerse = Math.max(50, Math.min(verseHeightPx + heightDelta, windowMaxVerse));
+      }
+      const clampedVerse = Math.max(50, Math.min(desiredVerse, windowMaxVerse));
 
       let changed = false;
       if (clampedSchedule !== scheduleWidthPx) {
@@ -389,10 +426,14 @@ window.addEventListener('DOMContentLoaded', async () => {
         changed = true;
       }
       if (clampedVerse !== verseHeightPx) {
-        document.getElementById('top-section').style.flex = `0 0 ${Math.max(50, window.innerHeight - clampedVerse - 16)}px`;
+        const newTop = Math.max(50, window.innerHeight - clampedVerse - 16);
+        document.getElementById('top-section').style.flex = `0 0 ${newTop}px`;
         versePanel.style.flex = `0 0 ${clampedVerse}px`;
         changed = true;
       }
+
+      // Remember last window size for next resize calculation
+      _lastWindowInnerHeight = window.innerHeight;
 
       if (changed) await saveDividerPositions();
     }, 150);
@@ -519,6 +560,8 @@ async function initScripture() {
   allVerses = await loadAllVersesFromDisk(baseDir);
 
   document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
+  // Ensure left column is wide enough to show the longest verse reference (clamped to a sane maximum)
+  try { adjustVerseListWidth(allVerses); } catch(e) { console.warn('adjustVerseListWidth failed', e); }
   renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
   safeStatus(`Loaded ${allVerses.length} verses.`);
   
@@ -527,6 +570,47 @@ async function initScripture() {
     renderSchedule();
   }
 
+  // Compute and set verse-list width based on measured text (used above)
+  function adjustVerseListWidth(allVersesList) {
+    const listEl = document.getElementById('verse-list');
+    if (!listEl || !allVersesList || allVersesList.length === 0) return;
+
+    // Create a temporary element to pick up computed font styles
+    const sample = document.createElement('div');
+    sample.className = 'verse-item';
+    sample.style.position = 'absolute'; sample.style.visibility = 'hidden'; sample.style.whiteSpace = 'nowrap';
+    document.body.appendChild(sample);
+    const computedFont = window.getComputedStyle(sample).font || '14px Arial';
+    document.body.removeChild(sample);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = computedFont;
+
+    // Measure the longest key
+    let maxW = 0;
+    for (let i = 0; i < allVersesList.length; i++) {
+      const key = allVersesList[i] && allVersesList[i].key ? String(allVersesList[i].key) : '';
+      const w = ctx.measureText(key).width;
+      if (w > maxW) maxW = w;
+    }
+
+    // Add padding and clamp to reasonable bounds
+    const padding = 16; // 8px left + 8px right (we already have those)
+    const minW = 120;
+    const maxAllowed = Math.min(420, Math.floor(window.innerWidth * 0.45));
+    const desired = Math.ceil(maxW + padding);
+    const final = Math.max(minW, Math.min(desired, maxAllowed));
+
+    document.documentElement.style.setProperty('--verse-list-width', `${final}px`);
+  }
+
+  // Recompute on resize (debounced)
+  let _verseListResizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (_verseListResizeTimer) clearTimeout(_verseListResizeTimer);
+    _verseListResizeTimer = setTimeout(() => adjustVerseListWidth(allVerses), 150);
+  });
   // Try to restore last selection if it belongs to this bible
   try {
     const settings = await ipcRenderer.invoke('load-settings');
@@ -1501,12 +1585,10 @@ function updateLiveButtonState(isActive) {
 }
 
 // ------------------ License / Auth Integration ------------------
-const KEYTAR_SERVICE = 'Liturgia';
-const KEYTAR_ACCOUNT = 'auth-token';
 
 async function getSavedToken() {
   try {
-    const t = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    const t = await secure.getToken();
     if (t) return t;
     // Fallback to settings (legacy)
     try {
@@ -1515,26 +1597,38 @@ async function getSavedToken() {
     } catch (e) {}
     return null;
   } catch (e) {
-    console.error('keytar get error', e);
+    console.error('secure get error', e);
     return null;
   }
 }
 
 async function saveToken(token) {
   try {
-    await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token);
-    // Remove legacy from settings
-    await ipcRenderer.invoke('update-settings', { auth: null });
-  } catch (e) { console.error('keytar set error', e); }
+    let ok = false;
+    try { ok = await secure.setToken(token); } catch (e) { console.error('secure.setToken exception', e); ok = false; }
+
+    // Always mirror token in settings as a backup so restarts can recover reliably
+    try { await ipcRenderer.invoke('update-settings', { auth: { token } }); } catch (e) { console.error('mirror settings save failed', e); }
+
+    if (ok) {
+      try { await ipcRenderer.invoke('update-settings', { lastAuthSavedAt: Date.now(), authStorage: 'keytar' }); } catch (e) {}
+      return true;
+    } else {
+      // Keytar not available or failed — settings now contain token as fallback
+      try { await ipcRenderer.invoke('update-settings', { lastAuthSavedAt: Date.now(), authStorage: 'settings' }); } catch (e) {}
+      return true;
+    }
+  } catch (e) { console.error('secure set error', e); return false; }
 }
 
 async function clearToken() {
   try {
-    await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
-  } catch (e) { console.error('keytar delete error', e); }
+    await secure.deleteToken();
+  } catch (e) { console.error('secure delete error', e); }
+  try { await ipcRenderer.invoke('update-settings', { auth: null, lastAuthSavedAt: null, authStorage: null }); } catch (e) {}
 }
 
-function createSetupModal() {
+async function createSetupModal() {
   // Create a full-screen overlay modal for initial setup
   if (document.getElementById('setup-modal')) return;
   const modal = document.createElement('div');
@@ -1544,10 +1638,6 @@ function createSetupModal() {
     <div style="width:420px;padding:24px;background:var(--panel-bg,#111);border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);">
       <h2>Welcome to Liturgia</h2>
       <p id="setup-message">Sign in to validate ownership or subscribe.</p>
-      <div style="margin-top:12px;">
-        <label>Server URL</label>
-        <input id="setup-server" style="width:100%;padding:8px;margin-top:6px;" placeholder="https://yourdomain.com/licenses" />
-      </div>
       <div style="margin-top:12px;display:flex;gap:8px;">
         <input id="setup-email" type="email" placeholder="you@example.com" style="flex:1;padding:8px;" />
         <button id="btn-magic" style="padding:8px 12px;">Send Magic Link</button>
@@ -1564,16 +1654,15 @@ function createSetupModal() {
   `;
   document.body.appendChild(modal);
 
-  // Restore saved server if present
-  (async () => {
-    const settings = await ipcRenderer.invoke('load-settings');
-    if (settings && settings.licenseServer) document.getElementById('setup-server').value = settings.licenseServer;
-  })();
+  // Resolve configured server (managed) up-front
+  const _settings = await ipcRenderer.invoke('load-settings');
+  const server = (_settings && _settings.licenseServer) ? _settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
 
   document.getElementById('btn-magic').onclick = async () => {
-    const email = document.getElementById('setup-email').value.trim();
-    const server = document.getElementById('setup-server').value.trim();
-    if (!email || !server) { alert('Enter server & email'); return; }
+    const emailInput = document.getElementById('setup-email');
+    const email = emailInput.value.trim();
+    if (!email) { document.getElementById('setup-status').textContent = 'Enter an email'; emailInput.focus(); return; }    const btn = document.getElementById('btn-magic');
+    btn.disabled = true;
     document.getElementById('setup-status').textContent = 'Sending magic link...';
     try {
       const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
@@ -1581,39 +1670,95 @@ function createSetupModal() {
       });
       const json = await res.json();
       if (json.ok) {
-        document.getElementById('setup-status').textContent = 'Magic link sent — check your email and paste the token via "Enter Token".';
-        await ipcRenderer.invoke('update-settings', { licenseServer: server });
+        // Persist chosen server so the app remembers it across restarts
+        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
+        document.getElementById('setup-status').textContent = 'Magic link sent — check your email (and spam/junk folder) and paste the token via "Enter Token".';
       } else {
         document.getElementById('setup-status').textContent = 'Failed to send: ' + (json.error||'');
       }
     } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error sending magic link'; }
+    finally { btn.disabled = false; }
   };
 
   document.getElementById('btn-enter-token').onclick = async () => {
-    const server = document.getElementById('setup-server').value.trim();
-    const token = prompt('Paste the token from the magic link page:');
-    if (!token) return;
-    // Save token and validate
-    document.getElementById('setup-status').textContent = 'Validating token...';
-    await saveToken(token);
-    const ok = await validateTokenAndActivate(token, server);
-    if (ok) { document.getElementById('setup-status').textContent = 'Validated.'; closeSetupModal(); }
-    else { document.getElementById('setup-status').textContent = 'Validation failed. Please ensure the token is correct.'; }
+    // Server is resolved when the modal was created (hidden from user)
+    if (!server) { document.getElementById('setup-status').textContent = 'Server not configured'; return; }
+    // Show inline token modal instead of prompt
+    if (document.getElementById('token-entry-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'token-entry-modal';
+    modal.style = 'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:11000;';
+    modal.innerHTML = `
+      <div style="width:420px;padding:18px;background:var(--panel-bg,#111);border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);">
+        <h3>Enter Sign-in Token</h3>
+        <p>Paste the token from the magic link page or generated token below.</p>
+        <textarea id="token-input" style="width:100%;height:80px;font-size:12px;margin-top:8px;"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+          <button id="token-cancel" style="padding:6px 10px;">Cancel</button>
+          <button id="token-save" style="padding:6px 10px;">Validate & Save</button>
+        </div>
+        <div id="token-status" style="margin-top:8px;color:#aaa;font-size:12px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('token-cancel').onclick = () => { modal.remove(); };
+    document.getElementById('token-save').onclick = async () => {
+      const token = document.getElementById('token-input').value.trim();
+      if (!token) { document.getElementById('token-status').textContent = 'Enter a token.'; return; }
+      document.getElementById('token-status').textContent = 'Validating...';
+      const result = await validateTokenAndActivate(token, server);
+      if (result && result.ok) {
+        const saved = await saveToken(token);
+        // Persist the server we used so restarts keep it
+        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
+        if (!saved) {
+          document.getElementById('token-status').textContent = 'Signed in but failed to persist token to secure storage. It will be stored in settings as fallback.';
+        } else if (result.active) {
+          document.getElementById('token-status').textContent = 'Token validated and saved.';
+        } else {
+          document.getElementById('token-status').textContent = 'Signed in (license inactive). A watermark will be shown; activate to remove it.';
+        }
+        setTimeout(() => { modal.remove(); closeSetupModal(); }, 1200);
+      } else {
+        document.getElementById('token-status').textContent = 'Validation failed. Use admin/generate_token.php or the magic link.';
+      }
+    };
   };
 
   document.getElementById('btn-subscribe').onclick = async () => {
-    const server = document.getElementById('setup-server').value.trim();
-    if (!server) { alert('Enter server URL first'); return; }
     // Ask for email to create checkout and open in external browser
-    const email = document.getElementById('setup-email').value.trim();
-    if (!email) { alert('Enter an email'); return; }
+    // 'server' variable is resolved when the modal was created (hidden from user)
+    const emailInput = document.getElementById('setup-email');
+    const email = emailInput.value.trim();
+    if (!email) { document.getElementById('setup-status').textContent = 'Enter an email'; emailInput.focus(); return; }
+
+    // Basic sanity check for email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { document.getElementById('setup-status').textContent = 'Enter a valid email address'; emailInput.focus(); return; }
+
+    const btn = document.getElementById('btn-subscribe');
+    btn.disabled = true;
     document.getElementById('setup-status').textContent = 'Creating checkout...';
     try {
-      const res = await fetch(server.replace(/\/$/, '') + '/create-checkout-session.php', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email: email, plan: 'monthly'}) });
-      const j = await res.json();
-      if (j.url) { shell.openExternal(j.url); document.getElementById('setup-status').textContent = 'Checkout opened in browser.'; }
-      else document.getElementById('setup-status').textContent = 'Failed to create checkout: ' + (j.error||'');
+      // Use application/x-www-form-urlencoded as Stripe expects
+      const url = server.replace(/\/$/, '') + '/create-checkout-session.php';
+      let res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: `email=${encodeURIComponent(email)}&plan=monthly` });
+      let j = null;
+      let textBody = null;
+      try { j = await res.json(); } catch (err) { textBody = await res.text().catch(()=>null); console.warn('create-checkout-session returned non-JSON'); }
+
+      // If the server complains about content type, retry with JSON (works with newer servers)
+      const errorMsg = (j && j.error) ? j.error : (textBody || '');
+      if (errorMsg && /content type/i.test(errorMsg)) {
+        console.warn('Server rejected urlencoded body, retrying with JSON');
+        res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email:email, plan:'monthly'}) });
+        try { j = await res.json(); } catch (err) { textBody = await res.text().catch(()=>null); }
+      }
+
+      if (j && j.url) { shell.openExternal(j.url); document.getElementById('setup-status').textContent = 'Checkout opened in browser.'; }
+      else if (j && j.error) document.getElementById('setup-status').textContent = 'Failed to create checkout: ' + (j.error||'');
+      else document.getElementById('setup-status').textContent = `Failed to create checkout: HTTP ${res.status} ${textBody||''}`;
     } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error creating checkout'; }
+    finally { btn.disabled = false; }
   };
 
   document.getElementById('btn-continue-offline').onclick = async () => { closeSetupModal(); };
@@ -1623,21 +1768,38 @@ function closeSetupModal() { const m = document.getElementById('setup-modal'); i
 
 async function validateTokenAndActivate(token, serverUrl) {
   try {
-    const server = (serverUrl || (await ipcRenderer.invoke('load-settings')).licenseServer || '').replace(/\/$/, '');
-    if (!server) return false;
-    const res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
+    const settings = await ipcRenderer.invoke('load-settings') || {};
+    const server = (serverUrl || settings.licenseServer || '').replace(/\/$/, '');
+    if (!server) {
+      ipcRenderer.send('license-status-update', { active: false, reason: 'no-server' });
+      return { ok: false, reason: 'no-server' };
+    }
+    // First try using Authorization header
+    let res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status !== 200) {
+      // Retry using query param token as a fallback (some hosts strip Authorization header)
+      try {
+        res = await fetch(server + '/license-status.php?token=' + encodeURIComponent(token));
+      } catch (e) {
+        // ignore, will handle below
+      }
+    }
+
     if (res.status === 200) {
       const j = await res.json();
-      if (j.active) {
-        await saveToken(token);
-        // store server url in settings
-        await ipcRenderer.invoke('update-settings', { licenseServer: server });
-        return true;
-      }
-      return false;
+      // Broadcast license status to main->live window
+      ipcRenderer.send('license-status-update', j);
+      // Accept token if the server accepted it (200), even if not currently active.
+      return { ok: true, active: !!j.active, status: j };
+    } else {
+      ipcRenderer.send('license-status-update', { active: false, reason: 'http-' + res.status });
+      return { ok: false, reason: 'http-' + res.status };
     }
-    return false;
-  } catch (e) { console.error('validate error', e); return false; }
+  } catch (e) {
+    console.error('validate error', e);
+    ipcRenderer.send('license-status-update', { active: false, reason: 'error', error: e.message });
+    return { ok: false, reason: 'error', error: e.message };
+  }
 }
 
 async function ensureAuthSetup() {
@@ -1646,14 +1808,35 @@ async function ensureAuthSetup() {
   const settings = await ipcRenderer.invoke('load-settings') || {};
   const server = settings.licenseServer || '';
   if (token) {
-    const ok = await validateTokenAndActivate(token, server);
-    if (ok) return; // proceed
+    const result = await validateTokenAndActivate(token, server);
+    if (result && result.ok) {
+      scheduleLicensePolling();
+      return; // proceed
+    }
     // invalid token: clear and show setup
     await clearToken();
+    ipcRenderer.send('license-status-update', { active: false, reason: 'invalid-token' });
+  } else {
+    ipcRenderer.send('license-status-update', { active: false, reason: 'no-token' });
   }
   // Show setup modal
   createSetupModal();
+  scheduleLicensePolling();
 }
+
+// Poll license status periodically (runs immediately and every 15 minutes)
+let _licensePollIntervalId = null;
+function scheduleLicensePolling() {
+  if (_licensePollIntervalId) clearInterval(_licensePollIntervalId);
+  const runCheck = async () => {
+    const token = await getSavedToken();
+    if (token) await validateTokenAndActivate(token);
+    else ipcRenderer.send('license-status-update', { active: false, reason: 'no-token' });
+  };
+  // Run immediately
+  runCheck().catch(e => { console.error('license poll error', e); ipcRenderer.send('license-status-update', { active: false, reason: 'poll-error' }); });
+  _licensePollIntervalId = setInterval(() => runCheck().catch(e => { console.error('license poll error', e); ipcRenderer.send('license-status-update', { active: false, reason: 'poll-error' }); }), 15 * 60 * 1000);
+} 
 
 async function loadCoreUI() {
   // This is where previous initiation code that expects license to be checked goes
@@ -1897,24 +2080,23 @@ function renderSchedule() {
     if (itemType === 'song') {
       const song = allSongs[item.songIndex];
       displayText = song ? song.title : 'Unknown Song';
+      text.textContent = displayText;
+      text.title = displayText;
     } else if (itemType === 'media') {
       const media = allMedia[item.mediaIndex];
       const iconSVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M15 12V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 8.172 2H7.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 4.172 4H3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2zM8 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
       const mediaName = media ? media.name : 'Unknown Media';
-      displayText = mediaName.length > 35 ? mediaName.substring(0, 32) + '...' : mediaName;
-      text.innerHTML = media ? iconSVG + displayText : 'Unknown Media';
+      displayText = mediaName;
+      // Use DOM to set icon + text (avoid truncation so wrapping works)
+      text.innerHTML = media ? iconSVG : '';
+      const mediaSpan = document.createElement('span');
+      mediaSpan.textContent = displayText;
+      text.appendChild(mediaSpan);
+      text.title = displayText;
     } else {
       displayText = getScheduleItemLabel(item.indices);
-    }
-    
-    if (itemType !== 'media') {
-      // Truncate text if too long (max 40 chars)
-      if (displayText.length > 40) {
-        text.textContent = displayText.substring(0, 37) + '...';
-        text.title = displayText; // Show full text on hover
-      } else {
-        text.textContent = displayText;
-      }
+      text.textContent = displayText;
+      text.title = displayText;
     }
     
     header.appendChild(text);
@@ -2631,7 +2813,18 @@ async function saveDividerPositions() {
 
 async function restoreDividerPositions() {
   const settings = await ipcRenderer.invoke('load-settings') || {};
-  if (!settings.dividerPositions) return;
+  // Ensure defaults exist on fresh installs and persist them so restore sees explicit values
+  if (!settings.dividerPositions) {
+    settings.dividerPositions = {
+      scheduleWidthPx: 250,
+      previewPercent: 50,
+      verseHeightPx: 350,
+      scheduleWidth: '250px',
+      previewFlex: '0 0 50%',
+      verseHeight: '0 0 350px'
+    };
+    try { await ipcRenderer.invoke('update-settings', { dividerPositions: settings.dividerPositions }); } catch (e) { console.warn('Failed to persist default divider positions:', e); }
+  }
   
   const scheduleSidebar = document.getElementById('schedule-sidebar');
   const slidePreview = document.getElementById('slide-preview');
@@ -2658,7 +2851,7 @@ async function restoreDividerPositions() {
     const m = settings.dividerPositions.verseHeight.match(/(\d+)px/);
     if (m) verseHeightPx = parseInt(m[1], 10);
   }
-  if (!verseHeightPx) verseHeightPx = 200;
+  if (!verseHeightPx) verseHeightPx = 350; // default moved up to give more top area on clean installs
 
   // Validate and clamp to safe ranges based on current window size
   scheduleWidthPx = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
@@ -2807,8 +3000,11 @@ function renderSongList(songs) {
     // Highlight matched text if there's a search query
     if (currentSearchQuery) {
       songItem.innerHTML = highlightText(song.title, currentSearchQuery);
+      // Also set title attribute so full text is visible on hover
+      songItem.title = song.title;
     } else {
       songItem.textContent = song.title;
+      songItem.title = song.title;
     }
     
     songItem.setAttribute('data-index', actualIndex);

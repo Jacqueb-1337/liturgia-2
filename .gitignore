@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.vscode/
+/liturgia/*
 
 # Copilot instructions
 .github/copilot-instructions.md

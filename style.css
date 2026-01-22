@@ -47,6 +47,12 @@ body.dark-theme ::-webkit-scrollbar-thumb {
 /* Control Buttons Container */
 #control-buttons-container {
   flex-shrink: 0;
+  margin-left: auto; /* ensure it stays to the right when placed inside bottom-tabs */
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0; /* moved to bottom-tabs area */
+  background: transparent;
 }
 
 #control-buttons-container button {
@@ -63,11 +69,6 @@ body.dark-theme ::-webkit-scrollbar-thumb {
 #control-buttons-container button:hover {
   background: #e0e0e0;
   border-color: #999;
-}
-
-body.dark-theme #control-buttons-container {
-  background: #2a2a2a !important;
-  border-bottom-color: #444 !important;
 }
 
 body.dark-theme #control-buttons-container button {
@@ -261,6 +262,18 @@ body.dark-theme .song-item:hover {
   background: #333 !important;
 }
 
+/* Prevent long song titles from wrapping and overlapping other items */
+.song-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 16px; /* small line-height so the single line vertically centers with padding */
+}
+
+.song-item[title] {
+  cursor: help; /* indicates hover tooltip available */
+} 
+
 .search-highlight {
   background: yellow;
   color: black;
@@ -327,7 +340,8 @@ body.dark-theme #song-display h2 {
   color: #fff;
 }
 
-body.dark-t6px;
+body.dark-theme .song-verse {
+  padding: 6px;
   margin: 2px 0;
   cursor: pointer;
   border-radius: 4px;
@@ -335,6 +349,7 @@ body.dark-t6px;
   background: #f9f9f9;
   font-size: 0.8em;
   line-height: 1.2
+}
 
 .song-verse:hover {
   background: #f0f0f0 !important;
@@ -856,6 +871,8 @@ body.dark-theme .song-verse:hover {
 
 #schedule-sidebar {
   background: #f5f5f5;
+  /* Prevent horizontal scroll caused by long single-word items */
+  overflow-x: hidden;
 }
 
 body.dark-theme #schedule-sidebar {
@@ -927,7 +944,7 @@ nav button {
 }
 
 .tab-content {
-  padding: 20px;
+  padding: 0px 20px 20px 20px;
 }
 
 .hidden {
@@ -1044,6 +1061,10 @@ body.dark-theme #verse-display {
   box-sizing: border-box;
   cursor: grab;
   user-select: none;
+  /* Prevent multi-line wrapping which caused repeated book-name lines; show ellipsis instead */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .verse-item:active {
@@ -1108,6 +1129,8 @@ body.dark-theme .verse-item.selected {
   padding: 8px;
   color: white;
   outline: none;
+  /* Allow flex children to shrink when the sidebar is narrow */
+  min-width: 0;
 }
 
 .schedule-item-header:focus {
@@ -1134,6 +1157,11 @@ body.dark-theme .verse-item.selected {
 .schedule-item-text {
   flex: 1;
   font-size: 13px;
+  /* Prevent long words from overflowing the sidebar: allow wrapping and breaking */
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere; /* modern browsers */
+  word-break: break-word;   /* fallback */
 }
 
 .schedule-item-verses {
