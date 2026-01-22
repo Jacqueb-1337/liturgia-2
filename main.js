@@ -266,19 +266,24 @@ async function startSaveReport() {
   try { settingsFile = await fs.promises.readFile(settingsPath, 'utf8'); } catch (e) {}
 
   // Collect system info
+  const packageJson = (() => { try { return require('./package.json'); } catch (e) { return {}; } })();
   const sysInfo = {
     platform: process.platform,
     arch: process.arch,
     node: process.version,
     electron: process.versions.electron || null,
-    cpu: os.cpus ? os.cpus()[0].model : null,
-    memory: { total: os.totalmem(), free: os.freemem() }
+    chrome: process.versions.chrome || null,
+    cpuModel: os.cpus ? (os.cpus()[0] ? os.cpus()[0].model : null) : null,
+    cpuCores: os.cpus ? os.cpus().length : null,
+    memory: { total: os.totalmem(), free: os.freemem() },
+    appVersion: packageJson.version || null
   };
 
   // Join everything into a delimited report
   const parts = [];
   parts.push('=== REPORT: LITURGIA DIAGNOSTIC REPORT ===');
-  parts.push(`Generated: ${new Date().toISOString()}`);
+  // Add generated timestamp into metadata
+  sysInfo['Report Generated'] = new Date().toISOString();
   parts.push('=== METADATA ===');
   parts.push(JSON.stringify(sysInfo, null, 2));
 
@@ -305,6 +310,18 @@ async function startSaveReport() {
     parts.push('=== PREVIEW CANVAS (base64 PNG) ===');
     parts.push(rendererPayload.previewDataUrl);
   }
+
+  // Include global styles so the viewer can render index/live HTML accurately
+  let globalCss = '';
+  try { globalCss = await fs.promises.readFile(path.join(__dirname, 'style.css'), 'utf8'); } catch (e) { globalCss = ''; }
+  if (globalCss) {
+    parts.push('=== GLOBAL CSS (styles.css) ===');
+    parts.push(globalCss);
+  }
+
+  // Include renderer in-memory payload as a named section for the viewer
+  parts.push('=== RENDERER SETTINGS (in-memory) ===');
+  parts.push(JSON.stringify(rendererPayload || {}, null, 2));
 
   parts.push('=== END OF REPORT ===');
   const reportContent = parts.join('\n\n');
