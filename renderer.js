@@ -35,6 +35,21 @@ const {
 let allVerses = [];
 let allSongs = [];
 let filteredSongs = []; // For search results
+
+// Safety stub for showPopover: queues calls if popover isn't initialized yet
+if (typeof window !== 'undefined' && !window.showPopover) {
+  const _showPopoverStub = function(name, key) {
+    console.warn('showPopover called before popover initialized:', name, key);
+    document.addEventListener('DOMContentLoaded', () => {
+      // If real showPopover replaced the stub, call it
+      if (window.showPopover && window.showPopover !== _showPopoverStub) {
+        try { window.showPopover(name, key); } catch (e) { console.warn('Deferred showPopover failed', e); }
+      }
+    }, { once: true });
+  };
+  window.showPopover = _showPopoverStub;
+}
+
 let currentSearchQuery = ''; // Track current search query for highlighting
 let selectedSongVerseIndex = null; // Track selected verse within a song
 let selectedIndices = [];
@@ -47,6 +62,23 @@ let previewStyles = { verseNumber: '', verseText: '', verseReference: '' };
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
+
+// Listen for import notifications from main process
+ipcRenderer.on('songs-imported', (event, info) => {
+  const added = info && info.addedCount ? info.addedCount : 0;
+  const total = info && info.totalFound ? info.totalFound : 0;
+  alert(`EasyWorship import complete: found ${total} song(s), imported ${added} new song(s).`);
+  // Refresh songs list from disk
+  loadSongs();
+});
+
+ipcRenderer.on('easyworship-import-disabled', (event, info) => {
+  if (info && info.reason === 'sql-missing') {
+    alert('EasyWorship import is disabled: sql.js is not installed. Run "npm install" in the app directory and restart.');
+  } else {
+    alert('EasyWorship import is disabled.');
+  }
+});
 let scheduleItems = []; // Array of { indices: [], expanded: false, selectedVerses: [] }
 let selectedScheduleItems = []; // Indices of selected schedule items for multi-select
 let anchorScheduleIndex = null; // For shift-click range selection
@@ -124,18 +156,45 @@ function getCanvasStylesFor(type) {
 }
 
 function setupPopover() {
+  // Ensure popover DOM elements exist; if not, defer initialization until DOMContentLoaded
   const popover = document.getElementById('css-popover');
   const textarea = document.getElementById('css-textarea');
   const cssSelect = document.getElementById('css-select');
   const saveBtn = document.getElementById('css-save');
   const cancelBtn = document.getElementById('css-cancel');
   const errorDiv = document.getElementById('css-error');
-  let currentElement = null;
 
-  // Click listeners for elements
-  document.getElementById('verse-number').addEventListener('click', () => showPopover('Verse Number', 'verseNumber'));
-  document.getElementById('verse-text').addEventListener('click', () => showPopover('Verse Text', 'verseText'));
-  document.getElementById('verse-reference').addEventListener('click', () => showPopover('Verse Reference', 'verseReference'));
+  if (!popover || !textarea || !cssSelect || !saveBtn || !cancelBtn || !errorDiv) {
+    console.warn('setupPopover: popover elements missing, deferring until DOMContentLoaded');
+    document.addEventListener('DOMContentLoaded', () => {
+      try { setupPopover(); } catch (e) { console.warn('setupPopover retry failed', e); }
+    }, { once: true });
+    return;
+  }
+
+  let currentElement = null;
+  let _triggersAttached = false;
+  function attachPopoverTriggers(retries = 6) {
+    if (_triggersAttached) return;
+    const vn = document.getElementById('verse-number');
+    const vt = document.getElementById('verse-text');
+    const vr = document.getElementById('verse-reference');
+    if (vn || vt || vr) {
+      if (vn) vn.addEventListener('click', () => showPopover('Verse Number', 'verseNumber'));
+      if (vt) vt.addEventListener('click', () => showPopover('Verse Text', 'verseText'));
+      if (vr) vr.addEventListener('click', () => showPopover('Verse Reference', 'verseReference'));
+      _triggersAttached = true;
+      return;
+    }
+    if (retries > 0) {
+      // Retry after a short delay to allow UI to render
+      setTimeout(() => attachPopoverTriggers(retries - 1), 250);
+    } else {
+      console.warn('attachPopoverTriggers: could not find trigger elements after retries');
+    }
+  }
+  // Attempt to attach immediately
+  attachPopoverTriggers();
 
   function showPopover(name, key) {
     currentElement = key;

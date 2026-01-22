@@ -19,6 +19,22 @@ console.warn = function(...args) { _pushMainLog('warn', args); _origConsoleWarn.
 console.error = function(...args) { _pushMainLog('error', args); _origConsoleError.apply(console, args); };
 const path = require('path');
 const fs = require('fs');
+let SqlJsInit = null;
+let SQL = null;
+async function ensureSqlJs() {
+  if (SQL) return SQL;
+  if (SqlJsInit === null) {
+    try { SqlJsInit = require('sql.js'); } catch (e) { console.warn('sql.js not available; EasyWorship import disabled. Run `npm install sql.js` to enable.', e); return null; }
+  }
+  try {
+    // Initialize sql.js runtime; locateFile ensures the wasm is found in node_modules
+    SQL = await SqlJsInit({ locateFile: file => path.join(__dirname, 'node_modules', 'sql.js', 'dist', file) });
+    return SQL;
+  } catch (e) {
+    console.warn('Failed to initialize sql.js', e);
+    return null;
+  }
+}
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
 
 // Keytar IPC: store tokens securely in main process. Falls back to settings file if keytar not available.
@@ -64,6 +80,166 @@ app.setName('liturgia');
 let mainWindow; // Add this at the top
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
+
+// --- EasyWorship Import Helpers ---
+function stripRtf(rtf) {
+  if (!rtf) return '';
+  let s = rtf;
+  s = s.replace(/\\par[d]?/gi, '\n');
+  // Remove control words (e.g., \b0, \i, \fs24, etc.)
+  s = s.replace(/\\[a-zA-Z]+-?\d*\b/g, '');
+  // Remove groups/braces
+  s = s.replace(/[{}]/g, '');
+  // Remove stray backslashes
+  s = s.replace(/\\/g, '');
+  // Collapse multiple newlines
+  s = s.replace(/\n\s*\n+/g, '\n\n');
+  return s.trim();
+}
+
+function findDatabasesDirUnder(root, maxDepth = 4) {
+  try {
+    const toVisit = [{ dir: root, depth: 0 }];
+    while (toVisit.length) {
+      const { dir, depth } = toVisit.shift();
+      if (depth > maxDepth) continue;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      // Quick check: if this directory contains Songs.db and SongWords.db
+      const names = entries.map(e => e.name.toLowerCase());
+      if (names.includes('songs.db') && names.includes('songwords.db')) return dir;
+      // Also accept `Databases` folder
+      if (names.includes('databases')) return path.join(dir, 'Databases');
+      for (const e of entries) {
+        if (e.isDirectory()) toVisit.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+      }
+    }
+  } catch (e) { console.warn('findDatabasesDirUnder error', e); }
+  return null;
+}
+
+async function importEasyWorshipFromDir(databasesDir) {
+  // Returns array of { title, author, text }
+  const SQL = await ensureSqlJs();
+  if (!SQL) throw new Error('sql.js not available');
+
+  const songsDbPath = path.join(databasesDir, 'Songs.db');
+  const songWordsDbPath = path.join(databasesDir, 'SongWords.db');
+  if (!fs.existsSync(songsDbPath) || !fs.existsSync(songWordsDbPath)) {
+    return [];
+  }
+
+  // Load DB files into sql.js (WASM) in-memory DBs
+  const songsBuf = fs.readFileSync(songsDbPath);
+  const wordsBuf = fs.readFileSync(songWordsDbPath);
+  const dbSongs = new SQL.Database(new Uint8Array(songsBuf));
+  const dbWords = new SQL.Database(new Uint8Array(wordsBuf));
+
+  // Run queries
+  const songsRes = dbSongs.exec('SELECT rowid, title, author FROM song;');
+  const out = [];
+
+  if (songsRes && songsRes.length > 0 && songsRes[0].values) {
+    const cols = songsRes[0].columns;
+    for (const vals of songsRes[0].values) {
+      const row = {};
+      for (let i = 0; i < cols.length; i++) row[cols[i]] = vals[i];
+      const id = row.rowid || row.row_id || row.id || vals[0];
+      const title = row.title || 'Untitled';
+      const author = row.author || 'Unknown';
+      let lyrics = '';
+      try {
+        const q = dbWords.exec(`SELECT words FROM word WHERE song_id = ${id} LIMIT 1;`);
+        if (q && q.length && q[0].values && q[0].values[0]) lyrics = q[0].values[0][0] || '';
+      } catch (e) {
+        console.warn('Failed to retrieve lyrics for', id, e.message || e);
+      }
+      out.push({ title, author, text: stripRtf(lyrics) });
+    }
+  }
+
+  try { dbSongs.close(); } catch (e) {}
+  try { dbWords.close(); } catch (e) {}
+
+  return out;
+}
+
+async function importEasyWorshipHandler() {
+  const SQL = await ensureSqlJs();
+  if (!SQL) {
+    await dialog.showMessageBox({ type: 'error', message: 'Dependency missing', detail: 'The package "sql.js" (WASM) is required to import EasyWorship databases. Please run "npm install" in the app directory and restart the app.', buttons: ['OK'] });
+    if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('easyworship-import-disabled', { reason: 'sql-missing' });
+    return;
+  }
+
+  const choice = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Auto Scan', 'Select Folder', 'Cancel'],
+    defaultId: 0,
+    title: 'Import EasyWorship database',
+    message: 'Import EasyWorship songs',
+    detail: 'Auto Scan will try commonly used locations. Select Folder lets you pick the EasyWorship installation or Databases folder.'
+  });
+
+  let databasesDir = null;
+  if (choice.response === 0) { // Auto Scan
+    const candidates = [
+      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'Softouch', 'Easyworship'),
+      path.join('C:\\ProgramData', 'Softouch', 'Easyworship'),
+      path.join(os.homedir(), 'Documents', 'Easyworship')
+    ];
+    for (const c of candidates) {
+      const found = findDatabasesDirUnder(c);
+      if (found) { databasesDir = found; break; }
+    }
+    if (!databasesDir) {
+      dialog.showMessageBox({ type: 'info', message: 'No EasyWorship databases found in common locations. Please select a folder manually.', buttons: ['OK'] });
+      // fall through to select folder
+    }
+  }
+
+  if (!databasesDir && choice.response !== 2) {
+    const sel = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Select EasyWorship installation or Databases folder' });
+    if (sel.canceled || !sel.filePaths || sel.filePaths.length === 0) return;
+    // If user selected some folder, try to locate DBs under it
+    const candidate = sel.filePaths[0];
+    const found = findDatabasesDirUnder(candidate);
+    databasesDir = found || candidate;
+  }
+
+  if (!databasesDir) return;
+
+  const songs = await importEasyWorshipFromDir(databasesDir);
+  if (!songs || songs.length === 0) {
+    await dialog.showMessageBox({ type: 'info', message: 'No songs found', detail: `No Songs.db/SongWords.db data found under ${databasesDir}`, buttons: ['OK'] });
+    return;
+  }
+
+  // Merge into songs.json in userData
+  const songsPath = path.join(app.getPath('userData'), 'songs.json');
+  let existing = [];
+  try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
+
+  let added = 0;
+  for (const s of songs) {
+    const exists = existing.some(e => (e.title || '').trim() === (s.title || '').trim() && (e.author || '').trim() === (s.author || '').trim());
+    if (exists) continue;
+    // Convert text into lyrics sections (split on blank lines)
+    const paragraphs = s.text ? s.text.split(/\r?\n\s*\r?\n/) : [];
+    const lyrics = paragraphs.length ? paragraphs.map(p => ({ section: '', text: (p || '').trim().replace(/\r?\n/g, '\n') })) : [{ section: '', text: (s.text || '').trim() }];
+    existing.push({ title: s.title, author: s.author, lyrics });
+    added++;
+  }
+
+  try { fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8'); } catch (e) { console.error('Failed to write songs.json', e); dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] }); return; }
+
+  mainWindow && mainWindow.webContents.send('songs-imported', { addedCount: added, totalFound: songs.length });
+
+  dialog.showMessageBox({ type: 'info', message: 'Import complete', detail: `Found ${songs.length} song(s). Imported ${added} new song(s).`, buttons: ['OK'] });
+}
+
+// ---------------------------
+
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 
@@ -466,6 +642,10 @@ function createWindow() {
             settingsWin.setMenuBarVisibility(false);
             settingsWin.loadFile('settings.html');
           }
+        },
+        {
+          label: 'Import EasyWorship database...',
+          click: async () => { await importEasyWorshipHandler(); }
         },
         { type: 'separator' },
         { role: 'quit' }

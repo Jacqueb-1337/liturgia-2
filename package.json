@@ -36,6 +36,7 @@
     "adm-zip": "^0.5.16",
     "http-server": "^14.1.1",
     "keytar": "^7.7.0",
-    "node-fetch": "^2.6.7"
+    "node-fetch": "^2.6.7",
+    "sql.js": "^1.8.0"
   }
 }
