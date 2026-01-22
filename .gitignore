@@ -1,17 +1,11 @@
 node_modules/
 dist/
 .vscode/
-# Keep site runtime data, DBs and logs out of the repo; track site source files
-/liturgia/data/*
-/liturgia/auth/data/*
-/liturgia/admin/data/*
-/liturgia/.env
+/liturgia/
+# Ignore the local site build/deploy folder; user handles uploads manually
 /payload.json
 /release_body*
 tmp*
 
 # Copilot instructions
 .github/copilot-instructions.md
-
-# Local upload helper (contains credentials)
-upload.py
