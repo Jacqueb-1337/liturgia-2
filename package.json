@@ -38,8 +38,10 @@
   "devDependencies": {
     "electron": "^25.9.8",
     "electron-builder": "^26.4.0",
+    "electron-rebuild": "^3.2.5",
+    "jimp": "^1.6.0",
     "png-to-ico": "^3.0.1",
-    "electron-rebuild": "^3.2.5"
+    "sharp": "^0.34.5"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
