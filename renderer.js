@@ -3363,12 +3363,29 @@ function showSongContextMenu(x, y) {
   const menu = document.getElementById('song-context-menu');
   if (!menu) return;
   
-  // Show/hide edit option based on selection
   const editOption = document.getElementById('song-context-edit');
-  if (editOption) {
-    editOption.style.display = selectedSongIndices.length === 1 ? 'block' : 'none';
+  const deleteOption = document.getElementById('song-context-delete');
+  const exportOption = document.getElementById('song-context-export');
+  const importOption = document.getElementById('song-context-import');
+
+  // Configure options based on selection
+  if (selectedSongIndices.length === 0) {
+    if (editOption) editOption.style.display = 'none';
+    if (deleteOption) deleteOption.style.display = 'none';
+    if (exportOption) exportOption.style.display = 'none';
+  } else if (selectedSongIndices.length === 1) {
+    if (editOption) editOption.style.display = 'block';
+    if (deleteOption) deleteOption.style.display = 'block';
+    if (exportOption) exportOption.style.display = 'block';
+  } else {
+    if (editOption) editOption.style.display = 'none';
+    if (deleteOption) deleteOption.style.display = 'block';
+    if (exportOption) exportOption.style.display = 'block';
   }
-  
+
+  // Import should always be visible
+  if (importOption) importOption.style.display = 'block';
+
   // Position menu initially to measure its size
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -3428,6 +3445,18 @@ function initSongContextMenu() {
   if (importBtn) {
     importBtn.addEventListener('click', () => {
       importSongs();
+    });
+  }
+
+  // Allow right-click anywhere in the song list to open the context menu (useful when there are no songs)
+  const songListEl = document.getElementById('song-list');
+  if (songListEl) {
+    songListEl.addEventListener('contextmenu', (e) => {
+      // If user right-clicked on a specific song item, let that handler run instead
+      if (e.target.closest('[data-index]')) return;
+      e.preventDefault();
+      // Don't change selection; show menu with import enabled
+      showSongContextMenu(e.clientX, e.clientY);
     });
   }
 }
