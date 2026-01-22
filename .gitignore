@@ -1,7 +1,11 @@
 node_modules/
 dist/
 .vscode/
-/liturgia/*
+# Keep site runtime data, DBs and logs out of the repo; track site source files
+/liturgia/data/*
+/liturgia/auth/data/*
+/liturgia/admin/data/*
+/liturgia/.env
 /payload.json
 /release_body*
 tmp*
