@@ -24,7 +24,16 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Liturgia",
       "runAfterFinish": false
-    }
+    },
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^25.9.8",

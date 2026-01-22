@@ -27,8 +27,29 @@ async function ensureSqlJs() {
     try { SqlJsInit = require('sql.js'); } catch (e) { console.warn('sql.js not available; EasyWorship import disabled. Run `npm install sql.js` to enable.', e); return null; }
   }
   try {
-    // Initialize sql.js runtime; locateFile ensures the wasm is found in node_modules
-    SQL = await SqlJsInit({ locateFile: file => path.join(__dirname, 'node_modules', 'sql.js', 'dist', file) });
+    // Provide a robust locateFile so sql.js can find the wasm in dev and packaged apps
+    const locateFile = (file) => {
+      // Dev path: node_modules inside project
+      const devPath = path.join(__dirname, 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(devPath)) return devPath;
+
+      // Packaged unpacked asar location (electron-builder unpacks specified files)
+      const unpacked = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(unpacked)) return unpacked;
+
+      // If we placed the wasm explicitly via extraResources, it may appear at the root of resources
+      const resRoot = path.join(process.resourcesPath, 'sql-wasm.wasm');
+      if (fs.existsSync(resRoot)) return resRoot;
+
+      // Alternative path inside resources
+      const resAlt = path.join(process.resourcesPath, 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(resAlt)) return resAlt;
+
+      // Fallback to the file name (let sql.js try relative fetch if supported)
+      return file;
+    };
+
+    SQL = await SqlJsInit({ locateFile });
     return SQL;
   } catch (e) {
     console.warn('Failed to initialize sql.js', e);
