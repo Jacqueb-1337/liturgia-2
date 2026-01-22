@@ -81,7 +81,46 @@ function applyPreviewStyles() {
   if (previewStyles.verseNumber) css += `#verse-number { ${atob(previewStyles.verseNumber)} }\n`;
   if (previewStyles.verseText) css += `#verse-text { ${atob(previewStyles.verseText)} }\n`;
   if (previewStyles.verseReference) css += `#verse-reference { ${atob(previewStyles.verseReference)} }\n`;
+  // Song preview styles
+  if (previewStyles.songTitle) css += `#song-title { ${atob(previewStyles.songTitle)} }\n`;
+  if (previewStyles.songText) css += `#song-text { ${atob(previewStyles.songText)} }\n`;
+  if (previewStyles.songReference) css += `#song-reference { ${atob(previewStyles.songReference)} }\n`;
   styleEl.textContent = css;
+}
+
+// Parse base64-encoded CSS and return allowed canvas style properties
+function parseCanvasStyleFromB64(b64) {
+  if (!b64) return {};
+  try {
+    const css = atob(b64).toLowerCase();
+    // Remove font-size/line-height/font shorthand (not allowed)
+    const cleaned = css.replace(/font-size\s*:\s*[^;]+;?/gi, '').replace(/line-height\s*:\s*[^;]+;?/gi, '').replace(/font\s*:\s*[^;]+;?/gi, '');
+    const res = {};
+    const colorMatch = cleaned.match(/color\s*:\s*([^;]+)\s*;?/i);
+    if (colorMatch) res.color = colorMatch[1].trim();
+    const weightMatch = cleaned.match(/font-weight\s*:\s*(bold|[6-9]00)\s*;?/i);
+    if (weightMatch) res.fontWeight = 'bold';
+    const italicMatch = cleaned.match(/font-style\s*:\s*(italic)\s*;?/i);
+    if (italicMatch) res.fontStyle = 'italic';
+    return res;
+  } catch (e) {
+    return {};
+  }
+}
+
+function getCanvasStylesFor(type) {
+  // type: 'verse' or 'song'
+  const map = {};
+  if (type === 'verse') {
+    map.text = parseCanvasStyleFromB64(previewStyles.verseText);
+    map.number = parseCanvasStyleFromB64(previewStyles.verseNumber);
+    map.reference = parseCanvasStyleFromB64(previewStyles.verseReference);
+  } else {
+    map.text = parseCanvasStyleFromB64(previewStyles.songText || previewStyles.verseText);
+    map.title = parseCanvasStyleFromB64(previewStyles.songTitle || previewStyles.verseNumber);
+    map.reference = parseCanvasStyleFromB64(previewStyles.songReference || previewStyles.verseReference);
+  }
+  return map;
 }
 
 function setupPopover() {
@@ -833,6 +872,12 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, displayWidth, displayHeight);
   
+  // Styles passed via content.styles (optional)
+  const styles = content && content.styles ? content.styles : null;
+  const textStyle = styles && styles.text ? styles.text : null;
+  const numberStyle = styles && (styles.number || styles.title) ? (styles.number || styles.title) : null;
+  const referenceStyle = styles && styles.reference ? styles.reference : null;
+
   // Handle background media (object with type, path, color, and settings)
   if (content.backgroundMedia) {
     const media = content.backgroundMedia;
@@ -912,17 +957,18 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   if (content.number) {
     ctx.font = `${baseFontSize * 0.6}px Arial`;
     ctx.textAlign = 'left';
-    ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
-  }
-  
-  // Render verse text (center)
-  if (content.text) {
-    ctx.textAlign = 'center';
-    const textY = displayHeight / 2;
+      ctx.fillStyle = (numberStyle && numberStyle.color) ? numberStyle.color : '#fff';
+      ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+    }
     
-    // Split text by explicit newlines first (for songs), then handle verse numbers
-    const textLines = content.text.split('\n');
-    const allLines = [];
+    // Render verse text (center)
+    if (content.text) {
+      ctx.textAlign = 'center';
+      const textY = displayHeight / 2;
+      // Default text color
+      const normalTextColor = (textStyle && textStyle.color) ? textStyle.color : '#fff';
+      // Subscript color uses a lighter tone or provided (derive if not given)
+      const subscriptColor = (textStyle && textStyle.subscriptColor) ? textStyle.subscriptColor : (textStyle && textStyle.color ? textStyle.color : '#ddd');
     
     textLines.forEach(textLine => {
       // Parse text to handle verse numbers as subscripts
@@ -973,7 +1019,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     const startY = textY - (totalHeight / 2);
     
     lines.forEach((line, i) => {
-      renderLineWithSubscripts(ctx, line, displayWidth / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
+      renderLineWithSubscripts(ctx, line, displayWidth / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, { textColor: normalTextColor, subscriptColor });
     });
   }
   
@@ -981,6 +1027,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   if (content.reference) {
     ctx.font = `${baseFontSize * 0.7}px Arial`;
     ctx.textAlign = 'right';
+    ctx.fillStyle = (referenceStyle && referenceStyle.color) ? referenceStyle.color : '#fff';
     ctx.fillText(content.reference, displayWidth - padding, displayHeight - padding - baseFontSize * 0.3);
   }
   
@@ -1105,11 +1152,11 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
     if (seg.isNumber) {
       // Render subscript (smaller, slightly lower)
       ctx.font = `${subscriptSize}px Arial`;
-      ctx.fillStyle = '#ddd';
+      ctx.fillStyle = (colors && colors.subscriptColor) ? colors.subscriptColor : '#ddd';
       ctx.textAlign = 'left';
       ctx.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
       x += ctx.measureText(seg.text + ' ').width;
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
     } else {
       // Render normal text
       ctx.font = `${baseFontSize}px Arial`;
@@ -1245,6 +1292,7 @@ async function updateLive(verseOrIndices) {
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
+    const styles = getCanvasStylesFor('verse');
     window.currentContent = {
       number: numberText,
       text: textContent,
@@ -1252,7 +1300,8 @@ async function updateLive(verseOrIndices) {
       showHint: showHint,
       width: width,
       height: height,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     };
     // If preview is in black or clear mode, reflect that in the preview canvas
     if (blackMode) {
@@ -1289,6 +1338,7 @@ async function updateLive(verseOrIndices) {
     showingCount: indicesToShow.length,
     totalSelected: indices.length,
     backgroundMedia: backgroundMedia,
+    styles: getCanvasStylesFor('verse'),
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
@@ -2072,6 +2122,18 @@ function renderSchedule() {
       header.appendChild(spacer);
     }
     
+    // Icon on header (song / verse / media)
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'schedule-item-icon';
+    if (itemType === 'song') {
+      iconDiv.innerHTML = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
+    } else if (itemType === 'media') {
+      iconDiv.innerHTML = '<i class="fa-solid fa-image" aria-hidden="true"></i>';
+    } else {
+      iconDiv.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+    }
+    header.appendChild(iconDiv);
+
     // Text
     const text = document.createElement('div');
     text.className = 'schedule-item-text';
@@ -2084,14 +2146,9 @@ function renderSchedule() {
       text.title = displayText;
     } else if (itemType === 'media') {
       const media = allMedia[item.mediaIndex];
-      const iconSVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M15 12V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 8.172 2H7.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 4.172 4H3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2zM8 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
       const mediaName = media ? media.name : 'Unknown Media';
       displayText = mediaName;
-      // Use DOM to set icon + text (avoid truncation so wrapping works)
-      text.innerHTML = media ? iconSVG : '';
-      const mediaSpan = document.createElement('span');
-      mediaSpan.textContent = displayText;
-      text.appendChild(mediaSpan);
+      text.textContent = displayText;
       text.title = displayText;
     } else {
       displayText = getScheduleItemLabel(item.indices);
@@ -2159,11 +2216,19 @@ function renderSchedule() {
               const verseItem = document.createElement('div');
               verseItem.className = 'schedule-verse-item';
               verseItem.tabIndex = 0;
+              // icon + text elements for song verse
+              const verseIcon = document.createElement('span');
+              verseIcon.className = 'schedule-verse-icon';
+              verseIcon.innerHTML = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
+              const verseText = document.createElement('span');
+              verseText.className = 'schedule-verse-text';
               
               // First line of verse as label
               const firstLine = verse.split('\\n')[0];
               const label = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
-              verseItem.textContent = `${section.section} (${i + 1}): ${label}`;
+              verseText.textContent = `${section.section} (${i + 1}): ${label}`;
+              verseItem.appendChild(verseIcon);
+              verseItem.appendChild(verseText);
               
               if (item.selectedVerses && item.selectedVerses.includes(verseIndex)) {
                 verseItem.classList.add('selected');
@@ -2204,9 +2269,24 @@ function renderSchedule() {
         const verse = allVerses[verseIndex];
         if (verse) {
           const match = verse.key.match(/^(.+?)\s+(\d+):(\d+)$/);
-          verseItem.textContent = match ? `${match[1]} ${match[2]}:${match[3]}` : verse.key;
+          const verseLabel = match ? `${match[1]} ${match[2]}:${match[3]}` : verse.key;
+          const verseIcon = document.createElement('span');
+          verseIcon.className = 'schedule-verse-icon';
+          verseIcon.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+          const verseText = document.createElement('span');
+          verseText.className = 'schedule-verse-text';
+          verseText.textContent = verseLabel;
+          verseItem.appendChild(verseIcon);
+          verseItem.appendChild(verseText);
         } else {
-          verseItem.textContent = 'Unknown';
+          const verseIcon = document.createElement('span');
+          verseIcon.className = 'schedule-verse-icon';
+          verseIcon.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+          const verseText = document.createElement('span');
+          verseText.className = 'schedule-verse-text';
+          verseText.textContent = 'Unknown';
+          verseItem.appendChild(verseIcon);
+          verseItem.appendChild(verseText);
         }
         
         verseItem.onclick = (e) => {
@@ -3141,8 +3221,8 @@ function displaySelectedSong() {
       verses.forEach((verse, verseIndex) => {
         const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
         const isSelected = selectedSongVerseIndex === globalVerseIndex;
-        const verseText = currentSearchQuery ? highlightText(verse, currentSearchQuery) : verse;
-        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseText}</p>`;
+        const verseHtml = (currentSearchQuery && currentSearchQuery.trim()) ? renderSongVerse(verse, currentSearchQuery) : parseMarkdown(verse);
+        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseHtml}</p>`;
       });
     });
   }
@@ -3218,12 +3298,14 @@ async function updatePreviewFromSongVerse(verseIndex) {
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getCanvasStylesFor('song');
     renderToCanvas(previewCanvas, {
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
       showHint: null,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     }, width, height);
   }
 }
@@ -3242,6 +3324,7 @@ async function updateLiveFromSongVerse(verseIndex) {
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getCanvasStylesFor('song');
     window.currentContent = {
       number: '',
       text: verseData.text,
@@ -3249,7 +3332,8 @@ async function updateLiveFromSongVerse(verseIndex) {
       showHint: null,
       width: width,
       height: height,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     };
     renderToCanvas(liveCanvas, window.currentContent, width, height);
   }
@@ -3262,6 +3346,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     showingCount: 1,
     totalSelected: 1,
     backgroundMedia: backgroundMedia,
+    styles: getCanvasStylesFor('song'),
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
@@ -3416,6 +3501,12 @@ function showSongContextMenu(x, y) {
   setTimeout(() => document.addEventListener('click', closeMenu), 0);
 }
 
+// Generic helper: close a context menu by id
+function closeContextMenu(id) {
+  const m = document.getElementById(id);
+  if (m) m.style.display = 'none';
+}
+
 function initSongContextMenu() {
   const editBtn = document.getElementById('song-context-edit');
   const deleteBtn = document.getElementById('song-context-delete');
@@ -3424,6 +3515,7 @@ function initSongContextMenu() {
   
   if (editBtn) {
     editBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       if (selectedSongIndices.length === 1) {
         editSong(selectedSongIndices[0]);
       }
@@ -3432,18 +3524,21 @@ function initSongContextMenu() {
   
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       deleteSongs(selectedSongIndices);
     });
   }
   
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       exportSongs(selectedSongIndices);
     });
   }
   
   if (importBtn) {
     importBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       importSongs();
     });
   }
@@ -3457,6 +3552,21 @@ function initSongContextMenu() {
       e.preventDefault();
       // Don't change selection; show menu with import enabled
       showSongContextMenu(e.clientX, e.clientY);
+    });
+
+    // Ctrl/Cmd + A when the song list is focused should select all displayed songs
+    songListEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const dataset = (filteredSongs && filteredSongs.length > 0) ? filteredSongs : allSongs;
+        if (!dataset || dataset.length === 0) return;
+        // Map the displayed songs back to their indices in allSongs
+        const indices = dataset.map(s => allSongs.findIndex(x => x.title === s.title && x.author === s.author)).filter(i => i >= 0);
+        if (indices.length === 0) return;
+        selectedSongIndices = indices;
+        renderSongList(dataset);
+        displaySelectedSong();
+      }
     });
   }
 }
@@ -3481,7 +3591,8 @@ function editSong(songIndex) {
     // Convert song lyrics back to plain text with [Section] tags
     const lyricsText = song.lyrics.map(section => `[${section.section}]\n${section.text}`).join('\n\n');
     lyricsDiv.textContent = lyricsText;
-    updateInlineSongFormatting();
+    const previewEl = document.getElementById('song-editor-preview');
+    if (previewEl) previewEl.style.display = 'none';
     
     titleInput.focus();
   }
@@ -3674,17 +3785,19 @@ function parseSongText(title, lyricsText) {
   sectionTexts.forEach((text) => {
     let sectionLabel = '';
     let sectionContent = text.trim();
-    
-    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
-    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
-    if (tagMatch) {
-      sectionLabel = tagMatch[1].trim();
-      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+
+    // Only treat a top-line that is exactly a tag as a section label
+    const lines = sectionContent.split('\n');
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    if (tagLineMatch) {
+      sectionLabel = tagLineMatch[1].trim();
+      lines.shift();
+      sectionContent = lines.join('\n').trim();
     } else {
-      // Default to "Verse" if no tag
       sectionLabel = 'Verse';
     }
-    
+
     sections.push({
       section: sectionLabel,
       text: sectionContent
@@ -3722,7 +3835,72 @@ function initSongEditor() {
   if (saveBtn) {
     saveBtn.addEventListener('click', saveSongFromEditor);
   }
-  
+
+  // Preview toggle button (added dynamically if not present)
+  let previewToggle = document.getElementById('song-editor-preview-toggle');
+  if (!previewToggle) {
+    previewToggle = document.createElement('button');
+    previewToggle.id = 'song-editor-preview-toggle';
+    previewToggle.textContent = 'Show Preview';
+    previewToggle.style.padding = '8px 12px';
+    previewToggle.style.cursor = 'pointer';
+    previewToggle.style.marginRight = '8px';
+    const footer = document.querySelector('.song-editor-footer');
+    if (footer) footer.insertBefore(previewToggle, footer.firstChild);
+  }
+
+  previewToggle.addEventListener('click', () => {
+    const previewEl = document.getElementById('song-editor-preview');
+    if (!previewEl) return;
+    if (previewEl.style.display === 'none' || previewEl.style.display === '') {
+      updateSongPreview();
+      previewEl.style.display = 'block';
+      previewToggle.textContent = 'Hide Preview';
+    } else {
+      previewEl.style.display = 'none';
+      previewToggle.textContent = 'Show Preview';
+    }
+  });
+
+  // Edit Styles button (opens popover for editing song styles)
+  let editStylesBtn = document.getElementById('song-editor-edit-styles');
+  if (!editStylesBtn) {
+    editStylesBtn = document.createElement('button');
+    editStylesBtn.id = 'song-editor-edit-styles';
+    editStylesBtn.textContent = 'Edit Styles';
+    editStylesBtn.style.padding = '8px 12px';
+    editStylesBtn.style.cursor = 'pointer';
+    editStylesBtn.style.marginRight = '8px';
+    const footer = document.querySelector('.song-editor-footer');
+    if (footer) footer.insertBefore(editStylesBtn, footer.firstChild);
+  }
+
+  editStylesBtn.addEventListener('click', () => {
+    // Simple menu to choose which song style to edit
+    const menu = document.createElement('div');
+    menu.style.position = 'absolute';
+    menu.style.bottom = '60px';
+    menu.style.left = '20px';
+    menu.style.background = 'white';
+    menu.style.border = '1px solid #ccc';
+    menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    menu.style.zIndex = 3000;
+    menu.style.padding = '8px';
+    menu.innerHTML = `<div style="padding:6px; cursor:pointer;">Edit Song Title Style</div>
+                      <div style="padding:6px; cursor:pointer;">Edit Song Text Style</div>
+                      <div style="padding:6px; cursor:pointer;">Edit Song Reference Style</div>`;
+    document.body.appendChild(menu);
+
+    const removeMenu = () => { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); };
+
+    menu.children[0].addEventListener('click', () => { removeMenu(); showPopover('Song Title', 'songTitle'); });
+    menu.children[1].addEventListener('click', () => { removeMenu(); showPopover('Song Text', 'songText'); });
+    menu.children[2].addEventListener('click', () => { removeMenu(); showPopover('Song Reference', 'songReference'); });
+
+    // Close the menu on any click outside
+    setTimeout(() => document.addEventListener('click', removeMenu, { once: true }), 0);
+  });
+
   // Close on backdrop click
   if (modal) {
     modal.addEventListener('click', (e) => {
@@ -3748,6 +3926,8 @@ function openSongEditor() {
     if (authorInput) authorInput.value = '';
     if (lyricsInput) {
       lyricsInput.textContent = '';
+      const previewEl = document.getElementById('song-editor-preview');
+      if (previewEl) previewEl.style.display = 'none';
       lyricsInput.focus();
     }
     if (titleInput) titleInput.focus();
@@ -3761,12 +3941,71 @@ function closeSongEditor() {
   }
 }
 
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function parseMarkdown(text) {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(.+?)__/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/_(.+?)_/g, '<em>$1</em>');
+  // simple, safe Markdown for bold and italics
+  let t = escapeHtml(text);
+  // Bold: **text** or __text__
+  t = t.replace(/(\*\*|__)([\s\S]+?)\1/g, '<strong>$2</strong>');
+  // Italic: *text* or _text_
+  t = t.replace(/(\*|_)([\s\S]+?)\1/g, '<em>$2</em>');
+  // Preserve single line breaks as <br>
+  t = t.replace(/\n/g, '<br>');
+  return t;
+}
+
+// Render lyrics plain text into HTML for the contenteditable editor
+function renderLyricsHtml(text) {
+  const sections = text.split(/\n\n+/).filter(s => s.trim() !== '');
+  const parts = sections.map(section => {
+    const lines = section.split('\n');
+    // detect tag only if the first line is exactly a tag on its own line
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    let html = '';
+    if (tagMatch) {
+      const label = escapeHtml(tagMatch[1].trim());
+      html += `<div class="song-tag">[${label}]</div>`;
+      lines.shift(); // remove tag line
+    }
+    const content = lines.join('\n').trim();
+    if (content) {
+      html += `<div class="song-section">${parseMarkdown(content)}</div>`;
+    }
+    return html;
+  });
+  return parts.join('<div class="song-section-sep"></div>');
+}
+
+function updateInlineSongFormatting() {
+  // Deprecated: inline replacement caused editing issues. Use updateSongPreview() to render a preview instead.
+}
+
+function updateSongPreview() {
+  const lyricsDiv = document.getElementById('song-editor-lyrics');
+  const previewEl = document.getElementById('song-editor-preview');
+  if (!lyricsDiv || !previewEl) return;
+  const text = lyricsDiv.innerText || lyricsDiv.textContent || '';
+  previewEl.innerHTML = renderLyricsHtml(text);
+}
+// Render a single verse with optional search highlighting
+function renderSongVerse(verseText, query) {
+  if (!query || !query.trim()) return parseMarkdown(verseText);
+  const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${q})`, 'gi');
+  // Use safe markers that won't be interpreted by HTML escaping
+  const START = '___HIGHLIGHT_START___';
+  const END = '___HIGHLIGHT_END___';
+  const marked = verseText.replace(regex, `${START}$1${END}`);
+  // Parse markdown which will escape HTML and convert markdown
+  let html = parseMarkdown(marked);
+  // Now replace markers with actual span tags (escaped content inside is safe)
+  html = html.replace(new RegExp(START, 'g'), '<span class="search-highlight">');
+  html = html.replace(new RegExp(END, 'g'), '</span>');
+  return html;
 }
 
 async function saveSongFromEditor() {
@@ -3799,16 +4038,18 @@ async function saveSongFromEditor() {
     let sectionLabel = '';
     let sectionContent = text.trim();
     
-    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
-    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
-    if (tagMatch) {
-      sectionLabel = tagMatch[1].trim();
-      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+    // Only treat a top-line that is exactly a tag as a section label
+    const lines = sectionContent.split('\n');
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    if (tagLineMatch) {
+      sectionLabel = tagLineMatch[1].trim();
+      lines.shift();
+      sectionContent = lines.join('\n').trim();
     } else {
-      // Default to "Verse" if no tag
       sectionLabel = 'Verse';
     }
-    
+
     sections.push({
       section: sectionLabel,
       text: sectionContent

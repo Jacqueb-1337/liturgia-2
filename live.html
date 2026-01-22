@@ -100,7 +100,11 @@
       textCanvas.height = height;
       const textCtx = textCanvas.getContext('2d');
       textCtx.clearRect(0, 0, width, height);
-      textCtx.fillStyle = '#fff';
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
       textCtx.textAlign = 'center';
       textCtx.textBaseline = 'middle';
 
@@ -113,6 +117,7 @@
       if (content.number) {
         textCtx.font = `${baseFontSize * 0.6}px Arial`;
         textCtx.textAlign = 'left';
+        textCtx.fillStyle = numberStyle.color || '#fff';
         textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
       }
 
@@ -167,7 +172,7 @@
         const startY = textY - (totalHeight / 2);
 
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
 
@@ -175,6 +180,7 @@
       if (content.reference) {
         textCtx.font = `${baseFontSize * 0.7}px Arial`;
         textCtx.textAlign = 'right';
+        textCtx.fillStyle = referenceStyle.color || '#fff';
         textCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
 
@@ -443,7 +449,11 @@
       textCtx.clearRect(0, 0, width, height);
       
       // Render OLD text to off-screen canvas using proper wrapping
-      textCtx.fillStyle = '#fff';
+      const styles = oldContent && oldContent.styles ? oldContent.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
       textCtx.textAlign = 'center';
       textCtx.textBaseline = 'middle';
       
@@ -456,6 +466,7 @@
       if (oldContent.number) {
         textCtx.font = `${baseFontSize * 0.6}px Arial`;
         textCtx.textAlign = 'left';
+        textCtx.fillStyle = numberStyle.color || '#fff';
         textCtx.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
       }
       
@@ -512,7 +523,7 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
       
@@ -587,8 +598,12 @@
       off.height = height;
       const offCtx = off.getContext('2d');
 
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
       offCtx.clearRect(0, 0, width, height);
-      offCtx.fillStyle = '#fff';
       offCtx.textAlign = 'center';
       offCtx.textBaseline = 'middle';
 
@@ -600,6 +615,7 @@
       if (content.number) {
         offCtx.font = `${baseFontSize * 0.6}px Arial`;
         offCtx.textAlign = 'left';
+        offCtx.fillStyle = numberStyle.color || '#fff';
         offCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
       }
 
@@ -648,7 +664,7 @@
         const totalHeight = lines.length * lineHeight;
         const startY = textY - (totalHeight / 2);
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, offCtx);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, offCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
 
@@ -656,6 +672,7 @@
       if (content.reference) {
         offCtx.font = `${baseFontSize * 0.7}px Arial`;
         offCtx.textAlign = 'right';
+        offCtx.fillStyle = referenceStyle.color || '#fff';
         offCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
 
@@ -1354,7 +1371,7 @@
     /**
      * Render a line with subscript verse numbers
      */
-    function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx) {
+    function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx, colors = {}) {
       const subscriptSize = baseFontSize * 0.6;
       let totalWidth = 0;
       
@@ -1375,14 +1392,15 @@
       segments.forEach(seg => {
         if (seg.isNumber) {
           context.font = `${subscriptSize}px Arial`;
-          context.fillStyle = '#ddd';
+          context.fillStyle = colors.subscriptColor || '#ddd';
           context.textAlign = 'left';
           context.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
           x += context.measureText(seg.text + ' ').width;
-          context.fillStyle = '#fff';
+          context.fillStyle = colors.textColor || '#fff';
         } else {
           context.font = `${baseFontSize}px Arial`;
           context.textAlign = 'left';
+          context.fillStyle = colors.textColor || '#fff';
           context.fillText(seg.text, x, y);
           x += context.measureText(seg.text).width;
         }
@@ -1398,8 +1416,11 @@
       const width = currentRenderWidth;
       const height = currentRenderHeight;
       const content = currentRenderContent;
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
       
-      ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
     
@@ -1414,6 +1435,7 @@
       if (content.number) {
         ctx.font = `${baseFontSize * 0.6}px Arial`;
         ctx.textAlign = 'left';
+        ctx.fillStyle = numberStyle.color || '#fff';
         ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
       }
       
@@ -1421,6 +1443,10 @@
       if (content.text) {
         ctx.textAlign = 'center';
         const textY = height / 2;
+        
+        // Default text color and subscript color
+        const normalTextColor = textStyle.color || '#fff';
+        const subscriptColor = textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd');
         
         // Split text by explicit newlines first (for songs), then handle verse numbers
         const textLines = content.text.split('\n');
@@ -1475,7 +1501,7 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, ctx, { textColor: normalTextColor, subscriptColor });
         });
       }
       
@@ -1483,6 +1509,7 @@
       if (content.reference) {
         ctx.font = `${baseFontSize * 0.7}px Arial`;
         ctx.textAlign = 'right';
+        ctx.fillStyle = referenceStyle.color || '#fff';
         ctx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
       

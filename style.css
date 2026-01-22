@@ -117,10 +117,20 @@ body.dark-theme .bottom-tab.active {
   background: #fff;
 }
 
+#song-list:focus {
+  outline: 2px solid #0e639c;
+  outline-offset: -2px;
+}
+
 body.dark-theme #song-list {
   background: #181a1b;
   color: #eee;
   border-color: #333;
+}
+
+body.dark-theme #song-list:focus {
+  outline: 2px solid #1177bb;
+  outline-offset: -2px;
 }
 
 /* Song search input and buttons */
@@ -323,6 +333,10 @@ body.dark-theme #search-autocomplete-input:focus {
   font-weight: 600;
 }
 
+body.dark-theme #song-display h3 {
+  color: #eee;
+}
+
 #song-display .song-author {
   color: #666;
   font-style: italic;
@@ -346,7 +360,6 @@ body.dark-theme .song-verse {
   cursor: pointer;
   border-radius: 4px;
   border: 1px solid #ddd;
-  background: #f9f9f9;
   font-size: 0.8em;
   line-height: 1.2
 }
@@ -776,6 +789,16 @@ body.dark-theme .song-editor-help {
   pointer-events: none;
 }
 
+/* Inline editor formatting */
+.song-tag {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.song-section {
+  margin-bottom: 12px;
+}
+.song-section-sep { height: 8px; }
+
 body.dark-theme #song-editor-lyrics[contenteditable]:empty:before {
   color: #666;
 }
@@ -874,6 +897,8 @@ body.dark-theme .song-verse:hover {
   /* Prevent horizontal scroll caused by long single-word items */
   overflow-x: hidden;
 }
+
+.search-highlight { background: yellow; }
 
 body.dark-theme #schedule-sidebar {
   background: #2a2a2a;
@@ -1141,6 +1166,33 @@ body.dark-theme .verse-item.selected {
 .schedule-item-header.selected {
   background: #0078d4;
 }
+
+/* Small icons for schedule items */
+.schedule-item-icon {
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: #cfcfcf;
+}
+.schedule-item-icon i { font-size: 14px; }
+
+.schedule-verse-icon {
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: #bdbdbd;
+}
+.schedule-verse-icon i { font-size: 12px; }
+
+.schedule-verse-text { vertical-align: middle; }
+
+/* Selected states: make icons contrast when selected */
+.schedule-item-header.selected .schedule-item-icon { color: #fff; }
+.schedule-verse-item.selected .schedule-verse-icon { color: #fff; }
 
 .expand-arrow {
   width: 16px;
