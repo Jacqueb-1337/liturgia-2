@@ -613,12 +613,16 @@ function loadWindowState() {
 async function createWindow() {
   // Restore previous window bounds/state when available
   const winState = loadWindowState();
+  // Pick appropriate icon for packaged vs dev
+  let iconPath = path.join(__dirname, 'logo.png');
+  try { if (app.isPackaged) iconPath = path.join(process.resourcesPath, 'build', 'icon.ico'); } catch(e){}
+
   const opts = {
     width: winState.width || 1000,
     height: winState.height || 700,
     x: typeof winState.x === 'number' ? winState.x : undefined,
     y: typeof winState.y === 'number' ? winState.y : undefined,
-    icon: path.join(__dirname, 'logo.png'),
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
@@ -717,7 +721,7 @@ async function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
-              icon: path.join(__dirname, 'logo.png'),
+              icon: iconPath,
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -998,7 +1002,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
-      icon: path.join(__dirname, 'logo.png'),
+      icon: iconPath,
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
