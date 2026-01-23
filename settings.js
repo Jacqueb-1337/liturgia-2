@@ -170,9 +170,12 @@ document.querySelectorAll('.save-settings').forEach(btn => {
     // Back-compat: username field might not exist anymore
     const usernameEl = document.getElementById('username');
     const username = usernameEl ? usernameEl.value : undefined;
-    const theme = document.getElementById('theme').value;
-    const darkTheme = document.getElementById('dark-theme').checked;
-    const defaultDisplay = document.getElementById('default-display').value;
+    const themeEl = document.getElementById('theme');
+    const theme = themeEl ? themeEl.value : '';
+    const darkEl = document.getElementById('dark-theme');
+    const darkTheme = darkEl ? !!darkEl.checked : false;
+    const defaultDisplayEl = document.getElementById('default-display');
+    const defaultDisplay = defaultDisplayEl ? defaultDisplayEl.value : '';
     
     // Use server-side atomic update to avoid races
     const patch = { theme, darkTheme, defaultDisplay };

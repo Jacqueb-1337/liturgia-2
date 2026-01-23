@@ -68,16 +68,22 @@ async function prompt(q){
 
     // Find artifacts
     const dist = path.resolve(__dirname, '..', 'dist');
-    const exe = fs.readdirSync(dist).find(f=>f.toLowerCase().endsWith('.exe'));
-    const blockmap = fs.readdirSync(dist).find(f=>f.toLowerCase().endsWith('.blockmap'));
+    const files = fs.readdirSync(dist);
+    const exe = files.find(f=>f.toLowerCase().endsWith('.exe'));
     if (!exe) {
       console.error('No .exe found in dist/ to upload');
       process.exit(1);
     }
+    // Prefer a blockmap that contains the exe base name, otherwise fallback to first .blockmap
+    const exeBase = exe.replace(/\.exe$/i,'').toLowerCase();
+    let blockmap = files.find(f => f.toLowerCase().endsWith('.blockmap') && f.toLowerCase().includes(exeBase));
+    if (!blockmap) blockmap = files.find(f => f.toLowerCase().endsWith('.blockmap')) || null;
 
-    // Create release with gh
+    // Create release with gh — quote paths to handle spaces
     const notes = commitMsg.replace(/\"/g,'\\\"');
-    execSync(`gh release create v${newVer} ${path.join(dist,exe)} ${blockmap ? path.join(dist,blockmap) : ''} --title "v${newVer}" --notes "${notes}"`, { stdio: 'inherit' });
+    const exePath = `"${path.join(dist,exe)}"`;
+    const blockmapPath = blockmap ? `"${path.join(dist,blockmap)}"` : '';
+    execSync(`gh release create v${newVer} ${exePath} ${blockmapPath} --title "v${newVer}" --notes "${notes}"`, { stdio: 'inherit' });
 
     console.log('Release v' + newVer + ' created successfully');
   } catch (e) {
