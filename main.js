@@ -99,6 +99,8 @@ ipcMain.handle('secure-delete-token', async () => {
 app.setName('liturgia');
 
 let mainWindow; // Add this at the top
+let splashWindow = null;
+let splashClosed = false;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 
@@ -417,10 +419,18 @@ ipcMain.handle('get-current-license-status', () => {
 // Allow other windows to request opening the setup modal in the main window
 ipcMain.on('show-setup-modal', () => {
   try {
-    if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('show-setup-modal');
+    if (mainWindow) {
+      // Ensure the main window is visible and focused before forwarding the request
+      try { mainWindow.show(); mainWindow.focus(); } catch(e){}
+      if (mainWindow.webContents) mainWindow.webContents.send('show-setup-modal');
+    }
   } catch (e) {
     console.error('show-setup-modal forward error', e);
   }
+});
+
+ipcMain.handle('focus-main-window', async () => {
+  try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } return true; } catch (e) { return false; }
 });
 
 // IPC helper to write a combined diagnostic report
@@ -600,7 +610,7 @@ function loadWindowState() {
   }
 }
 
-function createWindow() {
+async function createWindow() {
   // Restore previous window bounds/state when available
   const winState = loadWindowState();
   const opts = {
@@ -618,11 +628,64 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(opts);
 
+  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
+    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
+  } catch (e) { console.warn('Default dark theme check failed', e); }
+
   if (winState.maximized) mainWindow.maximize();
   if (winState.fullscreen) mainWindow.setFullScreen(true);
 
   mainWindow.loadFile('index.html');
   
+  // Create a splash overlay that covers the main window until the splash animation finishes
+  try {
+    const b = mainWindow.getBounds();
+    splashWindow = new BrowserWindow({
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#141923',
+      alwaysOnTop: true,
+      resizable: false,
+      movable: false,
+      skipTaskbar: true,
+      parent: mainWindow,
+      modal: false,
+      show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false }
+    });
+    splashWindow.setMenuBarVisibility(false);
+    splashWindow.loadFile('splash.html').catch(()=>{});
+    splashWindow.once('ready-to-show', () => { try { splashWindow.show(); } catch(e){} });
+
+    // Keep splash window bounds in sync while present
+    const syncSplashBounds = () => { try { if (splashWindow && mainWindow) splashWindow.setBounds(mainWindow.getBounds()); } catch(e){} };
+    mainWindow.on('move', syncSplashBounds);
+    mainWindow.on('resize', syncSplashBounds);
+
+    // Remove splash when renderer signals done
+    const splashCloser = () => {
+      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+      try { mainWindow.focus(); } catch(e){}
+    };
+
+    // Listen for splash finished message
+    const { ipcMain } = require('electron');
+    ipcMain.once('splash-finished', () => { splashClosed = true; splashCloser(); try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){} });
+
+    // IPC to let renderer query splash state if it missed the event
+    ipcMain.handle('is-splash-closed', () => splashClosed);
+
+    // Fallback close in case IPC doesn't arrive
+    setTimeout(() => { if (splashWindow) { splashClosed = true; splashCloser(); } }, 8000);
+  } catch (e) { console.warn('Failed to create splash window', e); }
+
   // Save window state on move/resize/maximize/unmaximize/fullscreen changes
   mainWindow.on('resize', saveWindowStateDebounced);
   mainWindow.on('move', saveWindowStateDebounced);
@@ -733,7 +796,43 @@ ipcMain.on('set-dark-theme', (event, enabled) => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  await createWindow();
+  // After window creation, load settings and, if enabled, check for updates on startup
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch {}
+    // Back-compat and registry fallback on Windows
+    if (typeof settings.autoCheckUpdates !== 'boolean' && process.platform === 'win32') {
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('reg query "HKCU\\Software\\Liturgia" /v AutoCheckForUpdates', { stdio: ['pipe','pipe','ignore'] }).toString();
+        const m = out.match(/AutoCheckForUpdates\s+REG_\w+\s+(\d+)/i);
+        if (m) settings.autoCheckUpdates = (m[1] === '1');
+      } catch (e) { /* ignore */ }
+    }
+    // Default to true if not present
+    if (typeof settings.autoCheckUpdates !== 'boolean') settings.autoCheckUpdates = true;
+
+    // Default dark theme for fresh installs
+    if (typeof settings.darkTheme !== 'boolean') {
+      settings.darkTheme = true;
+      try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme:', e); }
+    }
+
+    if (settings.autoCheckUpdates) {
+      const res = await checkForUpdates();
+      if (res && res.updateAvailable && mainWindow) {
+        mainWindow.webContents.send('update-available', res);
+        // Prompt user in a non-blocking way
+        try {
+          const choice = await dialog.showMessageBox(mainWindow, { type: 'info', message: `Update available: ${res.latest}`, detail: res.body || '', buttons: ['Open release','Dismiss'], defaultId: 0 });
+          if (choice.response === 0) { shell.openExternal(res.html_url); }
+        } catch (e) {}
+      }
+    }
+  } catch (e) { console.warn('Startup update check failed', e); }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -746,6 +845,42 @@ app.on('activate', () => {
 // Expose userData path to renderer
 ipcMain.handle('get-user-data-path', () => {
   return app.getPath('userData');
+});
+
+// Semantic version compare: returns 1 if a>b, -1 if a<b, 0 if equal
+function semverCompare(a, b) {
+  if (!a || !b) return 0;
+  const pa = a.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const pb = b.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+// Check for updates against GitHub releases
+async function checkForUpdates() {
+  try {
+    const fetch = require('node-fetch');
+    const api = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases/latest';
+    const r = await fetch(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+    if (!r.ok) return { ok:false, error: `GitHub API returned ${r.status}` };
+    const j = await r.json();
+    const latest = (j.tag_name || j.name || '').toString();
+    const current = app.getVersion();
+    const cmp = semverCompare(latest, current);
+    const updateAvailable = (cmp === 1);
+    return { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body };
+  } catch (e) { console.warn('checkForUpdates error', e); return { ok:false, error: String(e) }; }
+}
+
+// Expose manual check via IPC
+ipcMain.handle('check-for-updates-manual', async () => {
+  return await checkForUpdates();
 });
 
 async function loadAllVersesFromDiskMain(baseDir) {

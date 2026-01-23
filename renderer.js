@@ -368,6 +368,16 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
   }
 });
 
+// Notify user when an update is available (sent from main on startup or when detected)
+ipcRenderer.on('update-available', (event, res) => {
+  try {
+    const body = res && res.body ? (res.body.split('\n')[0]) : '';
+    const msg = `A new version is available: ${res.latest || ''}` + (body ? `\n\n${body}` : '');
+    const open = confirm(msg + "\n\nOpen release page?");
+    if (open && res && res.html_url) { require('electron').shell.openExternal(res.html_url); }
+  } catch (e) { console.warn('update-available handler error', e); }
+});
+
 // Allow other windows (Settings) to request the setup modal
 ipcRenderer.on('show-setup-modal', () => {
   try { createSetupModal(); } catch (e) { console.error('Failed to open setup modal from IPC', e); }
@@ -1829,26 +1839,33 @@ async function createSetupModal() {
   if (document.getElementById('setup-modal')) return;
   const modal = document.createElement('div');
   modal.id = 'setup-modal';
-  modal.style = 'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.85);color:#fff;display:flex;align-items:center;justify-content:center;z-index:10000;';
+  modal.className = 'setup-overlay';
+  // Inline fixed positioning as a fallback (ensures overlay centers correctly even if stylesheet is overridden)
+  modal.style.position = 'fixed';
+  modal.style.left = '0'; modal.style.top = '0'; modal.style.right = '0'; modal.style.bottom = '0';
+  modal.style.display = 'flex'; modal.style.alignItems = 'center'; modal.style.justifyContent = 'center';
+  modal.style.zIndex = '20000'; modal.style.background = 'rgba(0,0,0,0.6)';
   modal.innerHTML = `
-    <div style="width:420px;padding:24px;background:var(--panel-bg,#111);border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);">
+    <div class="setup-card">
       <h2>Welcome to Liturgia</h2>
       <p id="setup-message">Sign in to validate ownership or subscribe.</p>
-      <div style="margin-top:12px;display:flex;gap:8px;">
-        <input id="setup-email" type="email" placeholder="you@example.com" style="flex:1;padding:8px;" />
-        <button id="btn-magic" style="padding:8px 12px;">Send Magic Link</button>
+      <div class="form-row" style="margin-top:12px;">
+        <input id="setup-email" class="input" type="email" placeholder="you@example.com" />
+        <button id="btn-magic" class="btn">Send Magic Link</button>
       </div>
-      <div style="margin-top:12px;display:flex;gap:8px;">
-        <button id="btn-enter-token" style="flex:1;padding:8px;">Enter Token</button>
-        <button id="btn-subscribe" style="flex:1;padding:8px;">Subscribe / Purchase</button>
+      <div class="form-row" style="margin-top:12px;">
+        <button id="btn-enter-token" class="btn">Enter Token</button>
+        <button id="btn-subscribe" class="btn primary">Subscribe / Purchase</button>
       </div>
       <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
-        <button id="btn-continue-offline" style="padding:8px;">Continue Offline (grace)</button>
-        <div id="setup-status" style="opacity:0.9;font-size:12px;color:#aaa"></div>
+        <button id="btn-continue-offline" class="btn">Continue Offline (grace)</button>
+        <div id="setup-status" style="opacity:0.9;font-size:12px;color:var(--muted)"></div>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
+  // Focus email input to let user start typing immediately
+  const emailEl = document.getElementById('setup-email'); if (emailEl) setTimeout(()=>emailEl.focus(),50);
 
   // Resolve configured server (managed) up-front
   const _settings = await ipcRenderer.invoke('load-settings');
@@ -1883,20 +1900,27 @@ async function createSetupModal() {
     if (document.getElementById('token-entry-modal')) return;
     const modal = document.createElement('div');
     modal.id = 'token-entry-modal';
-    modal.style = 'position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:11000;';
+    modal.className = 'setup-overlay';
+    // Inline fixed positioning fallback to ensure proper overlay behavior
+    modal.style.position = 'fixed';
+    modal.style.left = '0'; modal.style.top = '0'; modal.style.right = '0'; modal.style.bottom = '0';
+    modal.style.display = 'flex'; modal.style.alignItems = 'center'; modal.style.justifyContent = 'center';
+    modal.style.zIndex = '20000'; modal.style.background = 'rgba(0,0,0,0.6)';
     modal.innerHTML = `
-      <div style="width:420px;padding:18px;background:var(--panel-bg,#111);border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);">
+      <div class="setup-card" style="width:420px;">
         <h3>Enter Sign-in Token</h3>
         <p>Paste the token from the magic link page or generated token below.</p>
-        <textarea id="token-input" style="width:100%;height:80px;font-size:12px;margin-top:8px;"></textarea>
+        <textarea id="token-input" class="input" style="height:80px;font-size:12px;margin-top:8px;width:100%;"></textarea>
         <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-          <button id="token-cancel" style="padding:6px 10px;">Cancel</button>
-          <button id="token-save" style="padding:6px 10px;">Validate & Save</button>
+          <button id="token-cancel" class="btn">Cancel</button>
+          <button id="token-save" class="btn primary">Validate & Save</button>
         </div>
-        <div id="token-status" style="margin-top:8px;color:#aaa;font-size:12px;"></div>
+        <div id="token-status" style="margin-top:8px;color:var(--muted);font-size:12px;"></div>
       </div>
     `;
     document.body.appendChild(modal);
+    // Focus the token input so users can paste immediately
+    const tokenInput = document.getElementById('token-input'); if (tokenInput) setTimeout(()=>tokenInput.focus(),50);
     document.getElementById('token-cancel').onclick = () => { modal.remove(); };
     document.getElementById('token-save').onclick = async () => {
       const token = document.getElementById('token-input').value.trim();
@@ -2018,6 +2042,41 @@ async function ensureAuthSetup() {
   // Show setup modal
   createSetupModal();
   scheduleLicensePolling();
+
+  // Ensure setup modal is shown after splash closes (splash might overlay it)
+  ipcRenderer.on('splash-closed', async () => {
+    try {
+      const token = await getSavedToken();
+      if (!token) {
+        if (!document.getElementById('setup-modal')) createSetupModal();
+        else {
+          // Ensure it's visible and focused
+          const m = document.getElementById('setup-modal'); if (m) { m.style.display='flex'; const el = document.getElementById('setup-email'); if (el) setTimeout(()=>el.focus(),50); }
+        }
+      } else {
+        const settings = await ipcRenderer.invoke('load-settings') || {};
+        const server = settings.licenseServer || '';
+        const res = await validateTokenAndActivate(token, server);
+        if (!res || !res.ok) {
+          if (!document.getElementById('setup-modal')) createSetupModal();
+          else { const m = document.getElementById('setup-modal'); if (m) { m.style.display='flex'; const el = document.getElementById('setup-email'); if (el) setTimeout(()=>el.focus(),50); }}
+        }
+      }
+      try { window.focus(); } catch(e){}
+      try { ipcRenderer.invoke('focus-main-window'); } catch(e){}
+    } catch (e) { console.warn('splash-closed handler error', e); }
+  });
+
+  // If the splash already closed before this handler attached, show the setup modal now
+  (async function(){
+    try {
+      const closed = await ipcRenderer.invoke('is-splash-closed');
+      if (closed) {
+        const token = await getSavedToken();
+        if (!token) { if (!document.getElementById('setup-modal')) createSetupModal(); }
+      }
+    } catch(e) { /* ignore */ }
+  })();
 }
 
 // Poll license status periodically (runs immediately and every 15 minutes)

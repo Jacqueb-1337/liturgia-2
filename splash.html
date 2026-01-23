@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Liturgia</title>
+  <style>
+    :root{--bg1:#0f1720;--bg2:#141923;--accent:#0078d4}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg1),var(--bg2));-webkit-font-smoothing:antialiased}
+    .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px}
+    .card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;border-radius:14px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 10px 30px rgba(0,0,0,0.6)}
+    img.logo{width:88px;height:88px;border-radius:12px;object-fit:cover}
+    .motto{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color:#fff; font-weight:600; font-size:18px; position:relative; overflow:visible;}
+    .motto .mask{display:inline-block; position:relative; overflow:hidden}
+    .motto .mask::before{content:'';position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(90deg,var(--bg1),var(--bg2));z-index:2;transform:translateX(0);transition:transform 900ms cubic-bezier(.2,.9,.2,1)}
+    .motto.revealed .mask::before{transform:translateX(100%)}
+
+    /* fade out state */
+    .splash-fade{opacity:0;transition:opacity 400ms ease}
+
+    /* small subtle loading bar */
+    .loader{height:4px;width:160px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
+    .loader > .bar{width:0;height:100%;background:linear-gradient(90deg,var(--accent),#00b0ff);transition:width 1.2s cubic-bezier(.2,.9,.2,1)}
+
+    /* keep a solid gradient background so fade reveals the app beneath without flashing */
+    /* body remains with gradient defined above */
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="card">
+      <img class="logo" src="logo.png" alt="Liturgia">
+      <div class="motto" id="motto"><span class="mask">Worship without distraction.</span></div>
+      <div class="loader"><div class="bar" id="bar"></div></div>
+    </div>
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    (function(){
+      // Start animation after slight delay so everything appears smooth
+      const motto = document.getElementById('motto');
+      const bar = document.getElementById('bar');
+      setTimeout(()=>{
+        bar.style.width = '100%';
+      }, 200);
+      setTimeout(()=>{
+        motto.classList.add('revealed');
+      }, 700);
+      // After the reveal, wait and then fade out
+      setTimeout(()=>{
+        document.body.classList.add('splash-fade');
+        // Give time for fade transition
+        setTimeout(()=>{ ipcRenderer.send('splash-finished'); }, 420);
+      }, 2200);
+      // As a backup, ensure we close after 6s
+      setTimeout(()=>{ ipcRenderer.send('splash-finished'); }, 6000);
+    })();
+  </script>
+</body>
+</html>

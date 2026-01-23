@@ -57,6 +57,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('theme').value = settings.theme || '';
     document.getElementById('dark-theme').checked = !!settings.darkTheme;
     applyDarkTheme(!!settings.darkTheme);
+    // Auto-update setting (default true for new installs)
+    const au = document.getElementById('auto-update-startup');
+    if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
   }
 
   // Populate account/subscription info
@@ -84,21 +87,32 @@ window.addEventListener('DOMContentLoaded', async () => {
         } catch (e) { /* ignore */ }
       }
       ai.textContent = displayEmail || 'Signed in';
-      if (license.active) {
-        si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
-      } else {
-        si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
-      }
 
-      // Toggle UI controls
-      if (signInBtn) signInBtn.style.display = 'none';
-      if (signOutBtn) signOutBtn.style.display = '';
-      if (viewSubBtn) viewSubBtn.style.display = '';
-      if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+      // If this is a 'no-token' trial (user continued without signing in), show only Sign in
+      const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
+      if (isNoToken) {
+        si.textContent = `Not active (no-token).`; // keep short
+        if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+        if (signOutBtn) signOutBtn.style.display = 'none';
+        if (viewSubBtn) viewSubBtn.style.display = 'none';
+        if (purchaseBtn) purchaseBtn.style.display = 'none';
+      } else {
+        if (license.active) {
+          si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
+        } else {
+          si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
+        }
+
+        // Toggle UI controls for normal signed-in flow
+        if (signInBtn) signInBtn.style.display = 'none';
+        if (signOutBtn) signOutBtn.style.display = '';
+        if (viewSubBtn) viewSubBtn.style.display = '';
+        if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+      }
     } else {
       document.getElementById('account-info').textContent = 'Not signed in';
       document.getElementById('subscription-info').textContent = '';
-      if (signInBtn) signInBtn.style.display = '';
+      if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
       if (signOutBtn) signOutBtn.style.display = 'none';
       if (viewSubBtn) viewSubBtn.style.display = 'none';
       if (purchaseBtn) purchaseBtn.style.display = '';
@@ -108,6 +122,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   await loadDisplays();
+
+  // Manual check for updates button
+  const checkBtn = document.getElementById('btn-check-updates');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', async () => {
+      const status = document.getElementById('update-status');
+      try {
+        status.textContent = 'Checking...';
+        const res = await ipcRenderer.invoke('check-for-updates-manual');
+        if (res && res.ok && res.updateAvailable) {
+          status.innerHTML = `Update available: <strong>${res.latest}</strong> — <a href="${res.html_url}" target="_blank">Release</a>`;
+        } else if (res && res.ok) {
+          status.textContent = 'No updates available';
+        } else {
+          status.textContent = 'Update check failed';
+        }
+      } catch (e) { status.textContent = 'Error checking for updates'; }
+      setTimeout(() => { const s = document.getElementById('update-status'); if (s) s.textContent = ''; }, 7000);
+    });
+  }
 
 // Helper: decode JWT payload without verifying signature (base64url)
 function decodeJwtPayload(token) {
@@ -141,6 +175,9 @@ document.querySelectorAll('.save-settings').forEach(btn => {
     // Use server-side atomic update to avoid races
     const patch = { theme, darkTheme, defaultDisplay };
     if (username !== undefined) patch.username = username;
+    // Include auto-update preference
+    const auEl = document.getElementById('auto-update-startup');
+    if (auEl) patch.autoCheckUpdates = !!auEl.checked;
     await ipcRenderer.invoke('update-settings', patch);
     applyDarkTheme(darkTheme);
     // Show status only for the current panel
@@ -177,6 +214,8 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       try {
         // Ask main window to show its setup popover/modal
         ipcRenderer.send('show-setup-modal');
+        // Close the settings window so the setup modal is visible
+        window.close();
       } catch (e) { console.error('Failed to request setup modal', e); }
     });
   }

@@ -4,6 +4,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "prebuild": "node scripts/clean-old-exe.js",
     "build": "electron-builder",
     "make-icon": "node scripts/make-icon.js",
     "rebuild-native": "npx electron-rebuild -f -w keytar --module-dir ."
@@ -23,7 +24,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Liturgia",
-      "runAfterFinish": false
+      "runAfterFinish": false,
+      "include": "build/installer.nsh"
     },
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
@@ -33,7 +35,8 @@
         "from": "node_modules/sql.js/dist/sql-wasm.wasm",
         "to": "sql-wasm.wasm"
       }
-    ]
+    ],
+    "artifactName": "liturgia.exe"
   },
   "devDependencies": {
     "electron": "^25.9.8",
