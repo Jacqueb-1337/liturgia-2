@@ -54,8 +54,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Back-compat: only set username field if it exists
     const usernameEl = document.getElementById('username');
     if (usernameEl) usernameEl.value = settings.username || '';
-    document.getElementById('theme').value = settings.theme || '';
-    document.getElementById('dark-theme').checked = !!settings.darkTheme;
+    const themeEl = document.getElementById('theme');
+    if (themeEl) themeEl.value = settings.theme || '';
+    const darkEl = document.getElementById('dark-theme');
+    if (darkEl) darkEl.checked = !!settings.darkTheme;
     applyDarkTheme(!!settings.darkTheme);
     // Auto-update setting (default true for new installs)
     const au = document.getElementById('auto-update-startup');

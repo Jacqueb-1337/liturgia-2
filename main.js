@@ -823,12 +823,9 @@ app.whenReady().then(async () => {
     if (settings.autoCheckUpdates) {
       const res = await checkForUpdates();
       if (res && res.updateAvailable && mainWindow) {
+        // Send update info to renderer only; renderer handles UI and download flow.
         mainWindow.webContents.send('update-available', res);
-        // Prompt user in a non-blocking way
-        try {
-          const choice = await dialog.showMessageBox(mainWindow, { type: 'info', message: `Update available: ${res.latest}`, detail: res.body || '', buttons: ['Open release','Dismiss'], defaultId: 0 });
-          if (choice.response === 0) { shell.openExternal(res.html_url); }
-        } catch (e) {}
+        // No native dialog here — keep update UX consistent inside the app.
       }
     }
   } catch (e) { console.warn('Startup update check failed', e); }

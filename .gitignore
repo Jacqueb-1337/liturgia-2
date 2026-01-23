@@ -9,3 +9,6 @@ tmp*
 
 # Copilot instructions
 .github/copilot-instructions.md
+
+# Local release helper (not for repo)
+scripts/release-bump.js

@@ -371,6 +371,84 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
 // Notify user when an update is available (sent from main on startup or when detected)
 ipcRenderer.on('update-available', (event, res) => {
   try {
+    function createInlineUpdateNotice(info, targetCard) {
+      // Add a compact update notice into the given container (e.g., setup modal) to avoid overlapping UI
+      const existing = targetCard.querySelector('.inline-update-notice');
+      if (existing) return existing;
+      const note = document.createElement('div');
+      note.className = 'inline-update-notice';
+      note.style.marginTop = '8px';
+      note.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div style="flex:1">Update available: <strong>${info.latest||''}</strong></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn small" data-action="open-release">Open Release</button>
+            <button class="btn small primary" data-action="download">Download</button>
+          </div>
+        </div>
+        <div class="inline-progress" style="margin-top:8px;display:none">
+          <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
+          <div style="margin-top:6px;font-size:12px;color:var(--muted,#666);" class="inline-progress-text">0%</div>
+        </div>
+      `;
+      targetCard.appendChild(note);
+
+      note.querySelector('[data-action="open-release"]').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+      const downloadBtn = note.querySelector('[data-action="download"]');
+      const inlineProgress = note.querySelector('.inline-progress');
+      const progressInner = note.querySelector('.progress-inner');
+      const progressText = note.querySelector('.inline-progress-text');
+      let currentFile = null;
+      let downloading = false;
+      downloadBtn.onclick = async () => {
+        if (downloading) return;
+        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+        downloading = true;
+        inlineProgress.style.display = 'block';
+        downloadBtn.disabled = true;
+        try {
+          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+          if (res && res.ok && res.file) {
+            currentFile = res.file;
+            progressInner.style.width = '100%';
+            progressText.textContent = 'Download complete';
+            downloadBtn.textContent = 'Run';
+            downloadBtn.disabled = false;
+            downloadBtn.onclick = async () => { await ipcRenderer.invoke('run-installer', currentFile); };
+          } else {
+            alert('Download failed: ' + (res && res.error));
+            downloadBtn.disabled = false;
+            downloading = false;
+          }
+        } catch (e) {
+          alert('Download failed: ' + e);
+          downloadBtn.disabled = false;
+          downloading = false;
+        }
+      };
+
+      ipcRenderer.on('update-download-progress', (ev, p) => {
+        if (p && p.file) {
+          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+          progressInner.style.width = (percent || 0) + '%';
+          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+        }
+      });
+
+      return note;
+    }
+
+    // If the setup/login modal is open, attach an inline update notice there instead of creating a new modal
+    const setupModal = document.getElementById('setup-modal');
+    if (setupModal) {
+      const card = setupModal.querySelector('.setup-card');
+      if (card) {
+        createInlineUpdateNotice(res, card);
+        return;
+      }
+    }
+
     function createUpdateModal(info) {
       if (document.getElementById('update-modal')) return;
       const modal = document.createElement('div');
