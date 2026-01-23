@@ -874,13 +874,75 @@ async function checkForUpdates() {
     const current = app.getVersion();
     const cmp = semverCompare(latest, current);
     const updateAvailable = (cmp === 1);
-    return { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body };
+    const assets = (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size }));
+    return { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
   } catch (e) { console.warn('checkForUpdates error', e); return { ok:false, error: String(e) }; }
 }
 
 // Expose manual check via IPC
 ipcMain.handle('check-for-updates-manual', async () => {
   return await checkForUpdates();
+});
+
+// In-memory map of active downloads
+const downloads = {};
+
+// Download an update asset (renderer requests with a browser_download_url)
+ipcMain.handle('download-update', async (event, { url }) => {
+  try {
+    const fetch = require('node-fetch');
+    const tmpDir = app.getPath('temp');
+    const name = path.basename((url || '').split('?')[0]) || `liturgia-update-${Date.now()}.exe`;
+    const dest = path.join(tmpDir, name);
+    const r = await fetch(url);
+    if (!r.ok) return { ok:false, error: `Download failed ${r.status}` };
+    const total = parseInt(r.headers.get('content-length') || '0', 10);
+    const destStream = fs.createWriteStream(dest);
+    let downloaded = 0;
+
+    downloads[dest] = { res: r };
+
+    return await new Promise((resolve, reject) => {
+      r.body.on('data', (chunk) => {
+        downloaded += chunk.length;
+        destStream.write(chunk);
+        const percent = total ? Math.round(downloaded / total * 100) : null;
+        try { event.sender.send('update-download-progress', { file: dest, downloaded, total, percent }); } catch (e) {}
+      });
+      r.body.on('end', () => {
+        destStream.end();
+        try { event.sender.send('update-download-complete', { file: dest }); } catch (e) {}
+        delete downloads[dest];
+        resolve({ ok:true, file: dest });
+      });
+      r.body.on('error', (err) => {
+        try { destStream.close(); fs.unlinkSync(dest); } catch (e) {}
+        delete downloads[dest];
+        reject({ ok:false, error: String(err) });
+      });
+    });
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Cancel an ongoing download and remove partial file
+ipcMain.handle('cancel-update-download', async (event, { file }) => {
+  try {
+    if (downloads[file] && downloads[file].res && downloads[file].res.body) {
+      try { downloads[file].res.body.destroy(); } catch (e) {}
+    }
+    try { fs.unlinkSync(file); } catch (e) {}
+    delete downloads[file];
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Run the downloaded installer (open file with default handler)
+ipcMain.handle('run-installer', async (event, file) => {
+  try {
+    if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
+    await shell.openPath(file);
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
 });
 
 async function loadAllVersesFromDiskMain(baseDir) {

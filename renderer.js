@@ -371,10 +371,83 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
 // Notify user when an update is available (sent from main on startup or when detected)
 ipcRenderer.on('update-available', (event, res) => {
   try {
-    const body = res && res.body ? (res.body.split('\n')[0]) : '';
-    const msg = `A new version is available: ${res.latest || ''}` + (body ? `\n\n${body}` : '');
-    const open = confirm(msg + "\n\nOpen release page?");
-    if (open && res && res.html_url) { require('electron').shell.openExternal(res.html_url); }
+    function createUpdateModal(info) {
+      if (document.getElementById('update-modal')) return;
+      const modal = document.createElement('div');
+      modal.id = 'update-modal';
+      modal.className = 'update-overlay';
+      const releaseNote = (info.body || '').split('\n')[0] || '';
+      modal.innerHTML = `
+        <div class="setup-card">
+          <h2>Update available: ${info.latest || ''}</h2>
+          <div style="margin:8px 0;color:var(--muted,#666);font-size:0.9em;">${releaseNote}</div>
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button id="update-open-release" class="btn">Open Release Page</button>
+            <button id="update-download" class="btn primary">Download & Install</button>
+            <button id="update-dismiss" class="btn">Dismiss</button>
+          </div>
+          <div id="update-progress" style="margin-top:12px;display:none;">
+            <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
+            <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      document.getElementById('update-open-release').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+      document.getElementById('update-dismiss').onclick = () => { modal.remove(); };
+
+      const downloadBtn = document.getElementById('update-download');
+      const progressEl = document.getElementById('update-progress');
+      const progressBar = modal.querySelector('.progress-inner');
+      const progressText = document.getElementById('update-progress-text');
+      let currentFile = null;
+      let downloading = false;
+      downloadBtn.onclick = async () => {
+        if (downloading) return;
+        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+        downloading = true;
+        progressEl.style.display = 'block';
+        downloadBtn.disabled = true;
+        try {
+          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+          if (res && res.ok && res.file) {
+            currentFile = res.file;
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Download complete';
+            downloadBtn.textContent = 'Run Installer';
+            downloadBtn.disabled = false;
+            downloadBtn.onclick = async () => {
+              await ipcRenderer.invoke('run-installer', currentFile);
+            };
+          } else {
+            alert('Download failed: ' + (res && res.error));
+            downloadBtn.disabled = false;
+            downloading = false;
+          }
+        } catch (e) {
+          alert('Download failed: ' + e);
+          downloadBtn.disabled = false;
+          downloading = false;
+        }
+      };
+
+      ipcRenderer.on('update-download-progress', (ev, p) => {
+        if (p && p.file) {
+          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+          progressBar.style.width = (percent || 0) + '%';
+          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+        }
+      });
+
+      document.getElementById('update-cancel').onclick = async () => {
+        if (currentFile) {
+          await ipcRenderer.invoke('cancel-update-download', { file: currentFile });
+        }
+        modal.remove();
+      };
+    }
+    createUpdateModal(res);
   } catch (e) { console.warn('update-available handler error', e); }
 });
 
