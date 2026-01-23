@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.3 - 2026-01-23
+
+- test version
+
 ## 2.2.2 - 2026-01-23
 
 - Enhancement: In-app update download and installer progress UI.
