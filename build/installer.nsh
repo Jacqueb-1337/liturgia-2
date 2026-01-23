@@ -3,12 +3,9 @@
 
 Var AUTOCHECK
 
-Function .onInit
-  ; Default unchecked
-  StrCpy $AUTOCHECK 1
-FunctionEnd
-
 Function CreateAutoUpdatePage
+  ; Default to enabled
+  StrCpy $AUTOCHECK 1
   nsDialogs::Create 1018
   Pop $0
   ${If} $0 == error
