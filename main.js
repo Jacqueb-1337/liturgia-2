@@ -796,6 +796,11 @@ ipcMain.on('set-dark-theme', (event, enabled) => {
   }
 });
 
+// On Windows set AppUserModelID so taskbar and notifications use the app icon
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.jacqueb.liturgia'); } catch (e) { console.warn('Failed to set AppUserModelId', e); }
+}
+
 app.whenReady().then(async () => {
   await createWindow();
   // After window creation, load settings and, if enabled, check for updates on startup
