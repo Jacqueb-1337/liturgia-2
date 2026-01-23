@@ -7,15 +7,6 @@
         {
             "type": "node",
             "request": "launch",
-            "name": "Release Bump (non-interactive)",
-            "skipFiles": [
-                "<node_internals>/**"
-            ],
-            "program": "${workspaceFolder}/scripts/release-bump.js"
-        },
-        {
-            "type": "node",
-            "request": "launch",
             "name": "Release Bump (interactive)",
             "skipFiles": [
                 "<node_internals>/**"

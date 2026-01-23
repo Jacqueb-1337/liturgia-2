@@ -428,6 +428,11 @@ body.dark-theme .setup-card {
 .progress { width: 100%; height: 12px; background: rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
 .progress-inner { height: 100%; width: 0%; background: var(--accent, #0078d4); transition: width 200ms ease; }
 
+/* Inline update notice style (used inside setup/login modal) */
+.inline-update-notice .btn.small { padding: 6px 10px; height: 30px; font-size: 0.9em; }
+.inline-update-notice .progress { height: 8px; }
+.inline-update-notice .progress-inner { background: var(--accent,#0078d4); }
+
 /* Global button styles (moved from settings to be available app-wide)
    Ensures modals, popovers and other windows use consistent buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:6px;background:transparent;border:1px solid rgba(0,0,0,0.08);color:#222;text-decoration:none;min-height:36px;box-sizing:border-box;height:36px;line-height:20px;cursor:pointer}
