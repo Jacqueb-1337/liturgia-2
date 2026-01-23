@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.2.2 - 2026-01-23
+
+- Enhancement: In-app update download and installer progress UI.
+
 ## 2.2.1 - 2026-01-23
 
 - Fix: Remove unused Theme textbox from Settings (prepares for future theming options).
