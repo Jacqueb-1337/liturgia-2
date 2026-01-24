@@ -3,6 +3,11 @@ name: Release Build
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name to build (e.g., v2.3.8)'
+        required: true
 
 permissions:
   contents: write
@@ -17,6 +22,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          fetch-depth: 0
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
@@ -95,11 +103,11 @@ jobs:
           }
         shell: pwsh
 
-      - name: Upload built artifacts to release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            dist/**/*
+      - name: Upload built artifacts to release (clobber duplicates)
+        run: |
+          TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          echo "Uploading to release $TAG"
+          gh release upload "$TAG" dist/** --clobber --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
