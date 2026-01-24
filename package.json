@@ -1,6 +1,7 @@
 {
   "name": "liturgia",
   "version": "2.3.4",
+  "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
