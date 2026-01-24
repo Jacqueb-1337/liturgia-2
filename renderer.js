@@ -53,6 +53,7 @@ async function loadAndApplySettings() {
 }
 
 function applyPreviewStyles() {
+  // Create/update a style tag for global preview CSS
   const styleId = 'preview-styles';
   let styleEl = document.getElementById(styleId);
   if (!styleEl) {
@@ -65,6 +66,20 @@ function applyPreviewStyles() {
   if (previewStyles.verseText) css += `#verse-text { ${atob(previewStyles.verseText)} }\n`;
   if (previewStyles.verseReference) css += `#verse-reference { ${atob(previewStyles.verseReference)} }\n`;
   styleEl.textContent = css;
+
+  // Also apply inline styles to any existing preview/live elements (keeps both behaviors)
+  Object.keys(previewStyles).forEach(key => {
+    const el = document.getElementById(key.toLowerCase().replace('verse', ''));
+    if (el && previewStyles[key]) {
+      el.style.cssText = atob(previewStyles[key]);
+    }
+  });
+  Object.keys(previewStyles).forEach(key => {
+    const liveEl = document.getElementById('live-' + key.toLowerCase().replace('verse', ''));
+    if (liveEl && previewStyles[key]) {
+      liveEl.style.cssText = atob(previewStyles[key]);
+    }
+  });
 }
 
 function setupPopover() {
@@ -134,23 +149,6 @@ function setupPopover() {
 
   cancelBtn.addEventListener('click', () => {
     popover.style.display = 'none';
-  });
-}
-
-function applyPreviewStyles() {
-  // Apply to preview elements
-  Object.keys(previewStyles).forEach(key => {
-    const el = document.getElementById(key.toLowerCase().replace('verse', ''));
-    if (el && previewStyles[key]) {
-      el.style.cssText = atob(previewStyles[key]);
-    }
-  });
-  // Also apply to live elements
-  Object.keys(previewStyles).forEach(key => {
-    const liveEl = document.getElementById('live-' + key.toLowerCase().replace('verse', ''));
-    if (liveEl && previewStyles[key]) {
-      liveEl.style.cssText = atob(previewStyles[key]);
-    }
   });
 }
 
@@ -250,6 +248,184 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
   }
 });
 
+// Notify user when an update is available (sent from main on startup or when detected)
+ipcRenderer.on('update-available', (event, res) => {
+  try {
+    // If the DOM isn't ready yet (rare), request any pending update from main
+    function ensureAndHandle(info) {
+      try {
+        if (!info) return;
+        function createInlineUpdateNotice(info, targetCard) {
+          // Add a compact update notice into the given container (e.g., setup modal) to avoid overlapping UI
+          const existing = targetCard.querySelector('.inline-update-notice');
+          if (existing) return existing;
+          const note = document.createElement('div');
+          note.className = 'inline-update-notice';
+          note.style.marginTop = '8px';
+          note.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <div style="flex:1">Update available: <strong>${info.latest||''}</strong></div>
+              <div style="display:flex;gap:8px">
+                <button class="btn small" data-action="open-release">Open Release</button>
+                <button class="btn small primary" data-action="download">Download</button>
+              </div>
+            </div>
+            <div class="inline-progress" style="margin-top:8px;display:none">
+              <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
+              <div style="margin-top:6px;font-size:12px;color:var(--muted,#666);" class="inline-progress-text">0%</div>
+            </div>
+          `;
+          targetCard.appendChild(note);
+
+          note.querySelector('[data-action="open-release"]').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+          const downloadBtn = note.querySelector('[data-action="download"]');
+          const inlineProgress = note.querySelector('.inline-progress');
+          const progressInner = note.querySelector('.progress-inner');
+          const progressText = note.querySelector('.inline-progress-text');
+          let currentFile = null;
+          let downloading = false;
+          downloadBtn.onclick = async () => {
+            if (downloading) return;
+            const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+            if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+            downloading = true;
+            inlineProgress.style.display = 'block';
+            downloadBtn.disabled = true;
+            try {
+              const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+              if (res && res.ok && res.file) {
+                currentFile = res.file;
+                progressInner.style.width = '100%';
+                progressText.textContent = 'Download complete';
+                downloadBtn.textContent = 'Run';
+                downloadBtn.disabled = false;
+                downloadBtn.onclick = async () => { await ipcRenderer.invoke('run-installer', currentFile); };
+              } else {
+                alert('Download failed: ' + (res && res.error));
+                downloadBtn.disabled = false;
+                downloading = false;
+              }
+            } catch (e) {
+              alert('Download failed: ' + e);
+              downloadBtn.disabled = false;
+              downloading = false;
+            }
+          };
+
+          ipcRenderer.on('update-download-progress', (ev, p) => {
+            if (p && p.file) {
+              const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+              progressInner.style.width = (percent || 0) + '%';
+              progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+            }
+          });
+
+          return note;
+        }
+
+        // If the setup/login modal is open, attach an inline update notice there instead of creating a new modal
+        const setupModal = document.getElementById('setup-modal');
+        if (setupModal) {
+          const card = setupModal.querySelector('.setup-card');
+          if (card) {
+            createInlineUpdateNotice(info, card);
+            return;
+          }
+        }
+
+        function createUpdateModal(info) {
+          if (document.getElementById('update-modal')) return;
+          const modal = document.createElement('div');
+          modal.id = 'update-modal';
+          modal.className = 'update-overlay';
+          const releaseNote = (info.body || '').split('\n')[0] || '';
+          modal.innerHTML = `
+            <div class="setup-card">
+              <h2>Update available: ${info.latest || ''}</h2>
+              <div style="margin:8px 0;color:var(--muted,#666);font-size:0.9em;">${releaseNote}</div>
+              <div style="margin-top:12px;display:flex;gap:8px;">
+                <button id="update-open-release" class="btn">Open Release Page</button>
+                <button id="update-download" class="btn primary">Download & Install</button>
+                <button id="update-dismiss" class="btn">Dismiss</button>
+              </div>
+              <div id="update-progress" style="margin-top:12px;display:none;">
+                <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
+                <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
+              </div>
+            </div>
+          `;
+          document.body.appendChild(modal);
+          document.getElementById('update-open-release').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+          document.getElementById('update-dismiss').onclick = () => { modal.remove(); };
+
+          const downloadBtn = document.getElementById('update-download');
+          const progressEl = document.getElementById('update-progress');
+          const progressBar = modal.querySelector('.progress-inner');
+          const progressText = document.getElementById('update-progress-text');
+          let currentFile = null;
+          let downloading = false;
+          downloadBtn.onclick = async () => {
+            if (downloading) return;
+            const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+            if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+            downloading = true;
+            progressEl.style.display = 'block';
+            downloadBtn.disabled = true;
+            try {
+              const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+              if (res && res.ok && res.file) {
+                currentFile = res.file;
+                progressBar.style.width = '100%';
+                progressText.textContent = 'Download complete';
+                downloadBtn.textContent = 'Run Installer';
+                downloadBtn.disabled = false;
+                downloadBtn.onclick = async () => {
+                  await ipcRenderer.invoke('run-installer', currentFile);
+                };
+              } else {
+                alert('Download failed: ' + (res && res.error));
+                downloadBtn.disabled = false;
+                downloading = false;
+              }
+            } catch (e) {
+              alert('Download failed: ' + e);
+              downloadBtn.disabled = false;
+              downloading = false;
+            }
+          };
+
+          ipcRenderer.on('update-download-progress', (ev, p) => {
+            if (p && p.file) {
+              const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+              progressBar.style.width = (percent || 0) + '%';
+              progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+            }
+          });
+
+          document.getElementById('update-cancel').onclick = async () => {
+            if (currentFile) {
+              await ipcRenderer.invoke('cancel-update-download', { file: currentFile });
+            }
+            modal.remove();
+          };
+        }
+        createUpdateModal(info);
+      } catch (e) { console.warn('update-available handler error', e); }
+    }
+
+    // If the DOM looks ready, handle immediately; otherwise we query main for pending update
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      ensureAndHandle(res);
+    } else {
+      ipcRenderer.invoke('get-pending-update').then(info => ensureAndHandle(info)).catch(()=>{});
+    }
+  } catch (e) { console.warn('update-available handler error', e); }
+});
+// Allow other windows (Settings) to request the setup modal
+ipcRenderer.on('show-setup-modal', () => {
+  try { createSetupModal(); } catch (e) { console.error('Failed to open setup modal from IPC', e); }
+});
+// Handle default-bible updates from main process
 ipcRenderer.on('default-bible-changed', async (event, bible) => {
   const userData = await ipcRenderer.invoke('get-user-data-path');
   const baseName = bible.endsWith('.json') ? bible.replace('.json','') : bible;
@@ -3576,7 +3752,10 @@ function formatFileSize(bytes) {
 }
 
 function pathToFileURL(filePath) {
-  // Convert Windows path to proper file URL
+  // delegate to preload-exposed helper (ensures consistent behavior cross-platform)
+  if (window && window.paths && typeof window.paths.fileUrlFor === 'function') {
+    return window.paths.fileUrlFor(filePath);
+  }
   const normalized = filePath.replace(/\\/g, '/');
   return 'file:///' + normalized;
 }
@@ -3621,25 +3800,41 @@ function renderMediaGrid() {
     
     html += `<div class="media-item${isSelected ? ' selected' : ''}" data-index="${actualIndex}" draggable="true" tabindex="0" style="cursor: pointer; border: 1px solid ${isSelected ? '#0078d4' : 'transparent'}; border-radius: 6px; padding: 6px; text-align: center;">`;
     
-    // Thumbnail
+    // Thumbnail (wrap in media-thumb container to allow badge overlays)
+    // Thumbnail (wrap in media-thumb container to allow badge overlays)
+    let thumbHtml = '';
     if (isColor) {
-      html += `<div style="width: 100%; height: 60px; background: ${media.color}; border-radius: 3px; margin-bottom: 6px;"></div>`;
+      thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: ${media.color}; border-radius: 3px; margin-bottom: 6px;"></div>`;
     } else {
-      const fileURL = media.path ? media.path.replace(/\\/g, '/') : '';
+      const fileURL = media.path ? media.path : ''; // will be converted to file URL by pathToFileURL() when used
       if (isImage) {
-      html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
-        <img src="file:///${fileURL}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
-      </div>`;
-    } else if (isVideo) {
-      html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
-        <video src="file:///${fileURL}" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
-      </div>`;
+        thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+          <img src="${pathToFileURL(fileURL)}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+        </div>`;
+      } else if (isVideo) {
+        thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+          <video src="${pathToFileURL(fileURL)}" style="max-width: 100%; max-height: 100%; object-fit: contain;"></video>
+        </div>`;
       } else {
-        html += `<div style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
-          <svg width="30" height="30" viewBox="0 0 16 16" fill="#666"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/></svg>
+        thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: #f0f0f0; border-radius: 3px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+            <svg width="30" height="30" viewBox="0 0 16 16" fill="#666"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5z"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5L9.5 0zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5z"/></svg>
         </div>`;
       }
     }
+
+    // Badges for defaults
+    if (defaultBackgrounds.songs === actualIndex) {
+      // music icon (FontAwesome 'music' SVG)
+      thumbHtml = thumbHtml.replace(/<\/div>\s*$/, '<div class="fa-badge fa-bottom-right" title="Default background for songs">'+
+        '<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><path d="M499.1 6.3c8.1 6 12.9 15.6 12.9 25.7l0 72 0 264c0 44.2-43 80-96 80s-96-35.8-96-80s43-80 96-80c11.2 0 22 1.6 32 4.6L448 147 192 223.8 192 432c0 44.2-43 80-96 80s-96-35.8-96-80s43-80 96-80c11.2 0 22 1.6 32 4.6L128 200l0-72c0-14.1 9.3-26.6 22.8-30.7l320-96c9.7-2.9 20.2-1.1 28.3 5z"/></svg></div></div>');
+    }
+    if (defaultBackgrounds.verses === actualIndex) {
+      // book icon (FontAwesome 'book-open' SVG)
+      thumbHtml = thumbHtml.replace(/<\/div>\s*$/, '<div class="fa-badge fa-bottom-left" title="Default background for verses">'+
+        '<svg viewBox="0 0 576 512" xmlns="http://www.w3.org/2000/svg"><path d="M249.6 471.5c10.8 3.8 22.4-4.1 22.4-15.5l0-377.4c0-4.2-1.6-8.4-5-11C247.4 52 202.4 32 144 32C93.5 32 46.3 45.3 18.1 56.1C6.8 60.5 0 71.7 0 83.8L0 454.1c0 11.9 12.8 20.2 24.1 16.5C55.6 460.1 105.5 448 144 448c33.9 0 79 14 105.6 23.5zm76.8 0C353 462 398.1 448 432 448c38.5 0 88.4 12.1 119.9 22.6c11.3 3.8 24.1-4.6 24.1-16.5l0-370.3c0-12.1-6.8-23.3-18.1-27.6C529.7 45.3 482.5 32 432 32c-58.4 0-103.4 20-123 35.6c-3.3 2.6-5 6.8-5 11L304 456c0 11.4 11.7 19.3 22.4 15.5z"/></svg></div></div>');
+    }
+
+    html += thumbHtml;
     
     // Labels
     html += `<div style="font-size: 10px; font-weight: 500; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${media.name}">${displayName}</div>`;
@@ -3751,18 +3946,20 @@ function showMediaContextMenu(x, y) {
     // Add handlers
     document.getElementById('media-context-bg-songs').addEventListener('click', async () => {
       if (selectedMediaIndex !== null) {
-        // Store entire media object, not just path
+        // Store index of default background
         defaultBackgrounds.songs = selectedMediaIndex;
         await saveMedia();
+        renderMediaGrid();
         menu.style.display = 'none';
       }
     });
     
     document.getElementById('media-context-bg-verses').addEventListener('click', async () => {
       if (selectedMediaIndex !== null) {
-        // Store entire media object, not just path
+        // Store index of default background
         defaultBackgrounds.verses = selectedMediaIndex;
         await saveMedia();
+        renderMediaGrid();
         menu.style.display = 'none';
       }
     });
@@ -3770,12 +3967,14 @@ function showMediaContextMenu(x, y) {
     document.getElementById('media-context-reset-songs').addEventListener('click', async () => {
       defaultBackgrounds.songs = null;
       await saveMedia();
+      renderMediaGrid();
       menu.style.display = 'none';
     });
     
     document.getElementById('media-context-reset-verses').addEventListener('click', async () => {
       defaultBackgrounds.verses = null;
       await saveMedia();
+      renderMediaGrid();
       menu.style.display = 'none';
     });
     
@@ -4715,5 +4914,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadTransitionSettings();
   setupTransitionButtons();
 });
+
+// Export test hooks for unit tests (if running under Node)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports._renderMediaGrid = renderMediaGrid;
+  module.exports._setAllMedia = (m) => { allMedia = m; };
+  module.exports._setDefaultBackgrounds = (d) => { defaultBackgrounds = d; };
+}
+
 
 

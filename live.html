@@ -553,6 +553,295 @@
       currentAnimationFrameId = requestAnimationFrame(animate);
     }
     
+    // Helper: compare backgrounds (supports backgroundMedia and legacy backgroundPath)
+    function backgroundsEqual(a, b) {
+      if (!a && !b) return true;
+      if (!a || !b) return false;
+
+      // Handle explicit backgroundMedia first
+      const am = a.backgroundMedia || (a.isMedia ? { type: a.mediaType, path: a.mediaPath, color: a.mediaColor } : null);
+      const bm = b.backgroundMedia || (b.isMedia ? { type: b.mediaType, path: b.mediaPath, color: b.mediaColor } : null);
+
+      if (am || bm) {
+        if (!am || !bm) return false;
+        if (am.type !== bm.type) return false;
+        if (am.type === 'COLOR') return am.color === bm.color;
+        if (am.path && bm.path) return am.path === bm.path;
+        return false;
+      }
+
+      // Legacy backgroundPath or color
+      if (a.backgroundPath || b.backgroundPath) {
+        return (a.backgroundPath || '') === (b.backgroundPath || '');
+      }
+
+      return false;
+    }
+
+    // Helper: render only the background portion of content to an offscreen canvas
+    function renderBackgroundToCanvas(content, canvas) {
+      return new Promise((resolve) => {
+        const ctxLocal = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        ctxLocal.fillStyle = '#000';
+        ctxLocal.fillRect(0, 0, width, height);
+
+        // Prefer backgroundMedia, but also accept media fields from isMedia payloads
+        let media = null;
+        if (content) {
+          media = content.backgroundMedia || null;
+          if (!media && content.isMedia) {
+            media = {
+              type: content.mediaType,
+              path: content.mediaPath,
+              color: content.mediaColor,
+              bgSize: content.bgSize,
+              bgRepeat: content.bgRepeat,
+              bgPosition: content.bgPosition
+            };
+          }
+        }
+
+        if (media && media.type === 'COLOR') {
+          applyColorToCanvas(ctxLocal, media.color, width, height);
+          resolve();
+          return;
+        }
+
+        // Image or video background handling
+        const pathToImg = media && media.path ? media.path : (content && content.backgroundPath ? content.backgroundPath : null);
+        if (pathToImg) {
+          // Determine if this is likely an image or video by extension (simple heuristic)
+          const ext = (pathToImg.split('.').pop() || '').toLowerCase();
+          const imageExts = ['jpg','jpeg','png','gif','webp','bmp'];
+          const videoExts = ['mp4','webm','ogg','mov','avi'];
+
+          if (imageExts.includes(ext)) {
+            const img = new Image();
+            img.onload = () => {
+              drawImageWithSettings(ctxLocal, img, width, height, {
+                bgSize: (media && media.bgSize) || 'cover',
+                bgRepeat: (media && media.bgRepeat) || 'no-repeat',
+                bgPosition: (media && media.bgPosition) || 'center'
+              });
+              resolve();
+            };
+            img.onerror = (e) => {
+              console.warn('[live] renderBackgroundToCanvas image load failed:', pathToImg, e);
+              // Fallback to black
+              ctxLocal.fillStyle = '#000';
+              ctxLocal.fillRect(0, 0, width, height);
+              resolve();
+            };
+            // Ensure file:// URL for absolute paths
+            img.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+            return;
+          }
+
+          if (videoExts.includes(ext)) {
+            const video = document.createElement('video');
+            video.preload = 'auto';
+            video.muted = true;
+            video.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+            // Wait for a frame to be available
+            video.addEventListener('loadeddata', () => {
+              try {
+                // Draw current frame
+                ctxLocal.drawImage(video, 0, 0, width, height);
+              } catch (e) {
+                // Drawing may fail on some codecs; fallback to black
+                ctxLocal.fillStyle = '#000';
+                ctxLocal.fillRect(0, 0, width, height);
+              }
+              resolve();
+            });
+            video.addEventListener('error', (e) => {
+              console.warn('[live] renderBackgroundToCanvas video load failed:', pathToImg, e);
+              ctxLocal.fillStyle = '#000';
+              ctxLocal.fillRect(0, 0, width, height);
+              resolve();
+            });
+            return;
+          }
+
+          // Unknown extension: try as image first
+          const img = new Image();
+          img.onload = () => {
+            drawImageWithSettings(ctxLocal, img, width, height, {
+              bgSize: (media && media.bgSize) || 'cover',
+              bgRepeat: (media && media.bgRepeat) || 'no-repeat',
+              bgPosition: (media && media.bgPosition) || 'center'
+            });
+            resolve();
+          };
+          img.onerror = () => {
+            ctxLocal.fillStyle = '#000';
+            ctxLocal.fillRect(0, 0, width, height);
+            resolve();
+          };
+          img.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+          return;
+        }
+
+        // No media: nothing else to draw
+        resolve();
+      });
+    }
+
+    // Helper: render text-only to an offscreen canvas (same layout logic used elsewhere)
+    function renderTextToCanvas(content) {
+      const canvas = document.createElement('canvas');
+      canvas.width = currentRenderWidth || window.innerWidth;
+      canvas.height = currentRenderHeight || window.innerHeight;
+      const textCtx = canvas.getContext('2d');
+      textCtx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!content || !content.text) return canvas;
+
+      textCtx.fillStyle = '#fff';
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+      const padding = canvas.width * 0.02;
+      const availableWidth = canvas.width - (padding * 2);
+      const availableHeight = canvas.height - (padding * 2);
+      let baseFontSize = canvas.height * 0.08;
+
+      // Verse number
+      if (content.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+
+      // Render verse text
+      const textY = canvas.height / 2;
+      const textLines = content.text.split('\n');
+      const allLines = [];
+      textLines.forEach(textLine => {
+        const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown parsed for measurement/render
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+        textCtx.font = `${baseFontSize}px Arial`;
+        const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+        allLines.push(...wrappedLines);
+      });
+
+      let lines = allLines;
+      // Grow font if space
+      while (true) {
+        const testSize = baseFontSize + 4;
+        textCtx.font = `${testSize}px Arial`;
+        const testLines = [];
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          // Ensure inline markdown is parsed for measurement
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+          testLines.push(...wrappedLines);
+        });
+        if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < canvas.height * 0.15) {
+          baseFontSize = testSize;
+          lines = testLines;
+        } else break;
+      }
+
+      while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+        baseFontSize -= 2;
+        textCtx.font = `${baseFontSize}px Arial`;
+        const testLines = [];
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          // Ensure inline markdown is parsed for measurement
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          testLines.push(...wrappedLines);
+        });
+        lines = testLines;
+      }
+
+      // Draw lines
+      const lineHeight = baseFontSize * 1.2;
+      const totalHeight = lines.length * lineHeight;
+      const startY = textY - (totalHeight / 2);
+      lines.forEach((line, i) => {
+        renderLineWithSubscripts(line, canvas.width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+      });
+
+      // Reference
+      if (content.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillText(content.reference, canvas.width - padding, canvas.height - padding - baseFontSize * 0.3);
+      }
+
+      return canvas;
+    }
+
+    // Apply a simple background cross-fade between two contents (text remains on top)
+    async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4) {
+      // Cancel any ongoing animations
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+
+      const width = canvas.width;
+      const height = canvas.height;
+
+      const oldBgCanvas = document.createElement('canvas');
+      oldBgCanvas.width = width; oldBgCanvas.height = height;
+      const newBgCanvas = document.createElement('canvas');
+      newBgCanvas.width = width; newBgCanvas.height = height;
+
+      // Render both backgrounds (await images to load when necessary)
+      await Promise.all([
+        renderBackgroundToCanvas(oldContent, oldBgCanvas),
+        renderBackgroundToCanvas(newContent, newBgCanvas)
+      ]);
+
+      // Pre-render text: keep the currently visible text stable during the background fade.
+      // If old content has visible text, prefer that; otherwise fall back to newContent.
+      const textSource = (oldContent && oldContent.text) ? oldContent : newContent;
+      const textCanvas = renderTextToCanvas(textSource);
+
+      const startTime = Date.now();
+      function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / (duration * 1000), 1);
+        const eased = easeInOutCubic(progress);
+
+        // Draw blended backgrounds
+        ctx.clearRect(0, 0, width, height);
+        ctx.globalAlpha = 1;
+
+        // Draw old bg with (1 - eased)
+        if (eased < 1) {
+          ctx.globalAlpha = 1 - eased;
+          ctx.drawImage(oldBgCanvas, 0, 0);
+        }
+        // Draw new bg with eased
+        ctx.globalAlpha = eased;
+        ctx.drawImage(newBgCanvas, 0, 0);
+        ctx.globalAlpha = 1;
+
+        // Draw watermark between background and text so it stays visible during crossfade
+        drawLicenseWatermark(ctx, canvas);
+
+        // Draw text on top
+        if (textCanvas) ctx.drawImage(textCanvas, 0, 0);
+
+        if (progress < 1) {
+          currentAnimationFrameId = requestAnimationFrame(animate);
+        } else {
+          currentAnimationFrameId = null;
+        }
+      };
+
+      currentAnimationFrameId = requestAnimationFrame(animate);
+    }
+
     /**
      * Render verse content to canvas
      */
@@ -609,8 +898,8 @@
             // Media content appears instantly, no text fade needed
           };
           img.onerror = (e) => console.error('Failed to load image:', content.mediaPath, e);
-          const fileURL = renderContent_content.mediaPath.replace(/\\/g, '/');
-          img.src = `file:///${fileURL}`;
+          const fileURL = renderContent_content.mediaPath;
+          img.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
         } else if (isVideo) {
           // Stop any existing video first
           if (window.currentVideo) {
@@ -619,8 +908,8 @@
           }
           
           const video = document.createElement('video');
-          const fileURL = renderContent_content.mediaPath.replace(/\\/g, '/');
-          video.src = `file:///${fileURL}`;
+          const fileURL = renderContent_content.mediaPath;
+          video.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
           video.loop = renderContent_content.loop !== false; // default true
           video.muted = renderContent_content.muted !== false; // default true
           video.play();
@@ -718,8 +1007,8 @@
                       );
                     }
                   };
-                  const fileURL = media.path.replace(/\\/g, '/');
-                  bgImg.src = `file:///${fileURL}`;
+                  const fileURL = media.path;
+                  bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
                   return; // Don't call fade-in below
                 }
               }
@@ -775,8 +1064,8 @@
             console.error('Live window failed to load background:', media.path, e);
             showTextWithAnimation();
           };
-          const fileURL = media.path.replace(/\\/g, '/');
-          bgImg.src = `file:///${fileURL}`;
+          const fileURL = media.path;
+          bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
         } else {
           // Video or unknown type - just show text with animation
           showTextWithAnimation();
@@ -785,7 +1074,7 @@
         // Legacy path string support
         console.log('Live window: Background path provided:', renderContent_content.backgroundPath);
         const bgImg = new Image();
-        const fileURL = renderContent_content.backgroundPath.replace(/\\/g, '/');
+        const fileURL = renderContent_content.backgroundPath;
         console.log('Live window: Loading background from:', fileURL);
         bgImg.onload = () => {
           console.log('Live window: Background loaded successfully');
@@ -807,7 +1096,7 @@
           console.error('Live window failed to load background:', renderContent_content.backgroundPath, e);
           showTextWithAnimation();
         };
-        bgImg.src = `file:///${fileURL}`;
+        bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
       } else {
         console.log('Live window: No background, rendering text only');
         showTextWithAnimation();
@@ -1083,8 +1372,8 @@
             } else if (media.type === 'JPG' || media.type === 'PNG') {
               const bgImg = new Image();
               bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: media.bgSize || 'cover', bgRepeat: media.bgRepeat || 'no-repeat', bgPosition: media.bgPosition || 'center' });
-              const fileURL = media.path.replace(/\\/g, '/');
-              bgImg.src = `file:///${fileURL}`;
+              const fileURL = media.path;
+              bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
             }
           }
         };
@@ -1148,8 +1437,8 @@
                 bgPosition: media.bgPosition || 'center'
               });
             };
-            const fileURL = media.path.replace(/\\/g, '/');
-            bgImg.src = `file:///${fileURL}`;
+            const fileURL = media.path;
+            bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
           }
         }
         currentRenderContent = {
@@ -1228,8 +1517,8 @@
                 );
               }
             };
-            const fileURL = media.path.replace(/\\/g, '/');
-            bgImg.src = `file:///${fileURL}`;
+            const fileURL = media.path;
+            bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
           }
         } else {
           // No background media, just fade in text

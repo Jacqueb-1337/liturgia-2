@@ -56,6 +56,73 @@ window.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('dark-theme').checked = !!settings.darkTheme;
     applyDarkTheme(!!settings.darkTheme);
   }
+
+  // Populate account/subscription info
+  try {
+    let license = await ipcRenderer.invoke('get-current-license-status');
+    // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+    try {
+      const token = await ipcRenderer.invoke('secure-get-token');
+      if (!token) license = null;
+    } catch (e) { /* ignore secure errors */ }
+
+    const ai = document.getElementById('account-info');
+    const si = document.getElementById('subscription-info');
+    const signInBtn = document.getElementById('btn-sign-in');
+    const signOutBtn = document.getElementById('btn-sign-out');
+    const viewSubBtn = document.getElementById('btn-view-subscription');
+    const purchaseBtn = document.getElementById('btn-purchase-subscription');
+
+    if (license) {
+      // Prefer explicit email from token_payload or user_row if present
+      const email = (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
+      let displayEmail = email;
+      if (!displayEmail) {
+        // Try to read mirrored token from settings as a fallback
+        try {
+          const s = await ipcRenderer.invoke('load-settings');
+          if (s && s.auth && s.auth.token) {
+            const p = decodeJwtPayload(s.auth.token);
+            if (p && p.email) displayEmail = p.email;
+          }
+        } catch (e) { /* ignore */ }
+      }
+      ai.textContent = displayEmail || 'Signed in';
+
+      // If this is a 'no-token' trial (user continued without signing in), show only Sign in
+      const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
+      if (isNoToken) {
+        si.textContent = `Not active (no-token).`; // keep short
+        if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+        if (signOutBtn) signOutBtn.style.display = 'none';
+        if (viewSubBtn) viewSubBtn.style.display = 'none';
+        if (purchaseBtn) purchaseBtn.style.display = 'none';
+      } else {
+        if (license.active) {
+          si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
+        } else {
+          si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
+        }
+
+        // Toggle UI controls for normal signed-in flow
+        if (signInBtn) signInBtn.style.display = 'none';
+        if (signOutBtn) signOutBtn.style.display = '';
+        if (viewSubBtn) viewSubBtn.style.display = '';
+        if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+      }
+    } else {
+      document.getElementById('account-info').textContent = 'Not signed in';
+      document.getElementById('subscription-info').textContent = '';
+      if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+      if (signOutBtn) signOutBtn.style.display = 'none';
+      if (viewSubBtn) viewSubBtn.style.display = 'none';
+      if (purchaseBtn) purchaseBtn.style.display = '';
+    }
+  } catch (e) {
+    console.error('Failed to load license status for settings:', e);
+  }
+
+
   await loadDisplays();
   const defaultDisplaySelect = document.getElementById('default-display');
   if (settings && settings.defaultDisplay) {

@@ -1,6 +1,20 @@
 // main.js
 
 const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } = require('electron');
+
+// Instrument dialog.showMessageBox during development to find stray native dialogs
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const _origShow = dialog.showMessageBox;
+    dialog.showMessageBox = async function(windowOrOptions, options) {
+      // Normalize parameters
+      const stack = new Error().stack;
+      console.warn('dialog.showMessageBox called. Stack trace:\n', stack);
+      // Forward call
+      return await _origShow.apply(dialog, arguments);
+    };
+  } catch (e) { console.warn('Failed to instrument dialog.showMessageBox', e); }
+}
 const os = require('os');
 
 // Main process in-memory log buffer
@@ -19,6 +33,55 @@ console.warn = function(...args) { _pushMainLog('warn', args); _origConsoleWarn.
 console.error = function(...args) { _pushMainLog('error', args); _origConsoleError.apply(console, args); };
 const path = require('path');
 const fs = require('fs');
+
+// Helper to determine the best icon path for windows/taskbar (works in dev and packaged)
+function getIconPath() {
+  try {
+    const devIco = path.join(__dirname, 'build', 'icon.ico');
+    if (fs.existsSync(devIco)) return devIco;
+    const { getIconPath } = require('./lib/paths');
+    return getIconPath(app);
+  } catch (e) { return path.join(__dirname, 'logo.png'); }
+}
+let SqlJsInit = null;
+let SQL = null;
+let pendingUpdate = null;
+let lastUpdateCheck = null;
+async function ensureSqlJs() {
+  if (SQL) return SQL;
+  if (SqlJsInit === null) {
+    try { SqlJsInit = require('sql.js'); } catch (e) { console.warn('sql.js not available; EasyWorship import disabled. Run `npm install sql.js` to enable.', e); return null; }
+  }
+  try {
+    // Provide a robust locateFile so sql.js can find the wasm in dev and packaged apps
+    const locateFile = (file) => {
+      // Dev path: node_modules inside project
+      const devPath = path.join(__dirname, 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(devPath)) return devPath;
+
+      // Packaged unpacked asar location (electron-builder unpacks specified files)
+      const unpacked = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(unpacked)) return unpacked;
+
+      // If we placed the wasm explicitly via extraResources, it may appear at the root of resources
+      const resRoot = path.join(process.resourcesPath, 'sql-wasm.wasm');
+      if (fs.existsSync(resRoot)) return resRoot;
+
+      // Alternative path inside resources
+      const resAlt = path.join(process.resourcesPath, 'node_modules', 'sql.js', 'dist', file);
+      if (fs.existsSync(resAlt)) return resAlt;
+
+      // Fallback to the file name (let sql.js try relative fetch if supported)
+      return file;
+    };
+
+    SQL = await SqlJsInit({ locateFile });
+    return SQL;
+  } catch (e) {
+    console.warn('Failed to initialize sql.js', e);
+    return null;
+  }
+}
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
 
 app.setName('liturgia');
@@ -27,7 +90,170 @@ let mainWindow; // Add this at the top
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 
-const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+
+// --- EasyWorship Import Helpers ---
+function stripRtf(rtf) {
+  if (!rtf) return '';
+  let s = rtf;
+  s = s.replace(/\\par[d]?/gi, '\n');
+  // Remove control words (e.g., \b0, \i, \fs24, etc.)
+  s = s.replace(/\\[a-zA-Z]+-?\d*\b/g, '');
+  // Remove groups/braces
+  s = s.replace(/[{}]/g, '');
+  // Remove stray backslashes
+  s = s.replace(/\\/g, '');
+  // Collapse multiple newlines
+  s = s.replace(/\n\s*\n+/g, '\n\n');
+  return s.trim();
+}
+
+function findDatabasesDirUnder(root, maxDepth = 4) {
+  try {
+    const toVisit = [{ dir: root, depth: 0 }];
+    while (toVisit.length) {
+      const { dir, depth } = toVisit.shift();
+      if (depth > maxDepth) continue;
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      // Quick check: if this directory contains Songs.db and SongWords.db
+      const names = entries.map(e => e.name.toLowerCase());
+      if (names.includes('songs.db') && names.includes('songwords.db')) return dir;
+      // Also accept `Databases` folder
+      if (names.includes('databases')) return path.join(dir, 'Databases');
+      for (const e of entries) {
+        if (e.isDirectory()) toVisit.push({ dir: path.join(dir, e.name), depth: depth + 1 });
+      }
+    }
+  } catch (e) { console.warn('findDatabasesDirUnder error', e); }
+  return null;
+}
+
+async function importEasyWorshipFromDir(databasesDir) {
+  // Returns array of { title, author, text }
+  const SQL = await ensureSqlJs();
+  if (!SQL) throw new Error('sql.js not available');
+
+  const songsDbPath = path.join(databasesDir, 'Songs.db');
+  const songWordsDbPath = path.join(databasesDir, 'SongWords.db');
+  if (!fs.existsSync(songsDbPath) || !fs.existsSync(songWordsDbPath)) {
+    return [];
+  }
+
+  // Load DB files into sql.js (WASM) in-memory DBs
+  const songsBuf = fs.readFileSync(songsDbPath);
+  const wordsBuf = fs.readFileSync(songWordsDbPath);
+  const dbSongs = new SQL.Database(new Uint8Array(songsBuf));
+  const dbWords = new SQL.Database(new Uint8Array(wordsBuf));
+
+  // Run queries
+  const songsRes = dbSongs.exec('SELECT rowid, title, author FROM song;');
+  const out = [];
+
+  if (songsRes && songsRes.length > 0 && songsRes[0].values) {
+    const cols = songsRes[0].columns;
+    for (const vals of songsRes[0].values) {
+      const row = {};
+      for (let i = 0; i < cols.length; i++) row[cols[i]] = vals[i];
+      const id = row.rowid || row.row_id || row.id || vals[0];
+      const title = row.title || 'Untitled';
+      const author = row.author || 'Unknown';
+      let lyrics = '';
+      try {
+        const q = dbWords.exec(`SELECT words FROM word WHERE song_id = ${id} LIMIT 1;`);
+        if (q && q.length && q[0].values && q[0].values[0]) lyrics = q[0].values[0][0] || '';
+      } catch (e) {
+        console.warn('Failed to retrieve lyrics for', id, e.message || e);
+      }
+      out.push({ title, author, text: stripRtf(lyrics) });
+    }
+  }
+
+  try { dbSongs.close(); } catch (e) {}
+  try { dbWords.close(); } catch (e) {}
+
+  return out;
+}
+
+async function importEasyWorshipHandler() {
+  const SQL = await ensureSqlJs();
+  if (!SQL) {
+    await dialog.showMessageBox({ type: 'error', message: 'Dependency missing', detail: 'The package "sql.js" (WASM) is required to import EasyWorship databases. Please run "npm install" in the app directory and restart the app.', buttons: ['OK'] });
+    if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('easyworship-import-disabled', { reason: 'sql-missing' });
+    return;
+  }
+
+  const choice = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Auto Scan', 'Select Folder', 'Cancel'],
+    defaultId: 0,
+    title: 'Import EasyWorship database',
+    message: 'Import EasyWorship songs',
+    detail: 'Auto Scan will try commonly used locations. Select Folder lets you pick the EasyWorship installation or Databases folder.'
+  });
+
+  let databasesDir = null;
+  if (choice.response === 0) { // Auto Scan
+    const candidates = [
+      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'Softouch', 'Easyworship'),
+      path.join('C:\\ProgramData', 'Softouch', 'Easyworship'),
+      path.join(os.homedir(), 'Documents', 'Easyworship')
+    ];
+    for (const c of candidates) {
+      const found = findDatabasesDirUnder(c);
+      if (found) { databasesDir = found; break; }
+    }
+    if (!databasesDir) {
+      dialog.showMessageBox({ type: 'info', message: 'No EasyWorship databases found in common locations. Please select a folder manually.', buttons: ['OK'] });
+      // fall through to select folder
+    }
+  }
+
+  if (!databasesDir && choice.response !== 2) {
+    const sel = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Select EasyWorship installation or Databases folder' });
+    if (sel.canceled || !sel.filePaths || sel.filePaths.length === 0) return;
+    // If user selected some folder, try to locate DBs under it
+    const candidate = sel.filePaths[0];
+    const found = findDatabasesDirUnder(candidate);
+    databasesDir = found || candidate;
+  }
+
+  if (!databasesDir) return;
+
+  const songs = await importEasyWorshipFromDir(databasesDir);
+  if (!songs || songs.length === 0) {
+    await dialog.showMessageBox({ type: 'info', message: 'No songs found', detail: `No Songs.db/SongWords.db data found under ${databasesDir}`, buttons: ['OK'] });
+    return;
+  }
+
+  // Merge into songs.json in userData
+  const { getUserDataDir } = require('./lib/paths');
+  const songsPath = path.join(getUserDataDir(app), 'songs.json');
+  let existing = [];
+  try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
+
+  let added = 0;
+  for (const s of songs) {
+    const exists = existing.some(e => (e.title || '').trim() === (s.title || '').trim() && (e.author || '').trim() === (s.author || '').trim());
+    if (exists) continue;
+    // Convert text into lyrics sections (split on blank lines)
+    const paragraphs = s.text ? s.text.split(/\r?\n\s*\r?\n/) : [];
+    const lyrics = paragraphs.length ? paragraphs.map(p => ({ section: '', text: (p || '').trim().replace(/\r?\n/g, '\n') })) : [{ section: '', text: (s.text || '').trim() }];
+    existing.push({ title: s.title, author: s.author, lyrics });
+    added++;
+  }
+
+  try { fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8'); } catch (e) { console.error('Failed to write songs.json', e); dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] }); return; }
+
+  mainWindow && mainWindow.webContents.send('songs-imported', { addedCount: added, totalFound: songs.length });
+
+  dialog.showMessageBox({ type: 'info', message: 'Import complete', detail: `Found ${songs.length} song(s). Imported ${added} new song(s).`, buttons: ['OK'] });
+}
+
+// ---------------------------
+
+
+const { getUserDataDir } = require('./lib/paths');
+const settingsPath = path.join(getUserDataDir(app), 'settings.json');
 
 ipcMain.handle('load-settings', async () => {
   try {
@@ -143,11 +369,12 @@ async function startSaveReport() {
   }
 
   // Read files and settings
+  const { resolveProjectPath } = require('./lib/paths');
   let indexHtml = '';
   let liveHtml = '';
   let settingsFile = '';
-  try { indexHtml = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8'); } catch (e) {}
-  try { liveHtml = await fs.promises.readFile(path.join(__dirname, 'live.html'), 'utf8'); } catch (e) {}
+  try { indexHtml = await fs.promises.readFile(resolveProjectPath('index.html'), 'utf8'); } catch (e) {}
+  try { liveHtml = await fs.promises.readFile(resolveProjectPath('live.html'), 'utf8'); } catch (e) {}
   try { settingsFile = await fs.promises.readFile(settingsPath, 'utf8'); } catch (e) {}
 
   // Collect system info
@@ -197,7 +424,8 @@ async function startSaveReport() {
   // Ask user where to save
   const { filePath, canceled } = await dialog.showSaveDialog({
     title: 'Save diagnostic report',
-    defaultPath: path.join(app.getPath('desktop'), defaultName),
+    const { getDesktopPath } = require('./lib/paths');
+    defaultPath: path.join(getDesktopPath(app), defaultName),
     filters: [{ name: 'Report', extensions: ['txt'] }]
   });
 
@@ -215,11 +443,78 @@ async function startSaveReport() {
   }
 }
 
+<<<<<<< Updated upstream
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 700,
     icon: path.join(__dirname, 'logo.png'),
+=======
+// Helpers for persisting window state (bounds, maximized, fullscreen)
+let _windowStateSaveTimer = null;
+async function saveWindowState() {
+  try {
+    if (!mainWindow) return;
+    const isMax = mainWindow.isMaximized();
+    const isFull = mainWindow.isFullScreen();
+
+    // If maximized/fullscreen, only persist state flags — do NOT overwrite normal bounds
+    if (isMax || isFull) {
+      const patch = { window: { maximized: !!isMax, fullscreen: !!isFull } };
+      return applySettingsPatch(patch);
+    }
+
+    // Normal window: persist its current bounds so they can be restored after unmaximize/leave-fullscreen
+    const bounds = mainWindow.getBounds();
+    const patch = { window: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, maximized: false, fullscreen: false } };
+    return applySettingsPatch(patch);
+  } catch (e) {
+    console.error('Failed to save window state:', e);
+  }
+}
+
+function saveWindowStateDebounced() {
+  if (_windowStateSaveTimer) clearTimeout(_windowStateSaveTimer);
+  _windowStateSaveTimer = setTimeout(() => { saveWindowState(); _windowStateSaveTimer = null; }, 300);
+}
+
+function loadWindowState() {
+  try {
+    try {
+      const st = fs.statSync(settingsPath);
+      if (st && st.size === 0) {
+        const bak = settingsPath + '.bak';
+        try {
+          const bakSt = fs.statSync(bak);
+          if (bakSt && bakSt.size > 0) {
+            console.warn('[loadWindowState] settings.json empty, restoring from backup');
+            fs.copyFileSync(bak, settingsPath);
+          }
+        } catch (e) {
+          // no backup
+        }
+      }
+    } catch (e) {
+      // settings file may not exist yet
+    }
+
+    const txt = fs.readFileSync(settingsPath, 'utf8');
+    const s = JSON.parse(txt);
+    return (s && s.window) ? s.window : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+async function createWindow() {
+  // Restore previous window bounds/state when available
+  const winState = loadWindowState();
+  const opts = {
+    width: winState.width || 1000,
+    height: winState.height || 700,
+    x: typeof winState.x === 'number' ? winState.x : undefined,
+    y: typeof winState.y === 'number' ? winState.y : undefined,
+    icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
@@ -251,7 +546,8 @@ function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
-              icon: path.join(__dirname, 'logo.png'),
+<<<<<<< Updated upstream
+              icon: getIconPath(),
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -317,7 +613,57 @@ ipcMain.on('set-dark-theme', (event, enabled) => {
   }
 });
 
+<<<<<<< Updated upstream
 app.whenReady().then(createWindow);
+=======
+// On Windows set AppUserModelID so taskbar and notifications use the app icon
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.jacqueb.liturgia'); } catch (e) { console.warn('Failed to set AppUserModelId', e); }
+}
+
+app.whenReady().then(async () => {
+  await createWindow();
+  // After window creation, load settings and, if enabled, check for updates on startup
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch {}
+    // Back-compat and registry fallback on Windows
+    if (typeof settings.autoCheckUpdates !== 'boolean' && process.platform === 'win32') {
+      try {
+        const { execSync } = require('child_process');
+        const out = execSync('reg query "HKCU\\Software\\Liturgia" /v AutoCheckForUpdates', { stdio: ['pipe','pipe','ignore'] }).toString();
+        const m = out.match(/AutoCheckForUpdates\s+REG_\w+\s+(\d+)/i);
+        if (m) settings.autoCheckUpdates = (m[1] === '1');
+      } catch (e) { /* ignore */ }
+    }
+    // Default to true if not present
+    if (typeof settings.autoCheckUpdates !== 'boolean') settings.autoCheckUpdates = true;
+
+    // Default dark theme for fresh installs
+    if (typeof settings.darkTheme !== 'boolean') {
+      settings.darkTheme = true;
+      try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme:', e); }
+    }
+
+    if (settings.autoCheckUpdates) {
+      const res = await checkForUpdates();
+      if (res && res.updateAvailable && mainWindow) {
+        // Send update info to renderer. If the renderer isn't ready yet (still loading), store
+        // the update info and deliver it when the window finishes loading so the user sees the
+        // in-app modal on startup reliably.
+        if (mainWindow.webContents && mainWindow.webContents.isLoading && mainWindow.webContents.isLoading()) {
+          pendingUpdate = res;
+          // Ensure we send it once the renderer finishes loading
+          mainWindow.webContents.once('did-finish-load', () => {
+            try { if (pendingUpdate && mainWindow && mainWindow.webContents) { mainWindow.webContents.send('update-available', pendingUpdate); pendingUpdate = null; } } catch(e) {}
+          });
+        } else {
+          try { mainWindow.webContents.send('update-available', res); } catch(e) {}
+        }
+      }
+    }
+  } catch (e) { console.warn('Startup update check failed', e); }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -329,7 +675,115 @@ app.on('activate', () => {
 
 // Expose userData path to renderer
 ipcMain.handle('get-user-data-path', () => {
-  return app.getPath('userData');
+  const { getUserDataDir } = require('./lib/paths');
+  return getUserDataDir(app);
+});
+
+// Semantic version compare: returns 1 if a>b, -1 if a<b, 0 if equal
+function semverCompare(a, b) {
+  if (!a || !b) return 0;
+  const pa = a.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const pb = b.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+// Check for updates against GitHub releases
+async function checkForUpdates() {
+  try {
+    const fetch = require('node-fetch');
+    const api = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases/latest';
+    const r = await fetch(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+    if (!r.ok) return { ok:false, error: `GitHub API returned ${r.status}` };
+    const j = await r.json();
+    const latest = (j.tag_name || j.name || '').toString();
+    const current = app.getVersion();
+    const cmp = semverCompare(latest, current);
+    const updateAvailable = (cmp === 1);
+    const assets = (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size }));
+    const result = { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
+    // Also cache the last check result (useful if renderer requests it later before another check)
+    lastUpdateCheck = result;
+    return result;
+  } catch (e) { console.warn('checkForUpdates error', e); return { ok:false, error: String(e) }; }
+}
+
+// Expose manual check via IPC
+ipcMain.handle('check-for-updates-manual', async () => {
+  return await checkForUpdates();
+});
+
+// Renderer can ask for any pending update that was found before it was ready
+ipcMain.handle('get-pending-update', async () => {
+  return pendingUpdate || lastUpdateCheck || { ok:false };
+});
+
+// In-memory map of active downloads
+const downloads = {};
+
+// Download an update asset (renderer requests with a browser_download_url)
+ipcMain.handle('download-update', async (event, { url }) => {
+  try {
+    const fetch = require('node-fetch');
+    const { getTempPath } = require('./lib/paths');
+    const tmpDir = getTempPath(app);
+    const name = path.basename((url || '').split('?')[0]) || `liturgia-update-${Date.now()}.exe`;
+    const dest = path.join(tmpDir, name);
+    const r = await fetch(url);
+    if (!r.ok) return { ok:false, error: `Download failed ${r.status}` };
+    const total = parseInt(r.headers.get('content-length') || '0', 10);
+    const destStream = fs.createWriteStream(dest);
+    let downloaded = 0;
+
+    downloads[dest] = { res: r };
+
+    return await new Promise((resolve, reject) => {
+      r.body.on('data', (chunk) => {
+        downloaded += chunk.length;
+        destStream.write(chunk);
+        const percent = total ? Math.round(downloaded / total * 100) : null;
+        try { event.sender.send('update-download-progress', { file: dest, downloaded, total, percent }); } catch (e) {}
+      });
+      r.body.on('end', () => {
+        destStream.end();
+        try { event.sender.send('update-download-complete', { file: dest }); } catch (e) {}
+        delete downloads[dest];
+        resolve({ ok:true, file: dest });
+      });
+      r.body.on('error', (err) => {
+        try { destStream.close(); fs.unlinkSync(dest); } catch (e) {}
+        delete downloads[dest];
+        reject({ ok:false, error: String(err) });
+      });
+    });
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Cancel an ongoing download and remove partial file
+ipcMain.handle('cancel-update-download', async (event, { file }) => {
+  try {
+    if (downloads[file] && downloads[file].res && downloads[file].res.body) {
+      try { downloads[file].res.body.destroy(); } catch (e) {}
+    }
+    try { fs.unlinkSync(file); } catch (e) {}
+    delete downloads[file];
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Run the downloaded installer (open file with default handler)
+ipcMain.handle('run-installer', async (event, file) => {
+  try {
+    if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
+    await shell.openPath(file);
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
 });
 
 async function loadAllVersesFromDiskMain(baseDir) {
@@ -370,7 +824,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow.focus();
     return;
   }
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  const settingsPath = path.join(getUserDataDir(app), 'settings.json');
   let settings = {};
   try {
     const data = await fs.promises.readFile(settingsPath, 'utf8');
@@ -383,7 +837,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
-      icon: path.join(__dirname, 'logo.png'),
+      icon: getIconPath(),
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
