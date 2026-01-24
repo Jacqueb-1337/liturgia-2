@@ -1,25 +1,22 @@
-const Jimp = require('jimp');
+const sharp = require('sharp');
+const fs = require('fs');
 
 (async () => {
+  const p = 'build/icon.png';
   try {
-    const path = 'build/icon.png';
-    let img = await Jimp.read(path);
-    if (img.bitmap.width < 256 || img.bitmap.height < 256) {
-      console.log('Icon too small', img.bitmap.width, 'x', img.bitmap.height, '— creating 512x512 placeholder.');
-      const n = new Jimp(512, 512, 0xff3366ff);
-      const font = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-      n.print(font, 20, 20, 'Liturgia');
-      await n.writeAsync(path);
-      console.log('Wrote placeholder', path);
+    if (!fs.existsSync(p)) throw new Error('not found');
+    const meta = await sharp(p).metadata();
+    if (meta.width < 256 || meta.height < 256) {
+      console.log('Icon too small', meta.width, 'x', meta.height, '— resizing to 512x512');
+      await sharp(p).resize(512, 512, { fit: 'cover' }).png().toFile(p);
+      console.log('Resized', p);
     } else {
-      console.log('Icon size OK', img.bitmap.width, 'x', img.bitmap.height);
+      console.log('Icon size OK', meta.width, 'x', meta.height);
     }
   } catch (err) {
     console.log('Could not read icon; creating 512x512 placeholder. Error:', err.message);
-    const n = new Jimp(512, 512, 0xff3366ff);
-    const font = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-    n.print(font, 20, 20, 'Liturgia');
-    await n.writeAsync('build/icon.png');
+    if (!fs.existsSync('build')) fs.mkdirSync('build', { recursive: true });
+    await sharp({ create: { width: 512, height: 512, channels: 4, background: '#ff3366' } }).png().toFile(p);
     console.log('Wrote placeholder build/icon.png');
   }
 })();
