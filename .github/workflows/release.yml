@@ -107,7 +107,13 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
           echo "Uploading to release $TAG"
-          gh release upload "$TAG" dist/** --clobber --repo "${{ github.repository }}"
+          if [ -d dist ]; then
+            echo "Finding files under dist/..."
+            find dist -type f -print0 | xargs -0 -n50 gh release upload "$TAG" --clobber --repo "${{ github.repository }}"
+          else
+            echo "dist directory not found; nothing to upload"
+          fi
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
