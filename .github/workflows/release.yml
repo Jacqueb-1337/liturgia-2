@@ -79,8 +79,21 @@ jobs:
         env:
           CI: true
 
-      - name: List dist
-        run: ls -la dist || true
+      - name: List dist (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ls -la dist || true
+        shell: bash
+
+      - name: List dist (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (Test-Path 'dist') {
+            Get-ChildItem 'dist' -Force
+          } else {
+            Write-Output 'dist not found'
+          }
+        shell: pwsh
 
       - name: Upload built artifacts to release
         uses: softprops/action-gh-release@v1
