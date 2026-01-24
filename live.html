@@ -578,6 +578,12 @@
       return false;
     }
 
+    // Helper: file URL helper that delegates to preload-exposed paths.fileUrlFor
+    function _fileUrlFor(p) {
+      try { if (window && window.paths && typeof window.paths.fileUrlFor === 'function') return window.paths.fileUrlFor(p); } catch (e) {}
+      return 'file:///' + (p || '').replace(/\\/g, '/');
+    }
+
     // Helper: render only the background portion of content to an offscreen canvas
     function renderBackgroundToCanvas(content, canvas) {
       return new Promise((resolve) => {
@@ -635,7 +641,7 @@
               resolve();
             };
             // Ensure file:// URL for absolute paths
-            img.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+            img.src = _fileUrlFor(pathToImg);
             return;
           }
 
@@ -643,7 +649,7 @@
             const video = document.createElement('video');
             video.preload = 'auto';
             video.muted = true;
-            video.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+            video.src = _fileUrlFor(pathToImg);
             // Wait for a frame to be available
             video.addEventListener('loadeddata', () => {
               try {
@@ -680,7 +686,7 @@
             ctxLocal.fillRect(0, 0, width, height);
             resolve();
           };
-          img.src = window.paths ? window.paths.fileUrlFor(pathToImg) : `file:///${pathToImg.replace(/\\/g, '/')}`;
+          img.src = _fileUrlFor(pathToImg);
           return;
         }
 
@@ -899,7 +905,7 @@
           };
           img.onerror = (e) => console.error('Failed to load image:', content.mediaPath, e);
           const fileURL = renderContent_content.mediaPath;
-          img.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+          img.src = _fileUrlFor(fileURL);
         } else if (isVideo) {
           // Stop any existing video first
           if (window.currentVideo) {
@@ -909,7 +915,7 @@
           
           const video = document.createElement('video');
           const fileURL = renderContent_content.mediaPath;
-          video.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+          video.src = _fileUrlFor(fileURL);
           video.loop = renderContent_content.loop !== false; // default true
           video.muted = renderContent_content.muted !== false; // default true
           video.play();
@@ -1008,7 +1014,7 @@
                     }
                   };
                   const fileURL = media.path;
-                  bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+                  bgImg.src = _fileUrlFor(fileURL);
                   return; // Don't call fade-in below
                 }
               }
@@ -1065,7 +1071,7 @@
             showTextWithAnimation();
           };
           const fileURL = media.path;
-          bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+          bgImg.src = _fileUrlFor(fileURL);
         } else {
           // Video or unknown type - just show text with animation
           showTextWithAnimation();
@@ -1096,7 +1102,7 @@
           console.error('Live window failed to load background:', renderContent_content.backgroundPath, e);
           showTextWithAnimation();
         };
-        bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+        bgImg.src = _fileUrlFor(fileURL);
       } else {
         console.log('Live window: No background, rendering text only');
         showTextWithAnimation();
@@ -1373,7 +1379,7 @@
               const bgImg = new Image();
               bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: media.bgSize || 'cover', bgRepeat: media.bgRepeat || 'no-repeat', bgPosition: media.bgPosition || 'center' });
               const fileURL = media.path;
-              bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+              bgImg.src = _fileUrlFor(fileURL);
             }
           }
         };
@@ -1438,7 +1444,7 @@
               });
             };
             const fileURL = media.path;
-            bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+            bgImg.src = _fileUrlFor(fileURL);
           }
         }
         currentRenderContent = {
@@ -1518,7 +1524,7 @@
               }
             };
             const fileURL = media.path;
-            bgImg.src = window.paths ? window.paths.fileUrlFor(fileURL) : `file:///${fileURL.replace(/\\/g, '/')}`;
+            bgImg.src = _fileUrlFor(fileURL);
           }
         } else {
           // No background media, just fade in text

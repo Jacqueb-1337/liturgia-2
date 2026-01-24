@@ -422,9 +422,9 @@ async function startSaveReport() {
   const reportContent = parts.join('\n\n');
 
   // Ask user where to save
+  const { getDesktopPath } = require('./lib/paths');
   const { filePath, canceled } = await dialog.showSaveDialog({
     title: 'Save diagnostic report',
-    const { getDesktopPath } = require('./lib/paths');
     defaultPath: path.join(getDesktopPath(app), defaultName),
     filters: [{ name: 'Report', extensions: ['txt'] }]
   });
@@ -443,13 +443,6 @@ async function startSaveReport() {
   }
 }
 
-<<<<<<< Updated upstream
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    icon: path.join(__dirname, 'logo.png'),
-=======
 // Helpers for persisting window state (bounds, maximized, fullscreen)
 let _windowStateSaveTimer = null;
 async function saveWindowState() {
@@ -518,10 +511,12 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
-      contextIsolation: false   // allow require() in renderer
+      contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
     }
-  });
+  };
 
+  // Create the main window instance
+  mainWindow = new BrowserWindow(opts);
   mainWindow.loadFile('index.html');
   
   // Close live window when main window closes
@@ -546,7 +541,6 @@ async function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
-<<<<<<< Updated upstream
               icon: getIconPath(),
               webPreferences: {
                 nodeIntegration: true,
@@ -613,9 +607,6 @@ ipcMain.on('set-dark-theme', (event, enabled) => {
   }
 });
 
-<<<<<<< Updated upstream
-app.whenReady().then(createWindow);
-=======
 // On Windows set AppUserModelID so taskbar and notifications use the app icon
 if (process.platform === 'win32') {
   try { app.setAppUserModelId('com.jacqueb.liturgia'); } catch (e) { console.warn('Failed to set AppUserModelId', e); }
@@ -697,9 +688,16 @@ function semverCompare(a, b) {
 // Check for updates against GitHub releases
 async function checkForUpdates() {
   try {
-    const fetch = require('node-fetch');
+    // Prefer global fetch (Node 18+). Fall back to node-fetch when available.
+    let fetchFn = (typeof fetch === 'function') ? fetch : null;
+    if (!fetchFn) {
+      try { fetchFn = require('node-fetch'); } catch (e) {
+        console.warn('checkForUpdates disabled: fetch not available', e);
+        return { ok:false, error: 'fetch not available' };
+      }
+    }
     const api = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases/latest';
-    const r = await fetch(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+    const r = await fetchFn(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
     if (!r.ok) return { ok:false, error: `GitHub API returned ${r.status}` };
     const j = await r.json();
     const latest = (j.tag_name || j.name || '').toString();
