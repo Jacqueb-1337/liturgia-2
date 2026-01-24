@@ -26,6 +26,30 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Fix icon (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          # If the placeholder icon is base64 text (starts with iVBOR), decode to binary
+          if head -c 8 build/icon.png | grep -q '^iVBOR'; then
+            base64 --decode build/icon.png > build/icon.png.bin && mv build/icon.png.bin build/icon.png
+            echo "Decoded build/icon.png from base64 into binary PNG"
+          else
+            echo "build/icon.png already binary or not present"
+          fi
+        shell: bash
+
+      - name: Fix icon (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $s = Get-Content build\icon.png -Raw -ErrorAction SilentlyContinue
+          if ($s -and $s.StartsWith('iVBOR')) {
+            [System.IO.File]::WriteAllBytes('build\icon.png',[System.Convert]::FromBase64String($s))
+            Write-Output "Decoded build\\icon.png from base64 into binary PNG"
+          } else {
+            Write-Output "build\\icon.png already binary or not present"
+          }
+        shell: pwsh
+
       - name: Build packages
         run: |
           echo "Building on $RUNNER_OS"
