@@ -65,27 +65,214 @@
 </head>
 <body>
   <canvas id="live-canvas" style="width: 100vw; height: 100vh; display: block;"></canvas>
+  <canvas id="live-text-canvas" style="position:absolute;left:0;top:0;width:100vw;height:100vh;pointer-events:none;display:block;"></canvas>
   <script>
     const { ipcRenderer } = require('electron');
     
-    const canvas = document.getElementById('live-canvas');
-    const ctx = canvas.getContext('2d');
+    const bgCanvas = document.getElementById('live-canvas');
+    const bgCtx = bgCanvas.getContext('2d');
+    const textCanvas = document.getElementById('live-text-canvas');
+    const textCtx = textCanvas.getContext('2d');
+    // Backwards-compatible aliases for older code that references `canvas`/`ctx`
+    const canvas = bgCanvas;
+    const ctx = bgCtx;
     
+    // License watermark state (updated from main via ipc)
+    let licenseStatus = { active: true };
+    ipcRenderer.on('license-status', (event, status) => {
+      licenseStatus = status || { active: false };
+      // Refresh current content so watermark is placed under text
+      refreshContentWithWatermark().catch(e => { console.error('Failed to refresh content for watermark:', e); });
+    });
+
+    // Initialize from main process stored status (if available)
+    (async () => {
+      try {
+        const s = await ipcRenderer.invoke('get-current-license-status');
+        if (s) { licenseStatus = s; await refreshContentWithWatermark(); }
+      } catch (e) { /* ignore */ }
+    })();
+
+    // Render text content to an offscreen canvas and return it
+    function renderTextToCanvas(content, width, height) {
+      const textCanvas = document.createElement('canvas');
+      textCanvas.width = width;
+      textCanvas.height = height;
+      const textCtx = textCanvas.getContext('2d');
+      textCtx.clearRect(0, 0, width, height);
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
+      textCtx.textAlign = 'center';
+      textCtx.textBaseline = 'middle';
+
+      const padding = width * 0.02;
+      const availableWidth = width - (padding * 2);
+      const availableHeight = height - (padding * 2);
+      let baseFontSize = height * 0.08;
+
+      // Render verse number (top left)
+      if (content.number) {
+        textCtx.font = `${baseFontSize * 0.6}px Arial`;
+        textCtx.textAlign = 'left';
+        textCtx.fillStyle = numberStyle.color || '#fff';
+        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+      }
+
+      // Render verse text (center)
+      if (content.text) {
+        textCtx.textAlign = 'center';
+        const textY = height / 2;
+        const textLines = content.text.split('\n');
+        const allLines = [];
+
+        textLines.forEach(textLine => {
+          const segments = parseVerseSegments(textLine);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          textCtx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          allLines.push(...wrappedLines);
+        });
+
+        let lines = allLines;
+
+        // Size adjustment (grow if space allows)
+        while (true) {
+          const testSize = baseFontSize + 4;
+          textCtx.font = `${testSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
+            baseFontSize = testSize;
+            lines = testLines;
+          } else break;
+        }
+
+        // Shrink if needed
+        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
+          baseFontSize -= 2;
+          textCtx.font = `${baseFontSize}px Arial`;
+          const testLines = [];
+          textLines.forEach(textLine => {
+            const segments = parseVerseSegments(textLine);
+            // Ensure inline markdown is parsed for measurement
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            testLines.push(...wrappedLines);
+          });
+          lines = testLines;
+        }
+
+        // Render lines
+        const lineHeight = baseFontSize * 1.2;
+        const totalHeight = lines.length * lineHeight;
+        const startY = textY - (totalHeight / 2);
+
+        lines.forEach((line, i) => {
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
+        });
+      }
+
+      // Render reference (bottom right)
+      if (content.reference) {
+        textCtx.font = `${baseFontSize * 0.7}px Arial`;
+        textCtx.textAlign = 'right';
+        textCtx.fillStyle = referenceStyle.color || '#fff';
+        textCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
+      }
+
+      return textCanvas;
+    }
+
+    // Refresh the visible canvas so watermark is placed between background and text
+    async function refreshContentWithWatermark() {
+      if (!canvas || !ctx) return;
+      if (!window.currentContent) {
+        // Nothing to do but draw watermark over black
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawLicenseWatermark();
+        return;
+      }
+      // Cancel any running animations
+      if (currentAnimationFrameId) { cancelAnimationFrame(currentAnimationFrameId); currentAnimationFrameId = null; }
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // Render background to offscreen canvas
+      const off = document.createElement('canvas'); off.width = width; off.height = height;
+      await renderBackgroundToCanvas(window.currentContent, off);
+      // Draw background
+      ctx.drawImage(off, 0, 0);
+      // Draw watermark between background and text
+      drawLicenseWatermark();
+      // Draw text if present
+      if (window.currentContent && window.currentContent.text) {
+        const txt = renderTextToCanvas(window.currentContent, width, height);
+        ctx.drawImage(txt, 0, 0);
+      }
+    }
+
+    function drawLicenseWatermark(targetCtx = bgCtx, targetCanvas = bgCanvas) {
+      if (!targetCanvas || !targetCtx) { console.debug('[live] drawLicenseWatermark: no target'); return; }
+      if (licenseStatus && licenseStatus.active) { console.debug('[live] drawLicenseWatermark: license active - skipping watermark'); return; } // nothing to draw
+      console.debug('[live] drawLicenseWatermark: drawing watermark', { active: !!(licenseStatus && licenseStatus.active), width: targetCanvas.width, height: targetCanvas.height });
+      targetCtx.save();
+      // Large, semi-transparent central watermark (draw on background canvas)
+      const minDim = Math.min(targetCanvas.width, targetCanvas.height);
+      const bigSize = Math.floor(minDim * 0.2); // 20% of min dimension
+      targetCtx.globalAlpha = 0.14;
+      targetCtx.fillStyle = '#ffffff';
+      targetCtx.textAlign = 'center';
+      targetCtx.textBaseline = 'middle';
+      targetCtx.translate(targetCanvas.width / 2, targetCanvas.height / 2);
+      targetCtx.rotate(-0.25);
+
+      // Draw main title
+      targetCtx.font = `bold ${bigSize}px Arial`;
+      targetCtx.fillText('LITURGIA', 0, 0);
+
+      // Draw account/email beneath if available (smaller, fainter)
+      const email = (licenseStatus && (licenseStatus.token_payload && licenseStatus.token_payload.email)) || (licenseStatus && licenseStatus.user_row && licenseStatus.user_row.email) || null;
+      if (email) {
+        targetCtx.globalAlpha = 0.10;
+        targetCtx.font = `bold ${Math.max(14, Math.floor(bigSize * 0.28))}px Arial`;
+        targetCtx.fillText(String(email).toUpperCase(), 0, Math.floor(bigSize * 0.9));
+      } else {
+        targetCtx.globalAlpha = 0.08;
+        targetCtx.font = `bold ${Math.max(12, Math.floor(bigSize * 0.18))}px Arial`;
+        targetCtx.fillText('UNLICENSED', 0, Math.floor(bigSize * 0.9));
+      }
+
+      targetCtx.restore();
+    }
+
     // Track state for clear/black modes
     let isClearMode = false;
     let isBlackMode = false;
     
     // Set canvas to actual display resolution
     function resizeCanvas() {
-      canvas.width = window.screen.width;
-      canvas.height = window.screen.height;
+      bgCanvas.width = window.screen.width;
+      bgCanvas.height = window.screen.height;
+      textCanvas.width = window.screen.width;
+      textCanvas.height = window.screen.height;
       // Redraw based on current mode
       if (isBlackMode || isClearMode) {
-        // Just fill with black
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Just fill with black on background and clear text layer
+        bgCtx.fillStyle = '#000';
+        bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+        drawLicenseWatermark();
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
       } else if (window.currentContent) {
-        renderContent(window.currentContent);
+        // Re-render full composition so watermark sits under text
+        refreshContentWithWatermark().catch(e => console.error('resize refresh failed', e));
       }
     }
     resizeCanvas();
@@ -228,6 +415,8 @@
           requestAnimationFrame(animate);
         } else {
           ctx.putImageData(originalImageData, 0, 0);
+          // Ensure watermark is present after fade finishes
+          drawLicenseWatermark();
           if (callback) callback();
         }
       };
@@ -264,7 +453,11 @@
       textCtx.clearRect(0, 0, width, height);
       
       // Render OLD text to off-screen canvas using proper wrapping
-      textCtx.fillStyle = '#fff';
+      const styles = oldContent && oldContent.styles ? oldContent.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
       textCtx.textAlign = 'center';
       textCtx.textBaseline = 'middle';
       
@@ -277,6 +470,7 @@
       if (oldContent.number) {
         textCtx.font = `${baseFontSize * 0.6}px Arial`;
         textCtx.textAlign = 'left';
+        textCtx.fillStyle = numberStyle.color || '#fff';
         textCtx.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
       }
       
@@ -289,6 +483,7 @@
         
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           textCtx.font = `${baseFontSize}px Arial`;
           const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
           allLines.push(...wrappedLines);
@@ -303,6 +498,7 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -321,6 +517,8 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            // Ensure inline markdown is parsed for measurement
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
             testLines.push(...wrappedLines);
           });
@@ -333,7 +531,7 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
       
@@ -356,8 +554,8 @@
         // Restore background first
         ctx.putImageData(backgroundImageData, 0, 0);
 
-        // Ensure smooth sub-pixel rendering
-        ctx.imageSmoothingEnabled = true;
+        // Draw watermark on top of background (so text fades out over it)
+        drawLicenseWatermark();
 
         // Apply fade-out effect to TEXT ONLY (use eased values)
         if (animationType === 'fade') {
@@ -401,101 +599,95 @@
       const content = currentRenderContent;
       const width = currentRenderWidth;
       const height = currentRenderHeight;
-      
+
       // Pre-render text to an off-screen canvas
-      const textCanvas = document.createElement('canvas');
-      textCanvas.width = width;
-      textCanvas.height = height;
-      const textCtx = textCanvas.getContext('2d');
-      
-      // Clear canvas to TRANSPARENT (not black) so only white text shows
-      textCtx.clearRect(0, 0, width, height);
-      
-      // Render text to off-screen canvas
-      textCtx.fillStyle = '#fff';
-      textCtx.textAlign = 'center';
-      textCtx.textBaseline = 'middle';
-      
+      const off = document.createElement('canvas');
+      off.width = width;
+      off.height = height;
+      const offCtx = off.getContext('2d');
+
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
+
+      offCtx.clearRect(0, 0, width, height);
+      offCtx.textAlign = 'center';
+      offCtx.textBaseline = 'middle';
+
       const padding = width * 0.02;
       const availableWidth = width - (padding * 2);
       const availableHeight = height - (padding * 2);
       let baseFontSize = height * 0.08;
-      
-      // Render verse number (top left)
+
       if (content.number) {
-        textCtx.font = `${baseFontSize * 0.6}px Arial`;
-        textCtx.textAlign = 'left';
-        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+        offCtx.font = `${baseFontSize * 0.6}px Arial`;
+        offCtx.textAlign = 'left';
+        offCtx.fillStyle = numberStyle.color || '#fff';
+        offCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
       }
-      
-      // Render verse text (center) - simplified for off-screen rendering
+
       if (content.text) {
-        textCtx.textAlign = 'center';
+        offCtx.textAlign = 'center';
         const textY = height / 2;
         const textLines = content.text.split('\n');
         const allLines = [];
-        
+
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
-          textCtx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          offCtx.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
           allLines.push(...wrappedLines);
         });
-        
+
         let lines = allLines;
-        
-        // Size adjustment
         while (true) {
           const testSize = baseFontSize + 4;
-          textCtx.font = `${testSize}px Arial`;
+          offCtx.font = `${testSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, offCtx);
             testLines.push(...wrappedLines);
           });
           if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
             baseFontSize = testSize;
             lines = testLines;
-          } else {
-            break;
-          }
+          } else break;
         }
-        
+
         while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
           baseFontSize -= 2;
-          textCtx.font = `${baseFontSize}px Arial`;
+          offCtx.font = `${baseFontSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
             testLines.push(...wrappedLines);
           });
           lines = testLines;
         }
-        
-        // Render lines
+
         const lineHeight = baseFontSize * 1.2;
         const totalHeight = lines.length * lineHeight;
         const startY = textY - (totalHeight / 2);
-        
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, offCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
-      
-      // Render reference (bottom right)
+
+      // Render reference if any
       if (content.reference) {
-        textCtx.font = `${baseFontSize * 0.7}px Arial`;
-        textCtx.textAlign = 'right';
-        textCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
+        offCtx.font = `${baseFontSize * 0.7}px Arial`;
+        offCtx.textAlign = 'right';
+        offCtx.fillStyle = referenceStyle.color || '#fff';
+        offCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
-      
-      const textImageData = textCtx.getImageData(0, 0, width, height);
-      
-      let backgroundImageData = null; // Will be captured on first animate call
-      
-      // Easing helper (smooth acceleration/deceleration)
+
+      // Animate onto the text canvas
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
       const animate = () => {
@@ -503,53 +695,38 @@
         const progress = Math.min(elapsed / duration, 1);
         const eased = easeInOutCubic(progress);
 
-        // Capture background on first frame (when it's guaranteed to be properly rendered)
-        if (!backgroundImageData) {
-          backgroundImageData = ctx.getImageData(0, 0, width, height);
-        }
-        
-        // Restore the captured background each frame
-        ctx.putImageData(backgroundImageData, 0, 0);
-
-        // Ensure smooth sub-pixel rendering
-        ctx.imageSmoothingEnabled = true;
-        
-        // Apply animation based on type (use eased progress)
+        // Clear text canvas and draw with eased alpha/offset
+        textCtx.clearRect(0, 0, width, height);
         if (animationType === 'fade') {
-          ctx.globalAlpha = eased;
-          ctx.drawImage(textCanvas, 0, 0);
-          ctx.globalAlpha = 1;
+          textCtx.globalAlpha = eased;
+          textCtx.drawImage(off, 0, 0);
+          textCtx.globalAlpha = 1;
         } else if (animationType === 'slide-left') {
-          // Slide in from right to left - fractional offset
           const offset = (1 - eased) * width;
-          ctx.globalAlpha = 1;
-          ctx.drawImage(textCanvas, offset, 0);
+          textCtx.drawImage(off, offset, 0);
         } else if (animationType === 'slide-right') {
-          // Slide in from left to right - fractional offset
           const offset = (eased - 1) * width;
-          ctx.globalAlpha = 1;
-          ctx.drawImage(textCanvas, offset, 0);
+          textCtx.drawImage(off, offset, 0);
         } else if (animationType === 'slide-up') {
           const offset = (1 - eased) * height;
-          ctx.globalAlpha = 1;
-          ctx.drawImage(textCanvas, 0, offset);
+          textCtx.drawImage(off, 0, offset);
         } else if (animationType === 'slide-down') {
           const offset = (eased - 1) * height;
-          ctx.globalAlpha = 1;
-          ctx.drawImage(textCanvas, 0, offset);
+          textCtx.drawImage(off, 0, offset);
         }
-        
+
         if (progress < 1) {
           currentAnimationFrameId = requestAnimationFrame(animate);
         } else {
-          // Animation complete - draw final text using drawImage to respect transparency
           currentAnimationFrameId = null;
-          ctx.globalAlpha = 1;
-          ctx.drawImage(textCanvas, 0, 0);
+          textCtx.clearRect(0, 0, width, height);
+          textCtx.drawImage(off, 0, 0);
+          // Defensive: ensure watermark is present after fade-in completes
+          try { drawLicenseWatermark(ctx, canvas); } catch (e) { console.warn('[live] drawLicenseWatermark failed after fade-in', e); }
           if (callback) callback();
         }
       };
-      
+
       currentAnimationFrameId = requestAnimationFrame(animate);
     }
     
@@ -583,7 +760,6 @@
       try { if (window && window.paths && typeof window.paths.fileUrlFor === 'function') return window.paths.fileUrlFor(p); } catch (e) {}
       return 'file:///' + (p || '').replace(/\\/g, '/');
     }
-
     // Helper: render only the background portion of content to an offscreen canvas
     function renderBackgroundToCanvas(content, canvas) {
       return new Promise((resolve) => {
@@ -867,6 +1043,16 @@
       currentRenderWidth = width;
       currentRenderHeight = height;
       
+      // If only the background changed, perform a background-only crossfade and keep text
+      if (oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
+        const dur = (renderContent_content && renderContent_content.transitionIn && renderContent_content.transitionIn.duration) ? renderContent_content.transitionIn.duration : 0.4;
+        applyBackgroundCrossfade(oldContent, renderContent_content, dur);
+        // Don't continue with normal rendering (crossfade draws the backgrounds and text)
+        // Store previous content for future out transitions
+        window.previousContent = renderContent_content;
+        return;
+      }
+      
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
       
@@ -883,6 +1069,8 @@
           console.log('Applying color:', renderContent_content.mediaColor);
           // Apply color or gradient
           applyColorToCanvas(ctx, renderContent_content.mediaColor, width, height);
+          // Ensure watermark is drawn onto the background for unlicensed state
+          drawLicenseWatermark(ctx, canvas);
           // Media content appears instantly, no text fade needed
         } else if (isImage) {
           console.log('Loading image with settings:', {
@@ -901,6 +1089,8 @@
               bgRepeat: renderContent_content.bgRepeat,
               bgPosition: renderContent_content.bgPosition
             });
+            // Draw watermark after rendering the image background
+            drawLicenseWatermark(ctx, canvas);
             // Media content appears instantly, no text fade needed
           };
           img.onerror = (e) => console.error('Failed to load image:', content.mediaPath, e);
@@ -955,6 +1145,8 @@
               ctx.fillStyle = '#000';
               ctx.fillRect(0, 0, width, height);
               ctx.drawImage(video, x, y, w, h);
+              // Draw watermark on each video frame so transitions capture it
+              drawLicenseWatermark();
             }
             requestAnimationFrame(drawFrame);
           };
@@ -995,6 +1187,8 @@
                 const media = renderContent_content.backgroundMedia;
                 if (media.type === 'COLOR') {
                   applyColorToCanvas(ctx, media.color, width, height);
+                  // Reapply watermark after redrawing the background color
+                  drawLicenseWatermark(ctx, canvas);
                 } else if (media.type === 'JPG' || media.type === 'PNG') {
                   // Image background - redraw it
                   const bgImg = new Image();
@@ -1004,6 +1198,8 @@
                       bgRepeat: media.bgRepeat || 'no-repeat',
                       bgPosition: media.bgPosition || 'center'
                     });
+                    // Reapply watermark after redrawing the background image
+                    drawLicenseWatermark(ctx, canvas);
                     
                     // Now start fade-in with background in place
                     if (renderContent_content.transitionIn) {
@@ -1029,7 +1225,8 @@
             }
           );
         } else {
-          // No fade-out needed, just apply fade-in
+          // No fade-out needed, ensure watermark is present then apply fade-in
+          drawLicenseWatermark();
           if (renderContent_content.transitionIn) {
             applyTextFadeInAnimation(
               renderContent_content.transitionIn.duration,
@@ -1049,6 +1246,8 @@
           ctx.fillRect(0, 0, width, height);
           
           applyColorToCanvas(ctx, media.color, width, height);
+          // Draw watermark between background and text
+          drawLicenseWatermark();
           showTextWithAnimation();
         } else if (media.type === 'JPG' || media.type === 'PNG') {
           console.log('Live window: Loading image background with settings:', media);
@@ -1063,6 +1262,8 @@
               bgRepeat: media.bgRepeat || 'no-repeat',
               bgPosition: media.bgPosition || 'center'
             });
+            // Draw watermark between background and text
+            drawLicenseWatermark();
             
             showTextWithAnimation();
           };
@@ -1093,6 +1294,8 @@
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(bgImg, x, y, w, h);
           console.log('Live window: Background drawn, no overlay darkening');
+          // Draw watermark between background and text
+          drawLicenseWatermark();
           
           // Show text with animation
           console.log('Live window: Showing text with animation');
@@ -1137,6 +1340,58 @@
       
       return segments;
     }
+
+    // Parse inline Markdown in a string into an array of word objects with style flags
+    // Supports: **bold**, __bold__, *italic*, _italic_
+    function parseInlineMarkdownWords(s) {
+      const out = [];
+      if (!s) return out;
+
+      const tokenRegex = /(\*\*|__)([\s\S]+?)\1|(\*|_)([\s\S]+?)\3/g;
+      let lastIndex = 0;
+      let m;
+
+      while ((m = tokenRegex.exec(s)) !== null) {
+        if (m.index > lastIndex) {
+          const plain = s.substring(lastIndex, m.index);
+          plain.split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: false, italic: false });
+          });
+        }
+
+        if (m[1] && m[2]) {
+          // Bold
+          m[2].split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: true, italic: false });
+          });
+        } else if (m[3] && m[4]) {
+          // Italic
+          m[4].split(' ').forEach((w, i, arr) => {
+            if (w === '') return;
+            const add = i < arr.length - 1 ? w + ' ' : w;
+            out.push({ text: add, bold: false, italic: true });
+          });
+        }
+
+        lastIndex = tokenRegex.lastIndex;
+      }
+
+      if (lastIndex < s.length) {
+        const rest = s.substring(lastIndex);
+        rest.split(' ').forEach((w, i, arr) => {
+          if (w === '') return;
+          const add = i < arr.length - 1 ? w + ' ' : w;
+          out.push({ text: add, bold: false, italic: false });
+        });
+      }
+
+      if (out.length === 0 && s.trim() !== '') out.push({ text: s, bold: false, italic: false });
+      return out;
+    }
     
     /**
      * Wrap text with subscript segments
@@ -1163,18 +1418,32 @@
           currentWidth += width;
           context.font = `${baseFontSize}px Arial`;
         } else {
-          const words = seg.text.split(' ');
-          words.forEach((word, idx) => {
-            const testWord = word + (idx < words.length - 1 ? ' ' : '');
+          // Use parsed words (with bold/italic flags) if available
+          const words = seg.words ? seg.words : seg.text.split(' ');
+          words.forEach((wordObj, idx) => {
+            const wordText = typeof wordObj === 'string' ? wordObj : wordObj.text;
+            const testWord = wordText + (idx < words.length - 1 ? ' ' : '');
+
+            // Measure using style-aware font if available
+            if (typeof wordObj !== 'string') {
+              const fontStr = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+              context.font = fontStr;
+            } else {
+              context.font = `${baseFontSize}px Arial`;
+            }
+
             const width = context.measureText(testWord).width;
-            
             if (currentWidth + width > maxWidth && currentLine.length > 0) {
               lines.push(currentLine);
               currentLine = [];
               currentWidth = 0;
             }
-            
-            currentLine.push({ isNumber: false, text: testWord });
+
+            if (typeof wordObj === 'string') {
+              currentLine.push({ isNumber: false, text: testWord });
+            } else {
+              currentLine.push({ isNumber: false, text: testWord, bold: !!wordObj.bold, italic: !!wordObj.italic });
+            }
             currentWidth += width;
           });
         }
@@ -1190,7 +1459,7 @@
     /**
      * Render a line with subscript verse numbers
      */
-    function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx) {
+    function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx, colors = {}) {
       const subscriptSize = baseFontSize * 0.6;
       let totalWidth = 0;
       
@@ -1211,14 +1480,17 @@
       segments.forEach(seg => {
         if (seg.isNumber) {
           context.font = `${subscriptSize}px Arial`;
-          context.fillStyle = '#ddd';
+          context.fillStyle = colors.subscriptColor || '#ddd';
           context.textAlign = 'left';
           context.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
           x += context.measureText(seg.text + ' ').width;
-          context.fillStyle = '#fff';
+          context.fillStyle = colors.textColor || '#fff';
         } else {
-          context.font = `${baseFontSize}px Arial`;
+          // Honor per-segment bold/italic flags when rendering
+          const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          context.font = fontStr;
           context.textAlign = 'left';
+          context.fillStyle = colors.textColor || '#fff';
           context.fillText(seg.text, x, y);
           x += context.measureText(seg.text).width;
         }
@@ -1234,8 +1506,11 @@
       const width = currentRenderWidth;
       const height = currentRenderHeight;
       const content = currentRenderContent;
+      const styles = content && content.styles ? content.styles : {};
+      const textStyle = styles.text || {};
+      const numberStyle = styles.number || styles.title || {};
+      const referenceStyle = styles.reference || {};
       
-      ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
     
@@ -1250,6 +1525,7 @@
       if (content.number) {
         ctx.font = `${baseFontSize * 0.6}px Arial`;
         ctx.textAlign = 'left';
+        ctx.fillStyle = numberStyle.color || '#fff';
         ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
       }
       
@@ -1258,17 +1534,23 @@
         ctx.textAlign = 'center';
         const textY = height / 2;
         
+        // Default text color and subscript color
+        const normalTextColor = textStyle.color || '#fff';
+        const subscriptColor = textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd');
+        
         // Split text by explicit newlines first (for songs), then handle verse numbers
         const textLines = content.text.split('\n');
         const allLines = [];
         
         textLines.forEach(textLine => {
-          // Parse text to handle verse numbers as subscripts
+                // Parse text to handle verse numbers as subscripts
           const segments = parseVerseSegments(textLine);
+          // Parse inline markdown for each non-number segment so we can render bold/italic on canvas
+          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           
           // Auto-size font to fill vertical space optimally
           ctx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, ctx);
           allLines.push(...wrappedLines);
         });
         
@@ -1280,7 +1562,8 @@
           ctx.font = `${testSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
+              const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize);
             testLines.push(...wrappedLines);
           });
@@ -1299,6 +1582,8 @@
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
             const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
             testLines.push(...wrappedLines);
           });
@@ -1311,7 +1596,7 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, ctx, { textColor: normalTextColor, subscriptColor });
         });
       }
       
@@ -1319,6 +1604,7 @@
       if (content.reference) {
         ctx.font = `${baseFontSize * 0.7}px Arial`;
         ctx.textAlign = 'right';
+        ctx.fillStyle = referenceStyle.color || '#fff';
         ctx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
       
@@ -1350,8 +1636,10 @@
         console.debug('[live] entering black mode');
         isClearMode = false;
         isBlackMode = true;
+        // Fill background black and clear the text layer so no text remains visible
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore if textCtx unavailable */ }
         currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
         return;
       }
@@ -1387,11 +1675,19 @@
         if (hasVisibleText) {
           const oldContent = { ...currentRenderContent };
           renderBackground();
+          // Ensure watermark is drawn into the captured background for the fade-out
+          drawLicenseWatermark();
           applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
+            // After fade-out finishes, clear the text layer to ensure no residual remains
+            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore */ }
             currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
           });
         } else {
           renderBackground();
+          // Draw watermark for clear-mode background
+          drawLicenseWatermark();
+          // Ensure text layer is cleared immediately
+          try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore */ }
           currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
         }
 
@@ -1415,6 +1711,8 @@
         const height = canvas.height;
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, width, height);
+        // Draw watermark on black screen
+        drawLicenseWatermark();
         currentRenderContent = {
           ...window.currentContent,
           number: '',
@@ -1500,6 +1798,8 @@
           const media = window.currentContent.backgroundMedia;
           if (media.type === 'COLOR') {
             applyColorToCanvas(ctx, media.color, width, height);
+            // Draw watermark between background and text
+            drawLicenseWatermark();
             // Then fade in text
             if (window.currentContent.transitionIn) {
               applyTextFadeInAnimation(
@@ -1515,6 +1815,8 @@
                 bgRepeat: media.bgRepeat || 'no-repeat',
                 bgPosition: media.bgPosition || 'center'
               });
+              // Draw watermark between background and text
+              drawLicenseWatermark();
               // Then fade in text
               if (window.currentContent.transitionIn) {
                 applyTextFadeInAnimation(
@@ -1527,7 +1829,8 @@
             bgImg.src = _fileUrlFor(fileURL);
           }
         } else {
-          // No background media, just fade in text
+          // No background media, draw watermark then fade in text
+          drawLicenseWatermark();
           if (window.currentContent.transitionIn) {
             applyTextFadeInAnimation(
               window.currentContent.transitionIn.duration,
@@ -1549,6 +1852,8 @@
       isBlackMode = true;
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Draw watermark after background fill so it appears under any text drawn later
+      drawLicenseWatermark();
     });
     
     ipcRenderer.on('reset-live-canvas', () => {
@@ -1562,6 +1867,10 @@
       isBlackMode = false;
       if (window.currentContent) {
         renderContent(window.currentContent);
+        // renderContent will call show-live-text logic which will draw watermark between background and text
+      } else {
+        // still ensure watermark is visible over background-only states
+        drawLicenseWatermark();
       }
     });
   </script>

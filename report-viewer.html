@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Liturgia Diagnostic Report Viewer</title>
+  <!-- Font Awesome for icons -->
+  <!-- Font Awesome CDN removed due to strict CSP. Consider bundling local icons or using inline SVGs instead -->
   <style>
     * {
       margin: 0;
@@ -87,6 +89,15 @@
       font-size: 13px;
     }
 
+    /* Icon styling for Font Awesome */
+    .nav-item i {
+      width: 20px;
+      display: inline-block;
+      text-align: center;
+      margin-right: 8px;
+      color: #9aa0a6;
+    }
+
     .nav-item:hover {
       background: #2a2d2e;
     }
@@ -94,6 +105,10 @@
     .nav-item.active {
       background: #37373d;
       border-left-color: #0e639c;
+      color: #fff;
+    }
+
+    .nav-item.active i {
       color: #fff;
     }
 
@@ -346,7 +361,7 @@
 </head>
 <body>
   <header>
-    <h1>📊 Liturgia Diagnostic Report Viewer</h1>
+    <h1><i class="fa-solid fa-magnifying-glass-chart"></i> Liturgia Diagnostic Report Viewer</h1>
     <div class="file-input-wrapper">
       <input type="file" id="file-input" accept=".txt">
       <button class="btn" onclick="document.getElementById('file-input').click()">
@@ -399,6 +414,7 @@
 
         switch(title) {
           case 'SYSTEM METADATA':
+          case 'METADATA':
             parseMetadata(content);
             break;
           case 'MAIN PROCESS LOGS':
@@ -408,15 +424,19 @@
             reportData.rendererLogs = parseLogs(content);
             break;
           case 'INDEX.HTML':
+          case 'INDEX.HTML FILE':
             reportData.indexHtml = content;
             break;
           case 'LIVE.HTML':
+          case 'LIVE.HTML FILE':
             reportData.liveHtml = content;
             break;
           case 'SETTINGS FILE (from disk)':
+          case 'SETTINGS FILE (on disk)':
             reportData.settingsFile = content;
             break;
           case 'RENDERER SETTINGS (in-memory)':
+          case 'RENDERER PAYLOAD':
             try {
               reportData.rendererSettings = JSON.parse(content);
             } catch(e) {
@@ -429,11 +449,32 @@
           case 'LIVE WINDOW SCREENSHOT (base64 PNG)':
             reportData.liveScreenshot = content.trim();
             break;
+          case 'GLOBAL CSS (styles.css)':
+            reportData.globalCss = content;
+            break;
         }
       });
     }
 
     function parseMetadata(content) {
+      const trimmed = content.trim();
+      // If content is JSON, parse and map to friendly keys
+      if (trimmed.startsWith('{')) {
+        try {
+          const obj = JSON.parse(trimmed);
+          if (obj.platform || obj.arch) reportData.metadata['Platform'] = (obj.platform || '') + (obj.arch ? ' ' + obj.arch : '');
+          if (obj.electron) reportData.metadata['Electron Version'] = obj.electron;
+          if (obj.node) reportData.metadata['Node Version'] = obj.node;
+          if (obj.chrome) reportData.metadata['Chrome Version'] = obj.chrome;
+          if (obj.cpuCores !== undefined) reportData.metadata['CPU Cores'] = String(obj.cpuCores);
+          if (obj.memory && obj.memory.total) reportData.metadata['Total Memory'] = String(obj.memory.total);
+          if (obj.appVersion) reportData.metadata['App Version'] = String(obj.appVersion);
+          return;
+        } catch (e) {
+          // fallthrough to line parsing
+        }
+      }
+
       content.split('\n').forEach(line => {
         const [key, ...valueParts] = line.split(':');
         if (key && valueParts.length) {
@@ -455,15 +496,15 @@
       const container = document.getElementById('main-container');
       
       const nav = [
-        { id: 'overview', label: 'Overview', icon: '📋' },
-        { id: 'main-logs', label: 'Main Logs', icon: '📝', badge: reportData.mainLogs.length },
-        { id: 'renderer-logs', label: 'Renderer Logs', icon: '📝', badge: reportData.rendererLogs.length },
-        { id: 'preview-canvas', label: 'Preview Canvas', icon: '🖼️' },
-        { id: 'live-screenshot', label: 'Live Screenshot', icon: '🖼️' },
-        { id: 'index-html', label: 'index.html', icon: '📄' },
-        { id: 'live-html', label: 'live.html', icon: '📄' },
-        { id: 'settings-file', label: 'Settings (disk)', icon: '⚙️' },
-        { id: 'settings-memory', label: 'Settings (memory)', icon: '⚙️' }
+        { id: 'overview', label: 'Overview', icon: '<i class="fa-solid fa-file-lines"></i>' },
+        { id: 'main-logs', label: 'Main Logs', icon: '<i class="fa-solid fa-list"></i>', badge: reportData.mainLogs.length },
+        { id: 'renderer-logs', label: 'Renderer Logs', icon: '<i class="fa-solid fa-code"></i>', badge: reportData.rendererLogs.length },
+        { id: 'preview-canvas', label: 'Preview Canvas', icon: '<i class="fa-solid fa-image"></i>' },
+        { id: 'live-screenshot', label: 'Live Screenshot', icon: '<i class="fa-solid fa-image"></i>' },
+        { id: 'index-html', label: 'index.html', icon: '<i class="fa-regular fa-file"></i>' },
+        { id: 'live-html', label: 'live.html', icon: '<i class="fa-regular fa-file"></i>' },
+        { id: 'settings-file', label: 'Settings (disk)', icon: '<i class="fa-solid fa-hdd"></i>' },
+        { id: 'settings-memory', label: 'Settings (memory)', icon: '<i class="fa-solid fa-microchip"></i>' }
       ];
 
       container.innerHTML = `
@@ -482,11 +523,16 @@
           ${renderImage('preview-canvas', reportData.previewCanvas, 'Preview Canvas')}
           ${renderImage('live-screenshot', reportData.liveScreenshot, 'Live Window Screenshot')}
           ${renderCode('index-html', reportData.indexHtml, 'index.html')}
+          ${reportData.indexHtml ? renderHtmlPreview('index-preview', reportData.indexHtml, reportData.globalCss, 'index.html Preview') : ''}
           ${renderCode('live-html', reportData.liveHtml, 'live.html')}
+          ${reportData.liveHtml ? renderHtmlPreview('live-preview', reportData.liveHtml, reportData.globalCss, 'live.html Preview') : ''}
           ${renderCode('settings-file', reportData.settingsFile, 'Settings File (from disk)', 'json')}
           ${renderJson('settings-memory', reportData.rendererSettings, 'Renderer Settings (in-memory)')}
         </div>
       `;
+
+      // After inserting HTML, attach srcdoc content to any preview iframes
+      attachHtmlPreviews();
 
       // Add click handlers
       document.querySelectorAll('.nav-item').forEach(item => {
@@ -587,12 +633,23 @@
     }
 
     function renderImage(id, base64Data, title) {
+      // base64Data might be a full data: URI or raw base64; handle both
+      let imgSrc = '';
+      if (base64Data && base64Data.trim()) {
+        const s = base64Data.trim();
+        if (s.startsWith('data:')) {
+          imgSrc = s;
+        } else {
+          imgSrc = 'data:image/png;base64,' + s;
+        }
+      }
+
       return `
         <div id="${id}" class="section">
           <h2 style="margin-bottom: 15px; font-size: 20px;">${title}</h2>
-          ${base64Data ? `
+          ${imgSrc ? `
             <div class="image-preview">
-              <img src="data:image/png;base64,${base64Data}" alt="${title}" />
+              <img src="${imgSrc}" alt="${title}" />
             </div>
           ` : `
             <div style="text-align: center; padding: 60px; color: #858585;">
@@ -617,6 +674,52 @@
           </div>
         </div>
       `;
+    }
+
+    function renderHtmlPreview(id, htmlContent, cssContent, title) {
+      // Return a placeholder iframe; srcdoc will be set after the DOM is inserted to avoid attribute-escaping issues
+      return `
+        <div id="${id}" class="section">
+          <h2 style="margin-bottom: 15px; font-size: 20px;">${title}</h2>
+          <div class="code-viewer">
+            <div class="code-header">
+              <h3>Rendered</h3>
+              <button class="btn btn-secondary" onclick="copyIframeHtml('${id}')">Copy HTML</button>
+            </div>
+            <div class="code-content">
+              <iframe id="${id}-iframe" style="width:100%;height:400px;border:1px solid #3e3e42;border-radius:4px;"></iframe>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function attachHtmlPreviews() {
+      // index-preview and live-preview may be present; set their srcdoc from reportData
+      const previews = [
+        { id: 'index-preview', html: reportData.indexHtml },
+        { id: 'live-preview', html: reportData.liveHtml }
+      ];
+
+      previews.forEach(p => {
+        if (!p.html) return;
+        const iframe = document.getElementById(`${p.id}-iframe`);
+        if (!iframe) return;
+        const css = reportData.globalCss || '';
+        let src = '';
+        if (css && css.trim()) src += `<style>${css}</style>`;
+        src += p.html;
+        iframe.srcdoc = src;
+      });
+    }
+
+    function copyIframeHtml(id) {
+      const iframe = document.getElementById(`${id}-iframe`);
+      if (!iframe) return;
+      const html = iframe.srcdoc || '';
+      navigator.clipboard.writeText(html).then(() => {
+        alert('Copied HTML to clipboard!');
+      });
     }
 
     function renderJson(id, data, title) {

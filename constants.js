@@ -4,7 +4,7 @@ const BIBLE_JSON  = `${CDN_BASE}/${VERSION}.json`;
 const ITEM_HEIGHT = 24;
 const WINDOW_SIZE = 200;
 const BUFFER      = 20;
-const BIBLE_STORAGE_DIR = 'bibles'; // Directory for downloaded Bibles
+const BIBLE_STORAGE_DIR = 'bibles'; // Directory for downloaded bibles
 
 const BOOKS = [
   "genesis","exodus","leviticus","numbers","deuteronomy",

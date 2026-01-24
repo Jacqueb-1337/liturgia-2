@@ -1,14 +1,16 @@
 {
   "name": "liturgia",
-  "version": "1.2.1",
+  "version": "2.3.0",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "prebuild": "node scripts/clean-old-exe.js",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
     "build:all": "electron-builder --mac || true && electron-builder --linux || true && electron-builder --win || true",
     "make-icon": "node scripts/make-icon.js",
+    "rebuild-native": "npx electron-rebuild -f -w keytar --module-dir .",
     "test": "jest --runInBand"
   },
   "jest": {
@@ -39,7 +41,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Liturgia",
-      "runAfterFinish": false
+      "runAfterFinish": false,
+      "include": "build/installer.nsh"
     },
     "files": [
       "dist/**/*",
@@ -49,19 +52,33 @@
       "!**/test",
       "!**/*.map"
     ],
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
     "extraResources": [
-      { "from": "build/extraResources", "to": "resources" }
+      { "from": "build/extraResources", "to": "resources" },
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql-wasm.wasm"
+      }
     ]
   },
   "devDependencies": {
     "electron": "^25.9.8",
     "electron-builder": "^26.4.0",
+    "electron-rebuild": "^3.2.5",
+    "jimp": "^1.6.0",
     "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
     "jest": "^29.6.1",
     "jest-environment-jsdom": "^30.2.0"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "keytar": "^7.7.0",
+    "node-fetch": "^2.6.7",
+    "sql.js": "^1.8.0",
+    "@fortawesome/fontawesome-free": "^6.5.1"
   }
 }

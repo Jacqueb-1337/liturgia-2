@@ -84,9 +84,49 @@ async function ensureSqlJs() {
 }
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
 
+// Keytar IPC: store tokens securely in main process. Falls back to settings file if keytar not available.
+let keytar = null;
+try { keytar = require('keytar'); } catch (e) { console.warn('keytar not available in main process:', e.message || e); }
+const KEYTAR_SERVICE = 'Liturgia';
+const KEYTAR_ACCOUNT = 'auth-token';
+
+ipcMain.handle('secure-get-token', async () => {
+  try {
+    if (keytar) return await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+    // fallback: read from settings
+    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); const settings = JSON.parse(txt); return settings.auth && settings.auth.token ? settings.auth.token : null; } catch { return null; }
+  } catch (e) { console.error('secure-get-token error', e); return null; }
+});
+
+ipcMain.handle('secure-set-token', async (event, token) => {
+  try {
+    if (keytar) { await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token); return true; }
+    // fallback: write to settings.json
+    let settings = {};
+    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); settings = JSON.parse(txt); } catch {}
+    settings.auth = settings.auth || {};
+    settings.auth.token = token;
+    await writeSettingsSafe(settings);
+    return true;
+  } catch (e) { console.error('secure-set-token error', e); return false; }
+});
+
+ipcMain.handle('secure-delete-token', async () => {
+  try {
+    if (keytar) { await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT); return true; }
+    let settings = {};
+    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); settings = JSON.parse(txt); } catch {}
+    if (settings.auth) delete settings.auth.token;
+    await writeSettingsSafe(settings);
+    return true;
+  } catch (e) { console.error('secure-delete-token error', e); return false; }
+});
+
 app.setName('liturgia');
 
 let mainWindow; // Add this at the top
+let splashWindow = null;
+let splashClosed = false;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 
@@ -255,11 +295,54 @@ async function importEasyWorshipHandler() {
 const { getUserDataDir } = require('./lib/paths');
 const settingsPath = path.join(getUserDataDir(app), 'settings.json');
 
+// Atomic settings write with backup. Writes to a tmp file then renames to avoid truncation and
+// copies the previous non-empty file to settings.json.bak so we can recover if something goes wrong.
+async function writeSettingsSafe(obj) {
+  try {
+    const s = JSON.stringify(obj, null, 2);
+    if (typeof s !== 'string') throw new Error('Settings serialization failed');
+    // Backup previous settings if it exists and has content
+    try {
+      const st = await fs.promises.stat(settingsPath);
+      if (st && st.size > 0) {
+        await fs.promises.copyFile(settingsPath, settingsPath + '.bak');
+      }
+    } catch (e) { /* ignore if file doesn't exist */ }
+
+    const tmp = settingsPath + '.tmp';
+    await fs.promises.writeFile(tmp, s, 'utf8');
+    await fs.promises.rename(tmp, settingsPath);
+    return true;
+  } catch (e) {
+    console.error('writeSettingsSafe error:', e);
+    return false;
+  }
+}
+
+// Load settings, and attempt to recover from backup if the file is present but empty
 ipcMain.handle('load-settings', async () => {
   try {
+    try {
+      const st = await fs.promises.stat(settingsPath);
+      if (st && st.size === 0) {
+        const bak = settingsPath + '.bak';
+        try {
+          const bakSt = await fs.promises.stat(bak);
+          if (bakSt && bakSt.size > 0) {
+            console.warn('[load-settings] settings.json empty, restoring from backup');
+            await fs.promises.copyFile(bak, settingsPath);
+          }
+        } catch (e) {
+          // no backup, ignore
+        }
+      }
+    } catch (e) {
+      // file missing or other stat error, ignore
+    }
     const data = await fs.promises.readFile(settingsPath, 'utf8');
     return JSON.parse(data);
-  } catch {
+  } catch (e) {
+    console.warn('[load-settings] returning default {}; error:', e && e.message);
     return {};
   }
 });
@@ -269,7 +352,11 @@ ipcMain.handle('save-settings', async (event, settings) => {
   try {
     console.log('[save-settings] Writing settings keys:', Object.keys(settings));
   } catch (e) {}
-  await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  if (!settings || typeof settings !== 'object') {
+    console.error('[save-settings] invalid settings payload, aborting write');
+    return false;
+  }
+  await writeSettingsSafe(settings);
   return true;
 });
 
@@ -277,7 +364,9 @@ ipcMain.handle('save-settings', async (event, settings) => {
 // load-modify-save concurrently and overwrite each other. Use this instead of
 // client-side load->modify->save when updating individual settings.
 let _settingsUpdateQueue = Promise.resolve();
-ipcMain.handle('update-settings', async (event, patch) => {
+
+// Shared helper to apply a patch to settings (used by IPC handler and internal callers)
+function applySettingsPatch(patch) {
   // Serialize updates through a promise queue to avoid races
   _settingsUpdateQueue = _settingsUpdateQueue.then(async () => {
     console.log('[update-settings] patch keys:', Object.keys(patch));
@@ -298,10 +387,14 @@ ipcMain.handle('update-settings', async (event, patch) => {
         current[k] = v;
       }
     }
-    await fs.promises.writeFile(settingsPath, JSON.stringify(current, null, 2), 'utf8');
+    await writeSettingsSafe(current);
     return current;
-  });
+  }).catch((e) => { console.error('applySettingsPatch error:', e); });
   return _settingsUpdateQueue;
+}
+
+ipcMain.handle('update-settings', async (event, patch) => {
+  return applySettingsPatch(patch);
 });
 
 ipcMain.on('set-default-bible', (event, bible) => {
@@ -324,7 +417,7 @@ ipcMain.on('set-default-bible', (event, bible) => {
         settings = {};
       }
       settings.defaultBible = bible;
-      await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+      await writeSettingsSafe(settings);
     } catch (err) {
       console.error('Failed to save default bible to settings:', err);
     }
@@ -335,6 +428,38 @@ ipcMain.handle('get-default-bible', () => defaultBible);
 
 ipcMain.handle('get-displays', () => {
   return screen.getAllDisplays();
+});
+
+let _lastLicenseStatus = null;
+ipcMain.on('license-status-update', (event, status) => {
+  try {
+    _lastLicenseStatus = status || null;
+    if (liveWindow && liveWindow.webContents) liveWindow.webContents.send('license-status', status);
+    if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('license-status', status);
+  } catch (e) {
+    console.error('license-status-update forward error', e);
+  }
+});
+
+ipcMain.handle('get-current-license-status', () => {
+  return _lastLicenseStatus;
+});
+
+// Allow other windows to request opening the setup modal in the main window
+ipcMain.on('show-setup-modal', () => {
+  try {
+    if (mainWindow) {
+      // Ensure the main window is visible and focused before forwarding the request
+      try { mainWindow.show(); mainWindow.focus(); } catch(e){}
+      if (mainWindow.webContents) mainWindow.webContents.send('show-setup-modal');
+    }
+  } catch (e) {
+    console.error('show-setup-modal forward error', e);
+  }
+});
+
+ipcMain.handle('focus-main-window', async () => {
+  try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } return true; } catch (e) { return false; }
 });
 
 // IPC helper to write a combined diagnostic report
@@ -378,19 +503,24 @@ async function startSaveReport() {
   try { settingsFile = await fs.promises.readFile(settingsPath, 'utf8'); } catch (e) {}
 
   // Collect system info
+  const packageJson = (() => { try { return require('./package.json'); } catch (e) { return {}; } })();
   const sysInfo = {
     platform: process.platform,
     arch: process.arch,
     node: process.version,
     electron: process.versions.electron || null,
-    cpu: os.cpus ? os.cpus()[0].model : null,
-    memory: { total: os.totalmem(), free: os.freemem() }
+    chrome: process.versions.chrome || null,
+    cpuModel: os.cpus ? (os.cpus()[0] ? os.cpus()[0].model : null) : null,
+    cpuCores: os.cpus ? os.cpus().length : null,
+    memory: { total: os.totalmem(), free: os.freemem() },
+    appVersion: packageJson.version || null
   };
 
   // Join everything into a delimited report
   const parts = [];
   parts.push('=== REPORT: LITURGIA DIAGNOSTIC REPORT ===');
-  parts.push(`Generated: ${new Date().toISOString()}`);
+  // Add generated timestamp into metadata
+  sysInfo['Report Generated'] = new Date().toISOString();
   parts.push('=== METADATA ===');
   parts.push(JSON.stringify(sysInfo, null, 2));
 
@@ -417,6 +547,18 @@ async function startSaveReport() {
     parts.push('=== PREVIEW CANVAS (base64 PNG) ===');
     parts.push(rendererPayload.previewDataUrl);
   }
+
+  // Include global styles so the viewer can render index/live HTML accurately
+  let globalCss = '';
+  try { globalCss = await fs.promises.readFile(path.join(__dirname, 'style.css'), 'utf8'); } catch (e) { globalCss = ''; }
+  if (globalCss) {
+    parts.push('=== GLOBAL CSS (styles.css) ===');
+    parts.push(globalCss);
+  }
+
+  // Include renderer in-memory payload as a named section for the viewer
+  parts.push('=== RENDERER SETTINGS (in-memory) ===');
+  parts.push(JSON.stringify(rendererPayload || {}, null, 2));
 
   parts.push('=== END OF REPORT ===');
   const reportContent = parts.join('\n\n');
@@ -514,11 +656,92 @@ async function createWindow() {
       contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
     }
   };
+<<<<<<< HEAD
+=======
+
+  mainWindow = new BrowserWindow(opts);
+
+  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
+    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
+  } catch (e) { console.warn('Default dark theme check failed', e); }
+
+  if (winState.maximized) mainWindow.maximize();
+  if (winState.fullscreen) mainWindow.setFullScreen(true);
+>>>>>>> origin/main
 
   // Create the main window instance
   mainWindow = new BrowserWindow(opts);
+
+  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
+    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
+  } catch (e) { console.warn('Default dark theme check failed', e); }
+
+  if (winState.maximized) mainWindow.maximize();
+  if (winState.fullscreen) mainWindow.setFullScreen(true);
+
   mainWindow.loadFile('index.html');
   
+  // Create a splash overlay that covers the main window until the splash animation finishes
+  try {
+    const b = mainWindow.getBounds();
+    splashWindow = new BrowserWindow({
+      x: b.x,
+      y: b.y,
+      width: b.width,
+      height: b.height,
+      frame: false,
+      transparent: false,
+      backgroundColor: '#141923',
+      alwaysOnTop: true,
+      resizable: false,
+      movable: false,
+      skipTaskbar: true,
+      parent: mainWindow,
+      modal: false,
+      show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false }
+    });
+    splashWindow.setMenuBarVisibility(false);
+    splashWindow.loadFile('splash.html').catch(()=>{});
+    splashWindow.once('ready-to-show', () => { try { splashWindow.show(); } catch(e){} });
+
+    // Keep splash window bounds in sync while present
+    const syncSplashBounds = () => { try { if (splashWindow && mainWindow) splashWindow.setBounds(mainWindow.getBounds()); } catch(e){} };
+    mainWindow.on('move', syncSplashBounds);
+    mainWindow.on('resize', syncSplashBounds);
+
+    // Remove splash when renderer signals done
+    const splashCloser = () => {
+      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+      try { mainWindow.focus(); } catch(e){}
+    };
+
+    // Listen for splash finished message
+    const { ipcMain } = require('electron');
+    ipcMain.once('splash-finished', () => { splashClosed = true; splashCloser(); try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){} });
+
+    // IPC to let renderer query splash state if it missed the event
+    ipcMain.handle('is-splash-closed', () => splashClosed);
+
+    // Fallback close in case IPC doesn't arrive
+    setTimeout(() => { if (splashWindow) { splashClosed = true; splashCloser(); } }, 8000);
+  } catch (e) { console.warn('Failed to create splash window', e); }
+
+  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
+  mainWindow.on('resize', saveWindowStateDebounced);
+  mainWindow.on('move', saveWindowStateDebounced);
+  mainWindow.on('maximize', () => { applySettingsPatch({ window: { maximized: true } }); });
+  mainWindow.on('unmaximize', () => { applySettingsPatch({ window: { maximized: false } }); saveWindowStateDebounced(); });
+  mainWindow.on('enter-full-screen', () => { applySettingsPatch({ window: { fullscreen: true } }); });
+  mainWindow.on('leave-full-screen', () => { applySettingsPatch({ window: { fullscreen: false } }); saveWindowStateDebounced(); });
+  mainWindow.on('close', saveWindowState);
+
   // Close live window when main window closes
   mainWindow.on('closed', () => {
     if (liveWindow) {
@@ -541,7 +764,11 @@ async function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
+<<<<<<< HEAD
               icon: getIconPath(),
+=======
+              icon: iconPath,
+>>>>>>> origin/main
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -550,6 +777,10 @@ async function createWindow() {
             settingsWin.setMenuBarVisibility(false);
             settingsWin.loadFile('settings.html');
           }
+        },
+        {
+          label: 'Import EasyWorship database...',
+          click: async () => { await importEasyWorshipHandler(); }
         },
         { type: 'separator' },
         { role: 'quit' }
@@ -560,6 +791,15 @@ async function createWindow() {
       submenu: [
         { role: 'reload' },
         { role: 'forcereload' },
+        { type: 'separator' },
+        // Toggle fullscreen (explicit so we can control accelerator)
+        {
+          label: 'Toggle Full Screen',
+          accelerator: process.platform === 'darwin' ? 'Ctrl+Command+F' : 'F11',
+          click: () => {
+            if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
+          }
+        },
         { type: 'separator' },
         { role: 'toggledevtools' }
       ]
@@ -639,6 +879,7 @@ app.whenReady().then(async () => {
     if (settings.autoCheckUpdates) {
       const res = await checkForUpdates();
       if (res && res.updateAvailable && mainWindow) {
+<<<<<<< HEAD
         // Send update info to renderer. If the renderer isn't ready yet (still loading), store
         // the update info and deliver it when the window finishes loading so the user sees the
         // in-app modal on startup reliably.
@@ -651,6 +892,11 @@ app.whenReady().then(async () => {
         } else {
           try { mainWindow.webContents.send('update-available', res); } catch(e) {}
         }
+=======
+        // Send update info to renderer only; renderer handles UI and download flow.
+        mainWindow.webContents.send('update-available', res);
+        // No native dialog here — keep update UX consistent inside the app.
+>>>>>>> origin/main
       }
     }
   } catch (e) { console.warn('Startup update check failed', e); }
@@ -784,6 +1030,104 @@ ipcMain.handle('run-installer', async (event, file) => {
   } catch (e) { return { ok:false, error: String(e) }; }
 });
 
+// Semantic version compare: returns 1 if a>b, -1 if a<b, 0 if equal
+function semverCompare(a, b) {
+  if (!a || !b) return 0;
+  const pa = a.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const pb = b.replace(/^v/i,'').split(/[-+]/)[0].split('.').map(x => parseInt(x,10)||0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+// Check for updates against GitHub releases
+async function checkForUpdates() {
+  try {
+    const fetch = require('node-fetch');
+    const api = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases/latest';
+    const r = await fetch(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+    if (!r.ok) return { ok:false, error: `GitHub API returned ${r.status}` };
+    const j = await r.json();
+    const latest = (j.tag_name || j.name || '').toString();
+    const current = app.getVersion();
+    const cmp = semverCompare(latest, current);
+    const updateAvailable = (cmp === 1);
+    const assets = (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size }));
+    return { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
+  } catch (e) { console.warn('checkForUpdates error', e); return { ok:false, error: String(e) }; }
+}
+
+// Expose manual check via IPC
+ipcMain.handle('check-for-updates-manual', async () => {
+  return await checkForUpdates();
+});
+
+// In-memory map of active downloads
+const downloads = {};
+
+// Download an update asset (renderer requests with a browser_download_url)
+ipcMain.handle('download-update', async (event, { url }) => {
+  try {
+    const fetch = require('node-fetch');
+    const tmpDir = app.getPath('temp');
+    const name = path.basename((url || '').split('?')[0]) || `liturgia-update-${Date.now()}.exe`;
+    const dest = path.join(tmpDir, name);
+    const r = await fetch(url);
+    if (!r.ok) return { ok:false, error: `Download failed ${r.status}` };
+    const total = parseInt(r.headers.get('content-length') || '0', 10);
+    const destStream = fs.createWriteStream(dest);
+    let downloaded = 0;
+
+    downloads[dest] = { res: r };
+
+    return await new Promise((resolve, reject) => {
+      r.body.on('data', (chunk) => {
+        downloaded += chunk.length;
+        destStream.write(chunk);
+        const percent = total ? Math.round(downloaded / total * 100) : null;
+        try { event.sender.send('update-download-progress', { file: dest, downloaded, total, percent }); } catch (e) {}
+      });
+      r.body.on('end', () => {
+        destStream.end();
+        try { event.sender.send('update-download-complete', { file: dest }); } catch (e) {}
+        delete downloads[dest];
+        resolve({ ok:true, file: dest });
+      });
+      r.body.on('error', (err) => {
+        try { destStream.close(); fs.unlinkSync(dest); } catch (e) {}
+        delete downloads[dest];
+        reject({ ok:false, error: String(err) });
+      });
+    });
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Cancel an ongoing download and remove partial file
+ipcMain.handle('cancel-update-download', async (event, { file }) => {
+  try {
+    if (downloads[file] && downloads[file].res && downloads[file].res.body) {
+      try { downloads[file].res.body.destroy(); } catch (e) {}
+    }
+    try { fs.unlinkSync(file); } catch (e) {}
+    delete downloads[file];
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Run the downloaded installer (open file with default handler)
+ipcMain.handle('run-installer', async (event, file) => {
+  try {
+    if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
+    await shell.openPath(file);
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
 async function loadAllVersesFromDiskMain(baseDir) {
   const allVerses = [];
   const readPromises = [];
@@ -835,7 +1179,11 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
+<<<<<<< HEAD
       icon: getIconPath(),
+=======
+      icon: iconPath,
+>>>>>>> origin/main
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,

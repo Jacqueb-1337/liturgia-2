@@ -51,10 +51,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   
   const settings = await ipcRenderer.invoke('load-settings');
   if (settings) {
-    document.getElementById('username').value = settings.username || '';
-    document.getElementById('theme').value = settings.theme || '';
-    document.getElementById('dark-theme').checked = !!settings.darkTheme;
+    // Back-compat: only set username field if it exists
+    const usernameEl = document.getElementById('username');
+    if (usernameEl) usernameEl.value = settings.username || '';
+    const themeEl = document.getElementById('theme');
+    if (themeEl) themeEl.value = settings.theme || '';
+    const darkEl = document.getElementById('dark-theme');
+    if (darkEl) darkEl.checked = !!settings.darkTheme;
     applyDarkTheme(!!settings.darkTheme);
+    // Auto-update setting (default true for new installs)
+    const au = document.getElementById('auto-update-startup');
+    if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
   }
 
   // Populate account/subscription info
@@ -121,9 +128,39 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (e) {
     console.error('Failed to load license status for settings:', e);
   }
-
-
   await loadDisplays();
+
+  // Manual check for updates button
+  const checkBtn = document.getElementById('btn-check-updates');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', async () => {
+      const status = document.getElementById('update-status');
+      try {
+        status.textContent = 'Checking...';
+        const res = await ipcRenderer.invoke('check-for-updates-manual');
+        if (res && res.ok && res.updateAvailable) {
+          status.innerHTML = `Update available: <strong>${res.latest}</strong> — <a href="${res.html_url}" target="_blank">Release</a>`;
+        } else if (res && res.ok) {
+          status.textContent = 'No updates available';
+        } else {
+          status.textContent = 'Update check failed';
+        }
+      } catch (e) { status.textContent = 'Error checking for updates'; }
+      setTimeout(() => { const s = document.getElementById('update-status'); if (s) s.textContent = ''; }, 7000);
+    });
+  }
+
+// Helper: decode JWT payload without verifying signature (base64url)
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const p = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = p + '='.repeat((4 - p.length % 4) % 4);
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch (e) { return null; }
+}
   const defaultDisplaySelect = document.getElementById('default-display');
   if (settings && settings.defaultDisplay) {
     defaultDisplaySelect.value = settings.defaultDisplay;
@@ -135,13 +172,23 @@ window.addEventListener('DOMContentLoaded', async () => {
 // Save settings from any panel
 document.querySelectorAll('.save-settings').forEach(btn => {
   btn.addEventListener('click', async () => {
-    const username = document.getElementById('username').value;
-    const theme = document.getElementById('theme').value;
-    const darkTheme = document.getElementById('dark-theme').checked;
-    const defaultDisplay = document.getElementById('default-display').value;
+    // Back-compat: username field might not exist anymore
+    const usernameEl = document.getElementById('username');
+    const username = usernameEl ? usernameEl.value : undefined;
+    const themeEl = document.getElementById('theme');
+    const theme = themeEl ? themeEl.value : '';
+    const darkEl = document.getElementById('dark-theme');
+    const darkTheme = darkEl ? !!darkEl.checked : false;
+    const defaultDisplayEl = document.getElementById('default-display');
+    const defaultDisplay = defaultDisplayEl ? defaultDisplayEl.value : '';
     
     // Use server-side atomic update to avoid races
-    await ipcRenderer.invoke('update-settings', { username, theme, darkTheme, defaultDisplay });
+    const patch = { theme, darkTheme, defaultDisplay };
+    if (username !== undefined) patch.username = username;
+    // Include auto-update preference
+    const auEl = document.getElementById('auto-update-startup');
+    if (auEl) patch.autoCheckUpdates = !!auEl.checked;
+    await ipcRenderer.invoke('update-settings', patch);
     applyDarkTheme(darkTheme);
     // Show status only for the current panel
     const panel = btn.getAttribute('data-panel');
@@ -166,12 +213,133 @@ document.getElementById('close-live-window').addEventListener('click', async () 
   await ipcRenderer.invoke('close-live-window');
 });
 
-let allBibleFiles = [];
+  // Sign-in / Sign-out buttons
+  const signOutBtn = document.getElementById('btn-sign-out');
+  const signInBtn = document.getElementById('btn-sign-in');
+  const viewSubBtn = document.getElementById('btn-view-subscription');
+  const purchaseBtn = document.getElementById('btn-purchase-subscription');
 
+  if (signInBtn) {
+    signInBtn.addEventListener('click', async () => {
+      try {
+        // Ask main window to show its setup popover/modal
+        ipcRenderer.send('show-setup-modal');
+        // Close the settings window so the setup modal is visible
+        window.close();
+      } catch (e) { console.error('Failed to request setup modal', e); }
+    });
+  }
+  if (signOutBtn) {
+    signOutBtn.addEventListener('click', async () => {
+      try {
+        await ipcRenderer.invoke('secure-delete-token');
+      } catch (e) { console.error('Failed to delete secure token', e); }
+      try { await ipcRenderer.invoke('update-settings', { auth: null }); } catch (e) {}
+      ipcRenderer.send('license-status-update', { active: false, reason: 'signed-out' });
+      document.getElementById('account-info').textContent = 'Not signed in';
+      document.getElementById('subscription-info').textContent = '';
+      // Toggle buttons
+      if (signInBtn) signInBtn.style.display = '';
+      if (signOutBtn) signOutBtn.style.display = 'none';
+      if (viewSubBtn) viewSubBtn.style.display = 'none';
+      if (purchaseBtn) purchaseBtn.style.display = '';
+    });
+  }
+
+  // View subscription (open Stripe portal)
+  if (viewSubBtn) {
+    viewSubBtn.addEventListener('click', async () => {
+      try {
+        let token = await ipcRenderer.invoke('secure-get-token');
+        if (!token) {
+          // fallback to settings mirror
+          const s = await ipcRenderer.invoke('load-settings');
+          if (s && s.auth && s.auth.token) token = s.auth.token;
+        }
+        if (!token) { alert('Sign in first'); return; }
+        const settings = await ipcRenderer.invoke('load-settings');
+        const server = (settings && settings.licenseServer) ? settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+        // Send token in both Authorization header and JSON body to survive proxies that strip headers
+        const res = await fetch(server + '/create-portal-session.php', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+        let j = null;
+        try { j = await res.json(); } catch (err) { j = null; }
+        if (res.status === 401) {
+          const msg = (j && j.error) ? j.error : 'Unauthorized';
+          // As a last resort try query param fallback
+          try {
+            const qres = await fetch(server + '/create-portal-session.php?token=' + encodeURIComponent(token), { method: 'POST' });
+            let qj = null;
+            try { qj = await qres.json(); } catch (er) { qj = null; }
+            if (qres.status === 200 && qj && qj.url) { window.open(qj.url, '_blank'); return; }
+          } catch (e) { /* ignore */ }
+
+          // If fallback didn't work, treat as invalid/expired token
+          try { await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('Failed to delete token after 401', e); }
+          try { await ipcRenderer.invoke('update-settings', { auth: null }); } catch (e) {}
+          ipcRenderer.send('license-status-update', { active: false, reason: 'signed-out' });
+          alert('Sign-in token invalid or expired. Please sign in again. (' + msg + ')');
+          // Update buttons
+          if (signInBtn) signInBtn.style.display = '';
+          if (signOutBtn) signOutBtn.style.display = 'none';
+          if (viewSubBtn) viewSubBtn.style.display = 'none';
+          if (purchaseBtn) purchaseBtn.style.display = '';
+          return;
+        }
+        if (j && j.url) { window.open(j.url, '_blank'); } else alert('Failed to open subscription portal: ' + (j && j.error ? j.error : 'Unknown error'));
+      } catch (e) { console.error(e); alert('Failed to open subscription portal'); }
+    });
+  }
+
+  // Purchase subscription
+  if (purchaseBtn) {
+    purchaseBtn.addEventListener('click', async () => {
+      // Reuse setup modal flow to collect email and create checkout
+      ipcRenderer.send('show-setup-modal');
+    });
+  }
+
+  // Update account UI when license status changes
+  ipcRenderer.on('license-status', async (event, status) => {
+    const ai = document.getElementById('account-info');
+    const si = document.getElementById('subscription-info');
+    if (!ai || !si) return;
+    if (status) {
+      const email = (status.token_payload && status.token_payload.email) || (status.user_row && status.user_row.email) || null;
+      let displayEmail = email;
+      if (!displayEmail) {
+        try {
+          const s = await ipcRenderer.invoke('load-settings');
+          if (s && s.auth && s.auth.token) {
+            const p = decodeJwtPayload(s.auth.token);
+            if (p && p.email) displayEmail = p.email;
+          }
+        } catch (e) {}
+      }
+      ai.textContent = displayEmail || 'Signed in';
+      if (status.active) {
+        si.textContent = `Plan: ${status.plan || (status.user_row ? status.user_row.plan : 'unknown')} — Expires: ${status.expires_at ? new Date(status.expires_at * 1000).toLocaleString() : 'n/a'}`;
+      } else {
+        si.textContent = `Not active (${status.reason || 'inactive'}).`;
+      }
+
+      // Toggle buttons
+      if (signInBtn) signInBtn.style.display = 'none';
+      if (signOutBtn) signOutBtn.style.display = '';
+      if (viewSubBtn) viewSubBtn.style.display = '';
+      if (purchaseBtn) purchaseBtn.style.display = status.active ? 'none' : '';
+    } else {
+      ai.textContent = 'Not signed in';
+      si.textContent = '';
+      if (signInBtn) signInBtn.style.display = '';
+      if (signOutBtn) signOutBtn.style.display = 'none';
+      if (viewSubBtn) viewSubBtn.style.display = 'none';
+      if (purchaseBtn) purchaseBtn.style.display = '';
+    }
+  });
+// Load list of available Bibles from GitHub
 async function loadBiblesList() {
   const apiUrl = 'https://api.github.com/repos/thiagobodruk/bible/contents/json';
   const biblesContainer = document.getElementById('bibles-list');
-  
   try {
     const response = await fetch(apiUrl);
     if (!response.ok) {
@@ -182,9 +350,9 @@ async function loadBiblesList() {
 
     const files = await response.json();
     allBibleFiles = files.filter(file => file.name.endsWith('.json'));
-    
+
     renderBiblesList(allBibleFiles);
-    
+
     // Add search functionality
     const searchInput = document.getElementById('bible-search');
     searchInput.addEventListener('input', (e) => {

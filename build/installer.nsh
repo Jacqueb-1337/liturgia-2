@@ -22,9 +22,17 @@ Function CreateAutoUpdatePage
   Pop $AUTOCHECK_CTRL
   ${NSD_Check} $AUTOCHECK_CTRL
 
-  ; Default to checked for fresh installs (ignore prior registry to keep default enabled)
-  ; (Preserve the user's explicit choice only via the installer UI when they install)
-  ; No registry read here to avoid silently turning off the checkbox on upgrade.
+  ; Set initial value from registry if present (preserve explicit user choice on upgrades)
+  ClearErrors
+  ReadRegStr $R0 HKCU "Software\Liturgia" "AutoCheckForUpdates"
+  ${If} ${Errors}
+    ; nothing
+  ${Else}
+    ${If} $R0 == 0
+      ${NSD_UnCheck} $AUTOCHECK_CTRL
+      StrCpy $AUTOCHECK 0
+    ${EndIf}
+  ${EndIf}
 
   nsDialogs::Show
 FunctionEnd

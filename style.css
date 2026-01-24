@@ -47,6 +47,12 @@ body.dark-theme ::-webkit-scrollbar-thumb {
 /* Control Buttons Container */
 #control-buttons-container {
   flex-shrink: 0;
+  margin-left: auto; /* ensure it stays to the right when placed inside bottom-tabs */
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 0; /* moved to bottom-tabs area */
+  background: transparent;
 }
 
 #control-buttons-container button {
@@ -63,11 +69,6 @@ body.dark-theme ::-webkit-scrollbar-thumb {
 #control-buttons-container button:hover {
   background: #e0e0e0;
   border-color: #999;
-}
-
-body.dark-theme #control-buttons-container {
-  background: #2a2a2a !important;
-  border-bottom-color: #444 !important;
 }
 
 body.dark-theme #control-buttons-container button {
@@ -116,10 +117,20 @@ body.dark-theme .bottom-tab.active {
   background: #fff;
 }
 
+#song-list:focus {
+  outline: 2px solid #0e639c;
+  outline-offset: -2px;
+}
+
 body.dark-theme #song-list {
   background: #181a1b;
   color: #eee;
   border-color: #333;
+}
+
+body.dark-theme #song-list:focus {
+  outline: 2px solid #1177bb;
+  outline-offset: -2px;
 }
 
 /* Song search input and buttons */
@@ -261,6 +272,18 @@ body.dark-theme .song-item:hover {
   background: #333 !important;
 }
 
+/* Prevent long song titles from wrapping and overlapping other items */
+.song-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 16px; /* small line-height so the single line vertically centers with padding */
+}
+
+.song-item[title] {
+  cursor: help; /* indicates hover tooltip available */
+} 
+
 .search-highlight {
   background: yellow;
   color: black;
@@ -310,6 +333,10 @@ body.dark-theme #search-autocomplete-input:focus {
   font-weight: 600;
 }
 
+body.dark-theme #song-display h3 {
+  color: #eee;
+}
+
 #song-display .song-author {
   color: #666;
   font-style: italic;
@@ -327,14 +354,15 @@ body.dark-theme #song-display h2 {
   color: #fff;
 }
 
-body.dark-t6px;
+body.dark-theme .song-verse {
+  padding: 6px;
   margin: 2px 0;
   cursor: pointer;
   border-radius: 4px;
   border: 1px solid #ddd;
-  background: #f9f9f9;
   font-size: 0.8em;
   line-height: 1.2
+}
 
 .song-verse:hover {
   background: #f0f0f0 !important;
@@ -369,6 +397,82 @@ body.dark-theme .song-verse-block {
 body.dark-theme .song-verse-block:hover {
   background: #333;
 }
+
+/* Setup modal styling: full-screen fixed overlay and centered card */
+.setup-overlay {
+  position: fixed !important;
+  left: 0; top: 0; right: 0; bottom: 0;
+  display: flex !important;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.6);
+  z-index: 20000 !important;
+}
+
+.setup-card {
+  background: var(--card-bg, #fff);
+  color: var(--card-color, #000);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.3);
+  padding: 18px;
+  width: 520px;
+  max-width: calc(100% - 40px);
+}
+
+body.dark-theme .setup-card {
+  background: #23272a;
+  color: #eee;
+}
+
+/* Update modal progress bar styles */
+.update-overlay { position: fixed !important; left: 0; top: 0; right: 0; bottom: 0; display: flex !important; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 20000 !important; }
+.progress { width: 100%; height: 12px; background: rgba(0,0,0,0.06); border-radius: 6px; overflow: hidden; }
+.progress-inner { height: 100%; width: 0%; background: var(--accent, #0078d4); transition: width 200ms ease; }
+
+/* Inline update notice style (used inside setup/login modal) */
+.inline-update-notice .btn.small { padding: 6px 10px; height: 30px; font-size: 0.9em; }
+.inline-update-notice .progress { height: 8px; }
+.inline-update-notice .progress-inner { background: var(--accent,#0078d4); }
+
+/* Global button styles (moved from settings to be available app-wide)
+   Ensures modals, popovers and other windows use consistent buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border-radius:6px;background:transparent;border:1px solid rgba(0,0,0,0.08);color:#222;text-decoration:none;min-height:36px;box-sizing:border-box;height:36px;line-height:20px;cursor:pointer}
+.btn.primary{background:var(--accent, #0078d4);border-color:var(--accent, #0078d4);color:#fff}
+
+/* Dark-mode button overrides */
+body.dark-theme .btn { color: var(--text,#eee); border-color: rgba(255,255,255,0.06); background: transparent }
+body.dark-theme .btn.primary { color: var(--text,#eee); background: var(--accent,#0078d4); border-color: var(--accent,#0078d4) }
+
+/* Global input and form-row styles - ensure textboxes and modal inputs are styled consistently */
+.form-row { display: flex; gap: 8px; align-items: center; }
+.form-row .input, .form-row input[type="text"], .form-row input[type="email"], .form-row textarea, .form-row select { flex: 1; min-width: 0; }
+
+.input, input[type="text"], input[type="email"], textarea, select {
+  padding: 8px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #222;
+  min-height: 36px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.input::placeholder, input::placeholder, textarea::placeholder { color: #999; }
+
+.input:focus, input[type="text"]:focus, input[type="email"]:focus, textarea:focus, select:focus {
+  border-color: var(--accent, #0078d4);
+  box-shadow: 0 0 0 2px rgba(0,120,212,0.08);
+}
+
+body.dark-theme .input, body.dark-theme input[type="text"], body.dark-theme input[type="email"], body.dark-theme textarea, body.dark-theme select {
+  background: #2a2a2a;
+  color: #eee;
+  border: 1px solid #444;
+}
+
+body.dark-theme .input::placeholder, body.dark-theme input::placeholder, body.dark-theme textarea::placeholder { color: #aaa; }
+
 
 body.dark-theme .song-verse-block.selected {
   background: #0078d4;
@@ -771,6 +875,16 @@ body.dark-theme .song-editor-help {
   pointer-events: none;
 }
 
+/* Inline editor formatting */
+.song-tag {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.song-section {
+  margin-bottom: 12px;
+}
+.song-section-sep { height: 8px; }
+
 body.dark-theme #song-editor-lyrics[contenteditable]:empty:before {
   color: #666;
 }
@@ -866,7 +980,11 @@ body.dark-theme .song-verse:hover {
 
 #schedule-sidebar {
   background: #f5f5f5;
+  /* Prevent horizontal scroll caused by long single-word items */
+  overflow-x: hidden;
 }
+
+.search-highlight { background: yellow; }
 
 body.dark-theme #schedule-sidebar {
   background: #2a2a2a;
@@ -937,7 +1055,7 @@ nav button {
 }
 
 .tab-content {
-  padding: 20px;
+  padding: 0px 20px 20px 20px;
 }
 
 .hidden {
@@ -1054,6 +1172,10 @@ body.dark-theme #verse-display {
   box-sizing: border-box;
   cursor: grab;
   user-select: none;
+  /* Prevent multi-line wrapping which caused repeated book-name lines; show ellipsis instead */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .verse-item:active {
@@ -1118,6 +1240,8 @@ body.dark-theme .verse-item.selected {
   padding: 8px;
   color: white;
   outline: none;
+  /* Allow flex children to shrink when the sidebar is narrow */
+  min-width: 0;
 }
 
 .schedule-item-header:focus {
@@ -1128,6 +1252,33 @@ body.dark-theme .verse-item.selected {
 .schedule-item-header.selected {
   background: #0078d4;
 }
+
+/* Small icons for schedule items */
+.schedule-item-icon {
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: #cfcfcf;
+}
+.schedule-item-icon i { font-size: 14px; }
+
+.schedule-verse-icon {
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: #bdbdbd;
+}
+.schedule-verse-icon i { font-size: 12px; }
+
+.schedule-verse-text { vertical-align: middle; }
+
+/* Selected states: make icons contrast when selected */
+.schedule-item-header.selected .schedule-item-icon { color: #fff; }
+.schedule-verse-item.selected .schedule-verse-icon { color: #fff; }
 
 .expand-arrow {
   width: 16px;
@@ -1144,6 +1295,11 @@ body.dark-theme .verse-item.selected {
 .schedule-item-text {
   flex: 1;
   font-size: 13px;
+  /* Prevent long words from overflowing the sidebar: allow wrapping and breaking */
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere; /* modern browsers */
+  word-break: break-word;   /* fallback */
 }
 
 .schedule-item-verses {

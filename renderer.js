@@ -2,7 +2,24 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, shell } = require('electron');
+// Secure storage API using IPC to main (uses keytar in main if available)
+const secure = {
+  async getToken() { try { return await ipcRenderer.invoke('secure-get-token'); } catch (e) { console.error('secure get token error', e); return null; } },
+  async setToken(token) { try { return await ipcRenderer.invoke('secure-set-token', token); } catch (e) { console.error('secure set token error', e); return false; } },
+  async deleteToken() { try { return await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('secure delete token error', e); return false; } }
+};
+let fetch;
+try {
+  fetch = require('node-fetch');
+} catch (e) {
+  if (typeof window !== 'undefined' && window.fetch) {
+    fetch = window.fetch.bind(window);
+    console.warn('node-fetch not available, using window.fetch fallback');
+  } else {
+    throw e; // rethrow if no fallback available
+  }
+}
 const {
   ensureBibleJson,
   loadAllVersesFromDisk,
@@ -18,6 +35,21 @@ const {
 let allVerses = [];
 let allSongs = [];
 let filteredSongs = []; // For search results
+
+// Safety stub for showPopover: queues calls if popover isn't initialized yet
+if (typeof window !== 'undefined' && !window.showPopover) {
+  const _showPopoverStub = function(name, key) {
+    console.warn('showPopover called before popover initialized:', name, key);
+    document.addEventListener('DOMContentLoaded', () => {
+      // If real showPopover replaced the stub, call it
+      if (window.showPopover && window.showPopover !== _showPopoverStub) {
+        try { window.showPopover(name, key); } catch (e) { console.warn('Deferred showPopover failed', e); }
+      }
+    }, { once: true });
+  };
+  window.showPopover = _showPopoverStub;
+}
+
 let currentSearchQuery = ''; // Track current search query for highlighting
 let selectedSongVerseIndex = null; // Track selected verse within a song
 let selectedIndices = [];
@@ -30,6 +62,23 @@ let previewStyles = { verseNumber: '', verseText: '', verseReference: '' };
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
+
+// Listen for import notifications from main process
+ipcRenderer.on('songs-imported', (event, info) => {
+  const added = info && info.addedCount ? info.addedCount : 0;
+  const total = info && info.totalFound ? info.totalFound : 0;
+  alert(`EasyWorship import complete: found ${total} song(s), imported ${added} new song(s).`);
+  // Refresh songs list from disk
+  loadSongs();
+});
+
+ipcRenderer.on('easyworship-import-disabled', (event, info) => {
+  if (info && info.reason === 'sql-missing') {
+    alert('EasyWorship import is disabled: sql.js is not installed. Run "npm install" in the app directory and restart.');
+  } else {
+    alert('EasyWorship import is disabled.');
+  }
+});
 let scheduleItems = []; // Array of { indices: [], expanded: false, selectedVerses: [] }
 let selectedScheduleItems = []; // Indices of selected schedule items for multi-select
 let anchorScheduleIndex = null; // For shift-click range selection
@@ -65,6 +114,10 @@ function applyPreviewStyles() {
   if (previewStyles.verseNumber) css += `#verse-number { ${atob(previewStyles.verseNumber)} }\n`;
   if (previewStyles.verseText) css += `#verse-text { ${atob(previewStyles.verseText)} }\n`;
   if (previewStyles.verseReference) css += `#verse-reference { ${atob(previewStyles.verseReference)} }\n`;
+  // Song preview styles
+  if (previewStyles.songTitle) css += `#song-title { ${atob(previewStyles.songTitle)} }\n`;
+  if (previewStyles.songText) css += `#song-text { ${atob(previewStyles.songText)} }\n`;
+  if (previewStyles.songReference) css += `#song-reference { ${atob(previewStyles.songReference)} }\n`;
   styleEl.textContent = css;
 
   // Also apply inline styles to any existing preview/live elements (keeps both behaviors)
@@ -82,19 +135,81 @@ function applyPreviewStyles() {
   });
 }
 
+// Parse base64-encoded CSS and return allowed canvas style properties
+function parseCanvasStyleFromB64(b64) {
+  if (!b64) return {};
+  try {
+    const css = atob(b64).toLowerCase();
+    // Remove font-size/line-height/font shorthand (not allowed)
+    const cleaned = css.replace(/font-size\s*:\s*[^;]+;?/gi, '').replace(/line-height\s*:\s*[^;]+;?/gi, '').replace(/font\s*:\s*[^;]+;?/gi, '');
+    const res = {};
+    const colorMatch = cleaned.match(/color\s*:\s*([^;]+)\s*;?/i);
+    if (colorMatch) res.color = colorMatch[1].trim();
+    const weightMatch = cleaned.match(/font-weight\s*:\s*(bold|[6-9]00)\s*;?/i);
+    if (weightMatch) res.fontWeight = 'bold';
+    const italicMatch = cleaned.match(/font-style\s*:\s*(italic)\s*;?/i);
+    if (italicMatch) res.fontStyle = 'italic';
+    return res;
+  } catch (e) {
+    return {};
+  }
+}
+
+function getCanvasStylesFor(type) {
+  // type: 'verse' or 'song'
+  const map = {};
+  if (type === 'verse') {
+    map.text = parseCanvasStyleFromB64(previewStyles.verseText);
+    map.number = parseCanvasStyleFromB64(previewStyles.verseNumber);
+    map.reference = parseCanvasStyleFromB64(previewStyles.verseReference);
+  } else {
+    map.text = parseCanvasStyleFromB64(previewStyles.songText || previewStyles.verseText);
+    map.title = parseCanvasStyleFromB64(previewStyles.songTitle || previewStyles.verseNumber);
+    map.reference = parseCanvasStyleFromB64(previewStyles.songReference || previewStyles.verseReference);
+  }
+  return map;
+}
+
 function setupPopover() {
+  // Ensure popover DOM elements exist; if not, defer initialization until DOMContentLoaded
   const popover = document.getElementById('css-popover');
   const textarea = document.getElementById('css-textarea');
   const cssSelect = document.getElementById('css-select');
   const saveBtn = document.getElementById('css-save');
   const cancelBtn = document.getElementById('css-cancel');
   const errorDiv = document.getElementById('css-error');
-  let currentElement = null;
 
-  // Click listeners for elements
-  document.getElementById('verse-number').addEventListener('click', () => showPopover('Verse Number', 'verseNumber'));
-  document.getElementById('verse-text').addEventListener('click', () => showPopover('Verse Text', 'verseText'));
-  document.getElementById('verse-reference').addEventListener('click', () => showPopover('Verse Reference', 'verseReference'));
+  if (!popover || !textarea || !cssSelect || !saveBtn || !cancelBtn || !errorDiv) {
+    console.warn('setupPopover: popover elements missing, deferring until DOMContentLoaded');
+    document.addEventListener('DOMContentLoaded', () => {
+      try { setupPopover(); } catch (e) { console.warn('setupPopover retry failed', e); }
+    }, { once: true });
+    return;
+  }
+
+  let currentElement = null;
+  let _triggersAttached = false;
+  function attachPopoverTriggers(retries = 6) {
+    if (_triggersAttached) return;
+    const vn = document.getElementById('verse-number');
+    const vt = document.getElementById('verse-text');
+    const vr = document.getElementById('verse-reference');
+    if (vn || vt || vr) {
+      if (vn) vn.addEventListener('click', () => showPopover('Verse Number', 'verseNumber'));
+      if (vt) vt.addEventListener('click', () => showPopover('Verse Text', 'verseText'));
+      if (vr) vr.addEventListener('click', () => showPopover('Verse Reference', 'verseReference'));
+      _triggersAttached = true;
+      return;
+    }
+    if (retries > 0) {
+      // Retry after a short delay to allow UI to render
+      setTimeout(() => attachPopoverTriggers(retries - 1), 250);
+    } else {
+      console.warn('attachPopoverTriggers: could not find trigger elements after retries');
+    }
+  }
+  // Attempt to attach immediately
+  attachPopoverTriggers();
 
   function showPopover(name, key) {
     currentElement = key;
@@ -120,6 +235,9 @@ function setupPopover() {
     errorDiv.textContent = '';
     popover.style.display = 'block';
   }
+
+  // Expose showPopover globally so external UI (menus/buttons) can call it
+  window.showPopover = showPopover;
 
   saveBtn.addEventListener('click', async () => {
     let css = '';
@@ -251,6 +369,7 @@ ipcRenderer.on('set-dark-theme', (event, enabled) => {
 // Notify user when an update is available (sent from main on startup or when detected)
 ipcRenderer.on('update-available', (event, res) => {
   try {
+
     // If the DOM isn't ready yet (rare), request any pending update from main
     function ensureAndHandle(info) {
       try {
@@ -433,60 +552,211 @@ ipcRenderer.on('default-bible-changed', async (event, bible) => {
   const localBibleFile = path.join(biblePath, 'bible.json');
   const legacyFile = path.join(userData, BIBLE_STORAGE_DIR, bible);
 
-  // Update current bible tracking
-  currentBibleFile = bible;
 
-  // Migrate legacy single-file download into the expected per-version folder
-  if (!fs.existsSync(localBibleFile) && fs.existsSync(legacyFile)) {
-    try {
-      await fs.promises.mkdir(biblePath, { recursive: true });
-      const txt = await fs.promises.readFile(legacyFile, 'utf8');
-      await fs.promises.writeFile(localBibleFile, txt, 'utf8');
-    } catch (err) {
-      console.error('Failed to migrate legacy bible file:', err);
+      note.querySelector('[data-action="open-release"]').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+      const downloadBtn = note.querySelector('[data-action="download"]');
+      const inlineProgress = note.querySelector('.inline-progress');
+      const progressInner = note.querySelector('.progress-inner');
+      const progressText = note.querySelector('.inline-progress-text');
+      let currentFile = null;
+      let downloading = false;
+      downloadBtn.onclick = async () => {
+        if (downloading) return;
+        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+        downloading = true;
+        inlineProgress.style.display = 'block';
+        downloadBtn.disabled = true;
+        try {
+          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+          if (res && res.ok && res.file) {
+            currentFile = res.file;
+            progressInner.style.width = '100%';
+            progressText.textContent = 'Download complete';
+            downloadBtn.textContent = 'Run';
+            downloadBtn.disabled = false;
+            downloadBtn.onclick = async () => { await ipcRenderer.invoke('run-installer', currentFile); };
+          } else {
+            alert('Download failed: ' + (res && res.error));
+            downloadBtn.disabled = false;
+            downloading = false;
+          }
+        } catch (e) {
+          alert('Download failed: ' + e);
+          downloadBtn.disabled = false;
+          downloading = false;
+        }
+      };
+
+      ipcRenderer.on('update-download-progress', (ev, p) => {
+        if (p && p.file) {
+          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+          progressInner.style.width = (percent || 0) + '%';
+          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+        }
+      });
+
+      return note;
     }
-  }
 
-  try {
-    allVerses = await loadAllVersesFromDisk(biblePath);
-  } catch (err) {
-    safeStatus('Failed to load selected Bible.');
-    console.error('Failed to load selected bible:', err);
-    return;
-  }
-
-  document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
-  renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
-  safeStatus(`Switched to ${baseName.replace('_', ' ')}.`);
-  
-  // Re-render schedule with new verse data
-  if (scheduleItems.length > 0) {
-    renderSchedule();
-  }
-
-  // Restore last selection if it belongs to this bible
-  try {
-    const settings = await ipcRenderer.invoke('load-settings');
-    if (settings && settings.lastSelected && settings.lastSelected.bible === currentBibleFile) {
-      const start = allVerses.findIndex(v => v.key === settings.lastSelected.startKey);
-      const end = settings.lastSelected.endKey ? allVerses.findIndex(v => v.key === settings.lastSelected.endKey) : start;
-      if (start !== -1) {
-        const realEnd = (end !== -1) ? end : start;
-        selectedIndices = [];
-        for (let k = Math.min(start, realEnd); k <= Math.max(start, realEnd); k++) selectedIndices.push(k);
-        anchorIndex = selectedIndices[0];
-        updateVerseDisplay();
-        updatePreview(allVerses[selectedIndices[0]]);
-        jumpToVerse(selectedIndices[0]);
-        renderWindow(allVerses, document.getElementById('verse-list').scrollTop, selectedIndices, handleVerseClick);
+    // If the setup/login modal is open, attach an inline update notice there instead of creating a new modal
+    const setupModal = document.getElementById('setup-modal');
+    if (setupModal) {
+      const card = setupModal.querySelector('.setup-card');
+      if (card) {
+        createInlineUpdateNotice(res, card);
+        return;
       }
     }
+
+    function createUpdateModal(info) {
+      if (document.getElementById('update-modal')) return;
+      const modal = document.createElement('div');
+      modal.id = 'update-modal';
+      modal.className = 'update-overlay';
+      const releaseNote = (info.body || '').split('\n')[0] || '';
+      modal.innerHTML = `
+        <div class="setup-card">
+          <h2>Update available: ${info.latest || ''}</h2>
+          <div style="margin:8px 0;color:var(--muted,#666);font-size:0.9em;">${releaseNote}</div>
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button id="update-open-release" class="btn">Open Release Page</button>
+            <button id="update-download" class="btn primary">Download & Install</button>
+            <button id="update-dismiss" class="btn">Dismiss</button>
+          </div>
+          <div id="update-progress" style="margin-top:12px;display:none;">
+            <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
+            <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      document.getElementById('update-open-release').onclick = () => { require('electron').shell.openExternal(info.html_url); };
+      document.getElementById('update-dismiss').onclick = () => { modal.remove(); };
+
+      const downloadBtn = document.getElementById('update-download');
+      const progressEl = document.getElementById('update-progress');
+      const progressBar = modal.querySelector('.progress-inner');
+      const progressText = document.getElementById('update-progress-text');
+      let currentFile = null;
+      let downloading = false;
+      downloadBtn.onclick = async () => {
+        if (downloading) return;
+        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
+        downloading = true;
+        progressEl.style.display = 'block';
+        downloadBtn.disabled = true;
+        try {
+          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
+          if (res && res.ok && res.file) {
+            currentFile = res.file;
+            progressBar.style.width = '100%';
+            progressText.textContent = 'Download complete';
+            downloadBtn.textContent = 'Run Installer';
+            downloadBtn.disabled = false;
+            downloadBtn.onclick = async () => {
+              await ipcRenderer.invoke('run-installer', currentFile);
+            };
+          } else {
+            alert('Download failed: ' + (res && res.error));
+            downloadBtn.disabled = false;
+            downloading = false;
+          }
+        } catch (e) {
+          alert('Download failed: ' + e);
+          downloadBtn.disabled = false;
+          downloading = false;
+        }
+      };
+
+      ipcRenderer.on('update-download-progress', (ev, p) => {
+        if (p && p.file) {
+          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
+          progressBar.style.width = (percent || 0) + '%';
+          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
+        }
+      });
+
+      document.getElementById('update-cancel').onclick = async () => {
+        if (currentFile) {
+          await ipcRenderer.invoke('cancel-update-download', { file: currentFile });
+        }
+        modal.remove();
+      };
+    }
+    createUpdateModal(res);
+  } catch (e) { console.warn('update-available handler error', e); }
+});
+
+// Allow other windows (Settings) to request the setup modal
+ipcRenderer.on('show-setup-modal', () => {
+  try { createSetupModal(); } catch (e) { console.error('Failed to open setup modal from IPC', e); }
+});
+// Handle default-bible updates from main process
+ipcRenderer.on('default-bible-changed', async (event, bible) => {
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const baseName = bible.endsWith('.json') ? bible.replace('.json','') : bible;
+    const biblePath = path.join(userData, 'bibles', baseName);
+    const localBibleFile = path.join(biblePath, 'bible.json');
+    const legacyFile = path.join(userData, BIBLE_STORAGE_DIR, bible);
+
+    // Update current bible tracking
+    currentBibleFile = bible;
+
+    // Migrate legacy single-file download into the expected per-version folder
+    if (!fs.existsSync(localBibleFile) && fs.existsSync(legacyFile)) {
+      try {
+        await fs.promises.mkdir(biblePath, { recursive: true });
+        const txt = await fs.promises.readFile(legacyFile, 'utf8');
+        await fs.promises.writeFile(localBibleFile, txt, 'utf8');
+      } catch (err) {
+        console.error('Failed to migrate legacy bible file:', err);
+      }
+    }
+
+    try {
+      allVerses = await loadAllVersesFromDisk(biblePath);
+    } catch (err) {
+      safeStatus('Failed to load selected Bible.');
+      console.error('Failed to load selected bible:', err);
+      return;
+    }
+
+    document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
+    renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
+    safeStatus(`Switched to ${baseName.replace('_', ' ')}.`);
+    
+    // Re-render schedule with new verse data
+    if (scheduleItems.length > 0) {
+      renderSchedule();
+    }
+
+    // Restore last selection if it belongs to this bible
+    try {
+      const settings = await ipcRenderer.invoke('load-settings');
+      if (settings && settings.lastSelected && settings.lastSelected.bible === currentBibleFile) {
+        const start = allVerses.findIndex(v => v.key === settings.lastSelected.startKey);
+        const end = settings.lastSelected.endKey ? allVerses.findIndex(v => v.key === settings.lastSelected.endKey) : start;
+        if (start !== -1) {
+          const realEnd = (end !== -1) ? end : start;
+          selectedIndices = [];
+          for (let k = Math.min(start, realEnd); k <= Math.max(start, realEnd); k++) selectedIndices.push(k);
+          anchorIndex = selectedIndices[0];
+          updateVerseDisplay();
+          updatePreview(allVerses[selectedIndices[0]]);
+          jumpToVerse(selectedIndices[0]);
+          renderWindow(allVerses, document.getElementById('verse-list').scrollTop, selectedIndices, handleVerseClick);
+        }
+      }
+    } catch (err) { console.error('Failed to restore last selection after bible change:', err); }
   } catch (err) {
-    console.error('Failed to restore last selection:', err);
+    console.error('Error handling default-bible-changed:', err);
   }
 });
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   // Install renderer-side logging buffer
   try {
     window.appLogs = window.appLogs || [];
@@ -498,13 +768,23 @@ window.addEventListener('DOMContentLoaded', () => {
     console.error = function(...args) { try { window.appLogs.push({ ts: new Date().toISOString(), level: 'error', msg: args.join(' ') }); } catch (e) {} ; _rerr.apply(console, args); };
   } catch (e) {}
 
-  loadAndApplySettings();
+  await loadAndApplySettings();
+
+  // Check auth/license before showing main UI
+  await ensureAuthSetup();
+  
+  // Continue with initial render
+  loadCoreUI();
 
   const listContainer = document.getElementById('verse-list');
   if (!listContainer) return;
 
+  // Track last known inner height so we can expand/shrink verse area proportionally on resize
+  let _lastWindowInnerHeight = window.innerHeight;
+
   // Initial render
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
+  // Other UI initialization moved into loadCoreUI so it only runs after auth check
 
   // Scroll handler
   listContainer.addEventListener('scroll', () => {
@@ -518,7 +798,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initImageEditor();
   initVideoEditor();
   initTabs();
-  // setupPopover(); // Disabled - not needed with canvas rendering
+  setupPopover(); // Enabled: required so style buttons and menus can open the CSS popover
   initSchedule();
   initResizers();
   restoreDividerPositions();
@@ -540,10 +820,22 @@ window.addEventListener('DOMContentLoaded', () => {
       const previewPercent = Math.round((slidePreview.getBoundingClientRect().width / (containerRect.width || 1)) * 100);
       const verseHeightPx = Math.round(versePanel.getBoundingClientRect().height);
 
-      // Clamp same as restore
+      // Clamp same as restore for schedule/preview
       const clampedSchedule = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
       const clampedPreview = Math.max(10, Math.min(previewPercent, 90));
-      const clampedVerse = Math.max(50, Math.min(verseHeightPx, Math.max(100, window.innerHeight - 100)));
+
+      // Allow verse panel to expand/shrink when window height changes.
+      const heightDelta = window.innerHeight - (_lastWindowInnerHeight || window.innerHeight);
+      const windowMaxVerse = Math.max(100, window.innerHeight - 100);
+      let desiredVerse = verseHeightPx;
+      if (heightDelta > 0) {
+        // Window grew: add delta to verse height but don't exceed window available area
+        desiredVerse = Math.min(windowMaxVerse, verseHeightPx + heightDelta);
+      } else if (heightDelta < 0) {
+        // Window shrunk: reduce verse height but respect minimums
+        desiredVerse = Math.max(50, Math.min(verseHeightPx + heightDelta, windowMaxVerse));
+      }
+      const clampedVerse = Math.max(50, Math.min(desiredVerse, windowMaxVerse));
 
       let changed = false;
       if (clampedSchedule !== scheduleWidthPx) {
@@ -556,10 +848,14 @@ window.addEventListener('DOMContentLoaded', () => {
         changed = true;
       }
       if (clampedVerse !== verseHeightPx) {
-        document.getElementById('top-section').style.flex = `0 0 ${Math.max(50, window.innerHeight - clampedVerse - 16)}px`;
+        const newTop = Math.max(50, window.innerHeight - clampedVerse - 16);
+        document.getElementById('top-section').style.flex = `0 0 ${newTop}px`;
         versePanel.style.flex = `0 0 ${clampedVerse}px`;
         changed = true;
       }
+
+      // Remember last window size for next resize calculation
+      _lastWindowInnerHeight = window.innerHeight;
 
       if (changed) await saveDividerPositions();
     }, 150);
@@ -686,6 +982,8 @@ async function initScripture() {
   allVerses = await loadAllVersesFromDisk(baseDir);
 
   document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
+  // Ensure left column is wide enough to show the longest verse reference (clamped to a sane maximum)
+  try { adjustVerseListWidth(allVerses); } catch(e) { console.warn('adjustVerseListWidth failed', e); }
   renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
   safeStatus(`Loaded ${allVerses.length} verses.`);
   
@@ -694,6 +992,47 @@ async function initScripture() {
     renderSchedule();
   }
 
+  // Compute and set verse-list width based on measured text (used above)
+  function adjustVerseListWidth(allVersesList) {
+    const listEl = document.getElementById('verse-list');
+    if (!listEl || !allVersesList || allVersesList.length === 0) return;
+
+    // Create a temporary element to pick up computed font styles
+    const sample = document.createElement('div');
+    sample.className = 'verse-item';
+    sample.style.position = 'absolute'; sample.style.visibility = 'hidden'; sample.style.whiteSpace = 'nowrap';
+    document.body.appendChild(sample);
+    const computedFont = window.getComputedStyle(sample).font || '14px Arial';
+    document.body.removeChild(sample);
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = computedFont;
+
+    // Measure the longest key
+    let maxW = 0;
+    for (let i = 0; i < allVersesList.length; i++) {
+      const key = allVersesList[i] && allVersesList[i].key ? String(allVersesList[i].key) : '';
+      const w = ctx.measureText(key).width;
+      if (w > maxW) maxW = w;
+    }
+
+    // Add padding and clamp to reasonable bounds
+    const padding = 16; // 8px left + 8px right (we already have those)
+    const minW = 120;
+    const maxAllowed = Math.min(420, Math.floor(window.innerWidth * 0.45));
+    const desired = Math.ceil(maxW + padding);
+    const final = Math.max(minW, Math.min(desired, maxAllowed));
+
+    document.documentElement.style.setProperty('--verse-list-width', `${final}px`);
+  }
+
+  // Recompute on resize (debounced)
+  let _verseListResizeTimer = null;
+  window.addEventListener('resize', () => {
+    if (_verseListResizeTimer) clearTimeout(_verseListResizeTimer);
+    _verseListResizeTimer = setTimeout(() => adjustVerseListWidth(allVerses), 150);
+  });
   // Try to restore last selection if it belongs to this bible
   try {
     const settings = await ipcRenderer.invoke('load-settings');
@@ -916,6 +1255,12 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, displayWidth, displayHeight);
   
+  // Styles passed via content.styles (optional)
+  const styles = content && content.styles ? content.styles : null;
+  const textStyle = styles && styles.text ? styles.text : null;
+  const numberStyle = styles && (styles.number || styles.title) ? (styles.number || styles.title) : null;
+  const referenceStyle = styles && styles.reference ? styles.reference : null;
+
   // Handle background media (object with type, path, color, and settings)
   if (content.backgroundMedia) {
     const media = content.backgroundMedia;
@@ -995,21 +1340,28 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   if (content.number) {
     ctx.font = `${baseFontSize * 0.6}px Arial`;
     ctx.textAlign = 'left';
-    ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
-  }
-  
-  // Render verse text (center)
-  if (content.text) {
-    ctx.textAlign = 'center';
-    const textY = displayHeight / 2;
+      ctx.fillStyle = (numberStyle && numberStyle.color) ? numberStyle.color : '#fff';
+      ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+    }
     
-    // Split text by explicit newlines first (for songs), then handle verse numbers
-    const textLines = content.text.split('\n');
-    const allLines = [];
+    // Render verse text (center)
+    if (content.text) {
+      ctx.textAlign = 'center';
+      const textY = displayHeight / 2;
+      const textLines = content.text.split('\n');
+      const allLines = [];
+      // Default text color
+      const normalTextColor = (textStyle && textStyle.color) ? textStyle.color : '#fff';
+      // Subscript color uses a lighter tone or provided (derive if not given)
+      const subscriptColor = (textStyle && textStyle.subscriptColor) ? textStyle.subscriptColor : (textStyle && textStyle.color ? textStyle.color : '#ddd');
     
     textLines.forEach(textLine => {
       // Parse text to handle verse numbers as subscripts
       const segments = parseVerseSegments(textLine);
+      // For each non-number segment, parse inline Markdown to preserve bold/italic per word
+      segments.forEach(s => {
+        if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text);
+      });
       
       // Auto-size font to fill vertical space optimally
       ctx.font = `${baseFontSize}px Arial`;
@@ -1026,6 +1378,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const testLines = [];
       textLines.forEach(textLine => {
         const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown is parsed for measurement
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
         const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, testSize);
         testLines.push(...wrappedLines);
       });
@@ -1044,6 +1398,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const testLines = [];
       textLines.forEach(textLine => {
         const segments = parseVerseSegments(textLine);
+        // Ensure inline markdown is parsed for measurement
+        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
         const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
         testLines.push(...wrappedLines);
       });
@@ -1056,7 +1412,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     const startY = textY - (totalHeight / 2);
     
     lines.forEach((line, i) => {
-      renderLineWithSubscripts(ctx, line, displayWidth / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize);
+      renderLineWithSubscripts(ctx, line, displayWidth / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, { textColor: normalTextColor, subscriptColor });
     });
   }
   
@@ -1064,6 +1420,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   if (content.reference) {
     ctx.font = `${baseFontSize * 0.7}px Arial`;
     ctx.textAlign = 'right';
+    ctx.fillStyle = (referenceStyle && referenceStyle.color) ? referenceStyle.color : '#fff';
     ctx.fillText(content.reference, displayWidth - padding, displayHeight - padding - baseFontSize * 0.3);
   }
   
@@ -1136,10 +1493,18 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
       currentWidth += width;
       ctx.font = `${baseFontSize}px Arial`;
     } else {
-      // Split text into words
-      const words = seg.text.split(' ');
-      words.forEach((word, idx) => {
-        const testWord = word + (idx < words.length - 1 ? ' ' : '');
+      // If seg.words exists (parsed with inline markdown), use those styled words
+      const words = seg.words ? seg.words : seg.text.split(' ');
+      words.forEach((wordObj, idx) => {
+        const wordText = typeof wordObj === 'string' ? wordObj : wordObj.text;
+        const testWord = wordText + (idx < words.length - 1 ? ' ' : '');
+        // Set font according to inline style for accurate measurement
+        if (typeof wordObj !== 'string') {
+          const styleFont = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          ctx.font = styleFont;
+        } else {
+          ctx.font = `${baseFontSize}px Arial`;
+        }
         const width = ctx.measureText(testWord).width;
         
         if (currentWidth + width > maxWidth && currentLine.length > 0) {
@@ -1148,7 +1513,12 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
           currentWidth = 0;
         }
         
-        currentLine.push({ isNumber: false, text: testWord });
+        // Preserve style info in pushed segment
+        if (typeof wordObj === 'string') {
+          currentLine.push({ isNumber: false, text: testWord });
+        } else {
+          currentLine.push({ isNumber: false, text: testWord, bold: !!wordObj.bold, italic: !!wordObj.italic });
+        }
         currentWidth += width;
       });
     }
@@ -1164,7 +1534,7 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
 /**
  * Render a line with subscript verse numbers
  */
-function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
+function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize, colors = {}) {
   // Calculate total width
   const subscriptSize = baseFontSize * 0.6;
   let totalWidth = 0;
@@ -1174,7 +1544,9 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
       ctx.font = `${subscriptSize}px Arial`;
       totalWidth += ctx.measureText(seg.text + ' ').width;
     } else {
-      ctx.font = `${baseFontSize}px Arial`;
+      // Determine font for measurement if style flags exist
+      const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+      ctx.font = fontStr;
       totalWidth += ctx.measureText(seg.text).width;
     }
   });
@@ -1188,15 +1560,17 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize) {
     if (seg.isNumber) {
       // Render subscript (smaller, slightly lower)
       ctx.font = `${subscriptSize}px Arial`;
-      ctx.fillStyle = '#ddd';
+      ctx.fillStyle = (colors && colors.subscriptColor) ? colors.subscriptColor : '#ddd';
       ctx.textAlign = 'left';
       ctx.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
       x += ctx.measureText(seg.text + ' ').width;
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
     } else {
-      // Render normal text
-      ctx.font = `${baseFontSize}px Arial`;
+      // Render normal text, honoring bold/italic flags if present
+      const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+      ctx.font = fontStr;
       ctx.textAlign = 'left';
+      ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
       ctx.fillText(seg.text, x, y);
       x += ctx.measureText(seg.text).width;
     }
@@ -1227,6 +1601,63 @@ function wrapText(ctx, text, maxWidth) {
   
   if (currentLine) lines.push(currentLine);
   return lines;
+}
+
+/**
+ * Parse inline Markdown in a string into an array of word objects with style flags
+ * Supports: **bold**, __bold__, *italic*, _italic_
+ */
+function parseInlineMarkdownWords(s) {
+  const out = [];
+  if (!s) return out;
+
+  const tokenRegex = /(\*\*|__)([\s\S]+?)\1|(\*|_)([\s\S]+?)\3/g;
+  let lastIndex = 0;
+  let m;
+
+  while ((m = tokenRegex.exec(s)) !== null) {
+    if (m.index > lastIndex) {
+      // Plain text before this token
+      const plain = s.substring(lastIndex, m.index);
+      plain.split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: false, italic: false });
+      });
+    }
+
+    if (m[1] && m[2]) {
+      // Bold using ** or __
+      m[2].split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: true, italic: false });
+      });
+    } else if (m[3] && m[4]) {
+      // Italic using * or _
+      m[4].split(' ').forEach((w, i, arr) => {
+        if (w === '') return;
+        const add = i < arr.length - 1 ? w + ' ' : w;
+        out.push({ text: add, bold: false, italic: true });
+      });
+    }
+
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < s.length) {
+    const rest = s.substring(lastIndex);
+    rest.split(' ').forEach((w, i, arr) => {
+      if (w === '') return;
+      const add = i < arr.length - 1 ? w + ' ' : w;
+      out.push({ text: add, bold: false, italic: false });
+    });
+  }
+
+  // If nothing matched, but s has no spaces, ensure we return it
+  if (out.length === 0 && s.trim() !== '') out.push({ text: s, bold: false, italic: false });
+
+  return out;
 }
 
 async function updatePreview(verseOrIndices) {
@@ -1328,6 +1759,7 @@ async function updateLive(verseOrIndices) {
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
+    const styles = getCanvasStylesFor('verse');
     window.currentContent = {
       number: numberText,
       text: textContent,
@@ -1335,7 +1767,8 @@ async function updateLive(verseOrIndices) {
       showHint: showHint,
       width: width,
       height: height,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     };
     // If preview is in black or clear mode, reflect that in the preview canvas
     if (blackMode) {
@@ -1372,6 +1805,7 @@ async function updateLive(verseOrIndices) {
     showingCount: indicesToShow.length,
     totalSelected: indices.length,
     backgroundMedia: backgroundMedia,
+    styles: getCanvasStylesFor('verse'),
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
@@ -1667,6 +2101,315 @@ function updateLiveButtonState(isActive) {
   }
 }
 
+// ------------------ License / Auth Integration ------------------
+
+async function getSavedToken() {
+  try {
+    const t = await secure.getToken();
+    if (t) return t;
+    // Fallback to settings (legacy)
+    try {
+      const s = await ipcRenderer.invoke('load-settings');
+      if (s && s.auth && s.auth.token) return s.auth.token;
+    } catch (e) {}
+    return null;
+  } catch (e) {
+    console.error('secure get error', e);
+    return null;
+  }
+}
+
+async function saveToken(token) {
+  try {
+    let ok = false;
+    try { ok = await secure.setToken(token); } catch (e) { console.error('secure.setToken exception', e); ok = false; }
+
+    // Always mirror token in settings as a backup so restarts can recover reliably
+    try { await ipcRenderer.invoke('update-settings', { auth: { token } }); } catch (e) { console.error('mirror settings save failed', e); }
+
+    if (ok) {
+      try { await ipcRenderer.invoke('update-settings', { lastAuthSavedAt: Date.now(), authStorage: 'keytar' }); } catch (e) {}
+      return true;
+    } else {
+      // Keytar not available or failed — settings now contain token as fallback
+      try { await ipcRenderer.invoke('update-settings', { lastAuthSavedAt: Date.now(), authStorage: 'settings' }); } catch (e) {}
+      return true;
+    }
+  } catch (e) { console.error('secure set error', e); return false; }
+}
+
+async function clearToken() {
+  try {
+    await secure.deleteToken();
+  } catch (e) { console.error('secure delete error', e); }
+  try { await ipcRenderer.invoke('update-settings', { auth: null, lastAuthSavedAt: null, authStorage: null }); } catch (e) {}
+}
+
+async function createSetupModal() {
+  // Create a full-screen overlay modal for initial setup
+  if (document.getElementById('setup-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'setup-modal';
+  modal.className = 'setup-overlay';
+  // Inline fixed positioning as a fallback (ensures overlay centers correctly even if stylesheet is overridden)
+  modal.style.position = 'fixed';
+  modal.style.left = '0'; modal.style.top = '0'; modal.style.right = '0'; modal.style.bottom = '0';
+  modal.style.display = 'flex'; modal.style.alignItems = 'center'; modal.style.justifyContent = 'center';
+  modal.style.zIndex = '20000'; modal.style.background = 'rgba(0,0,0,0.6)';
+  modal.innerHTML = `
+    <div class="setup-card">
+      <h2>Welcome to Liturgia</h2>
+      <p id="setup-message">Sign in to validate ownership or subscribe.</p>
+      <div class="form-row" style="margin-top:12px;">
+        <input id="setup-email" class="input" type="email" placeholder="you@example.com" />
+        <button id="btn-magic" class="btn">Send Magic Link</button>
+      </div>
+      <div class="form-row" style="margin-top:12px;">
+        <button id="btn-enter-token" class="btn">Enter Token</button>
+        <button id="btn-subscribe" class="btn primary">Subscribe / Purchase</button>
+      </div>
+      <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
+        <button id="btn-continue-offline" class="btn">Continue Offline (grace)</button>
+        <div id="setup-status" style="opacity:0.9;font-size:12px;color:var(--muted)"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  // Focus email input to let user start typing immediately
+  const emailEl = document.getElementById('setup-email'); if (emailEl) setTimeout(()=>emailEl.focus(),50);
+
+  // Resolve configured server (managed) up-front
+  const _settings = await ipcRenderer.invoke('load-settings');
+  const server = (_settings && _settings.licenseServer) ? _settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+
+  document.getElementById('btn-magic').onclick = async () => {
+    const emailInput = document.getElementById('setup-email');
+    const email = emailInput.value.trim();
+    if (!email) { document.getElementById('setup-status').textContent = 'Enter an email'; emailInput.focus(); return; }    const btn = document.getElementById('btn-magic');
+    btn.disabled = true;
+    document.getElementById('setup-status').textContent = 'Sending magic link...';
+    try {
+      const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}`
+      });
+      const json = await res.json();
+      if (json.ok) {
+        // Persist chosen server so the app remembers it across restarts
+        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
+        document.getElementById('setup-status').textContent = 'Magic link sent — check your email (and spam/junk folder) and paste the token via "Enter Token".';
+      } else {
+        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json.error||'');
+      }
+    } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error sending magic link'; }
+    finally { btn.disabled = false; }
+  };
+
+  document.getElementById('btn-enter-token').onclick = async () => {
+    // Server is resolved when the modal was created (hidden from user)
+    if (!server) { document.getElementById('setup-status').textContent = 'Server not configured'; return; }
+    // Show inline token modal instead of prompt
+    if (document.getElementById('token-entry-modal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'token-entry-modal';
+    modal.className = 'setup-overlay';
+    // Inline fixed positioning fallback to ensure proper overlay behavior
+    modal.style.position = 'fixed';
+    modal.style.left = '0'; modal.style.top = '0'; modal.style.right = '0'; modal.style.bottom = '0';
+    modal.style.display = 'flex'; modal.style.alignItems = 'center'; modal.style.justifyContent = 'center';
+    modal.style.zIndex = '20000'; modal.style.background = 'rgba(0,0,0,0.6)';
+    modal.innerHTML = `
+      <div class="setup-card" style="width:420px;">
+        <h3>Enter Sign-in Token</h3>
+        <p>Paste the token from the magic link page or generated token below.</p>
+        <textarea id="token-input" class="input" style="height:80px;font-size:12px;margin-top:8px;width:100%;"></textarea>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+          <button id="token-cancel" class="btn">Cancel</button>
+          <button id="token-save" class="btn primary">Validate & Save</button>
+        </div>
+        <div id="token-status" style="margin-top:8px;color:var(--muted);font-size:12px;"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    // Focus the token input so users can paste immediately
+    const tokenInput = document.getElementById('token-input'); if (tokenInput) setTimeout(()=>tokenInput.focus(),50);
+    document.getElementById('token-cancel').onclick = () => { modal.remove(); };
+    document.getElementById('token-save').onclick = async () => {
+      const token = document.getElementById('token-input').value.trim();
+      if (!token) { document.getElementById('token-status').textContent = 'Enter a token.'; return; }
+      document.getElementById('token-status').textContent = 'Validating...';
+      const result = await validateTokenAndActivate(token, server);
+      if (result && result.ok) {
+        const saved = await saveToken(token);
+        // Persist the server we used so restarts keep it
+        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
+        if (!saved) {
+          document.getElementById('token-status').textContent = 'Signed in but failed to persist token to secure storage. It will be stored in settings as fallback.';
+        } else if (result.active) {
+          document.getElementById('token-status').textContent = 'Token validated and saved.';
+        } else {
+          document.getElementById('token-status').textContent = 'Signed in (license inactive). A watermark will be shown; activate to remove it.';
+        }
+        setTimeout(() => { modal.remove(); closeSetupModal(); }, 1200);
+      } else {
+        document.getElementById('token-status').textContent = 'Validation failed. Use admin/generate_token.php or the magic link.';
+      }
+    };
+  };
+
+  document.getElementById('btn-subscribe').onclick = async () => {
+    // Ask for email to create checkout and open in external browser
+    // 'server' variable is resolved when the modal was created (hidden from user)
+    const emailInput = document.getElementById('setup-email');
+    const email = emailInput.value.trim();
+    if (!email) { document.getElementById('setup-status').textContent = 'Enter an email'; emailInput.focus(); return; }
+
+    // Basic sanity check for email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { document.getElementById('setup-status').textContent = 'Enter a valid email address'; emailInput.focus(); return; }
+
+    const btn = document.getElementById('btn-subscribe');
+    btn.disabled = true;
+    document.getElementById('setup-status').textContent = 'Creating checkout...';
+    try {
+      // Use application/x-www-form-urlencoded as Stripe expects
+      const url = server.replace(/\/$/, '') + '/create-checkout-session.php';
+      let res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: `email=${encodeURIComponent(email)}&plan=monthly` });
+      let j = null;
+      let textBody = null;
+      try { j = await res.json(); } catch (err) { textBody = await res.text().catch(()=>null); console.warn('create-checkout-session returned non-JSON'); }
+
+      // If the server complains about content type, retry with JSON (works with newer servers)
+      const errorMsg = (j && j.error) ? j.error : (textBody || '');
+      if (errorMsg && /content type/i.test(errorMsg)) {
+        console.warn('Server rejected urlencoded body, retrying with JSON');
+        res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({email:email, plan:'monthly'}) });
+        try { j = await res.json(); } catch (err) { textBody = await res.text().catch(()=>null); }
+      }
+
+      if (j && j.url) { shell.openExternal(j.url); document.getElementById('setup-status').textContent = 'Checkout opened in browser.'; }
+      else if (j && j.error) document.getElementById('setup-status').textContent = 'Failed to create checkout: ' + (j.error||'');
+      else document.getElementById('setup-status').textContent = `Failed to create checkout: HTTP ${res.status} ${textBody||''}`;
+    } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error creating checkout'; }
+    finally { btn.disabled = false; }
+  };
+
+  document.getElementById('btn-continue-offline').onclick = async () => { closeSetupModal(); };
+}
+
+function closeSetupModal() { const m = document.getElementById('setup-modal'); if (m) m.remove(); }
+
+async function validateTokenAndActivate(token, serverUrl) {
+  try {
+    const settings = await ipcRenderer.invoke('load-settings') || {};
+    const server = (serverUrl || settings.licenseServer || '').replace(/\/$/, '');
+    if (!server) {
+      ipcRenderer.send('license-status-update', { active: false, reason: 'no-server' });
+      return { ok: false, reason: 'no-server' };
+    }
+    // First try using Authorization header
+    let res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status !== 200) {
+      // Retry using query param token as a fallback (some hosts strip Authorization header)
+      try {
+        res = await fetch(server + '/license-status.php?token=' + encodeURIComponent(token));
+      } catch (e) {
+        // ignore, will handle below
+      }
+    }
+
+    if (res.status === 200) {
+      const j = await res.json();
+      // Broadcast license status to main->live window
+      ipcRenderer.send('license-status-update', j);
+      // Accept token if the server accepted it (200), even if not currently active.
+      return { ok: true, active: !!j.active, status: j };
+    } else {
+      ipcRenderer.send('license-status-update', { active: false, reason: 'http-' + res.status });
+      return { ok: false, reason: 'http-' + res.status };
+    }
+  } catch (e) {
+    console.error('validate error', e);
+    ipcRenderer.send('license-status-update', { active: false, reason: 'error', error: e.message });
+    return { ok: false, reason: 'error', error: e.message };
+  }
+}
+
+async function ensureAuthSetup() {
+  // Called on startup. If no token, show setup modal.
+  const token = await getSavedToken();
+  const settings = await ipcRenderer.invoke('load-settings') || {};
+  const server = settings.licenseServer || '';
+  if (token) {
+    const result = await validateTokenAndActivate(token, server);
+    if (result && result.ok) {
+      scheduleLicensePolling();
+      return; // proceed
+    }
+    // invalid token: clear and show setup
+    await clearToken();
+    ipcRenderer.send('license-status-update', { active: false, reason: 'invalid-token' });
+  } else {
+    ipcRenderer.send('license-status-update', { active: false, reason: 'no-token' });
+  }
+  // Show setup modal
+  createSetupModal();
+  scheduleLicensePolling();
+
+  // Ensure setup modal is shown after splash closes (splash might overlay it)
+  ipcRenderer.on('splash-closed', async () => {
+    try {
+      const token = await getSavedToken();
+      if (!token) {
+        if (!document.getElementById('setup-modal')) createSetupModal();
+        else {
+          // Ensure it's visible and focused
+          const m = document.getElementById('setup-modal'); if (m) { m.style.display='flex'; const el = document.getElementById('setup-email'); if (el) setTimeout(()=>el.focus(),50); }
+        }
+      } else {
+        const settings = await ipcRenderer.invoke('load-settings') || {};
+        const server = settings.licenseServer || '';
+        const res = await validateTokenAndActivate(token, server);
+        if (!res || !res.ok) {
+          if (!document.getElementById('setup-modal')) createSetupModal();
+          else { const m = document.getElementById('setup-modal'); if (m) { m.style.display='flex'; const el = document.getElementById('setup-email'); if (el) setTimeout(()=>el.focus(),50); }}
+        }
+      }
+      try { window.focus(); } catch(e){}
+      try { ipcRenderer.invoke('focus-main-window'); } catch(e){}
+    } catch (e) { console.warn('splash-closed handler error', e); }
+  });
+
+  // If the splash already closed before this handler attached, show the setup modal now
+  (async function(){
+    try {
+      const closed = await ipcRenderer.invoke('is-splash-closed');
+      if (closed) {
+        const token = await getSavedToken();
+        if (!token) { if (!document.getElementById('setup-modal')) createSetupModal(); }
+      }
+    } catch(e) { /* ignore */ }
+  })();
+}
+
+// Poll license status periodically (runs immediately and every 15 minutes)
+let _licensePollIntervalId = null;
+function scheduleLicensePolling() {
+  if (_licensePollIntervalId) clearInterval(_licensePollIntervalId);
+  const runCheck = async () => {
+    const token = await getSavedToken();
+    if (token) await validateTokenAndActivate(token);
+    else ipcRenderer.send('license-status-update', { active: false, reason: 'no-token' });
+  };
+  // Run immediately
+  runCheck().catch(e => { console.error('license poll error', e); ipcRenderer.send('license-status-update', { active: false, reason: 'poll-error' }); });
+  _licensePollIntervalId = setInterval(() => runCheck().catch(e => { console.error('license poll error', e); ipcRenderer.send('license-status-update', { active: false, reason: 'poll-error' }); }), 15 * 60 * 1000);
+} 
+
+async function loadCoreUI() {
+  // This is where previous initiation code that expects license to be checked goes
+  // For now, do nothing special; the rest of DOMContentLoaded will continue.
+}
+
+
 async function saveLastSelectionToSettings() {
   try {
     if (!selectedIndices || selectedIndices.length === 0) {
@@ -1895,6 +2638,18 @@ function renderSchedule() {
       header.appendChild(spacer);
     }
     
+    // Icon on header (song / verse / media)
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'schedule-item-icon';
+    if (itemType === 'song') {
+      iconDiv.innerHTML = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
+    } else if (itemType === 'media') {
+      iconDiv.innerHTML = '<i class="fa-solid fa-image" aria-hidden="true"></i>';
+    } else {
+      iconDiv.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+    }
+    header.appendChild(iconDiv);
+
     // Text
     const text = document.createElement('div');
     text.className = 'schedule-item-text';
@@ -1903,24 +2658,18 @@ function renderSchedule() {
     if (itemType === 'song') {
       const song = allSongs[item.songIndex];
       displayText = song ? song.title : 'Unknown Song';
+      text.textContent = displayText;
+      text.title = displayText;
     } else if (itemType === 'media') {
       const media = allMedia[item.mediaIndex];
-      const iconSVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M15 12V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 8.172 2H7.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 4.172 4H3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2zM8 9a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
       const mediaName = media ? media.name : 'Unknown Media';
-      displayText = mediaName.length > 35 ? mediaName.substring(0, 32) + '...' : mediaName;
-      text.innerHTML = media ? iconSVG + displayText : 'Unknown Media';
+      displayText = mediaName;
+      text.textContent = displayText;
+      text.title = displayText;
     } else {
       displayText = getScheduleItemLabel(item.indices);
-    }
-    
-    if (itemType !== 'media') {
-      // Truncate text if too long (max 40 chars)
-      if (displayText.length > 40) {
-        text.textContent = displayText.substring(0, 37) + '...';
-        text.title = displayText; // Show full text on hover
-      } else {
-        text.textContent = displayText;
-      }
+      text.textContent = displayText;
+      text.title = displayText;
     }
     
     header.appendChild(text);
@@ -1983,11 +2732,19 @@ function renderSchedule() {
               const verseItem = document.createElement('div');
               verseItem.className = 'schedule-verse-item';
               verseItem.tabIndex = 0;
+              // icon + text elements for song verse
+              const verseIcon = document.createElement('span');
+              verseIcon.className = 'schedule-verse-icon';
+              verseIcon.innerHTML = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
+              const verseText = document.createElement('span');
+              verseText.className = 'schedule-verse-text';
               
               // First line of verse as label
               const firstLine = verse.split('\\n')[0];
               const label = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
-              verseItem.textContent = `${section.section} (${i + 1}): ${label}`;
+              verseText.textContent = `${section.section} (${i + 1}): ${label}`;
+              verseItem.appendChild(verseIcon);
+              verseItem.appendChild(verseText);
               
               if (item.selectedVerses && item.selectedVerses.includes(verseIndex)) {
                 verseItem.classList.add('selected');
@@ -2028,9 +2785,24 @@ function renderSchedule() {
         const verse = allVerses[verseIndex];
         if (verse) {
           const match = verse.key.match(/^(.+?)\s+(\d+):(\d+)$/);
-          verseItem.textContent = match ? `${match[1]} ${match[2]}:${match[3]}` : verse.key;
+          const verseLabel = match ? `${match[1]} ${match[2]}:${match[3]}` : verse.key;
+          const verseIcon = document.createElement('span');
+          verseIcon.className = 'schedule-verse-icon';
+          verseIcon.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+          const verseText = document.createElement('span');
+          verseText.className = 'schedule-verse-text';
+          verseText.textContent = verseLabel;
+          verseItem.appendChild(verseIcon);
+          verseItem.appendChild(verseText);
         } else {
-          verseItem.textContent = 'Unknown';
+          const verseIcon = document.createElement('span');
+          verseIcon.className = 'schedule-verse-icon';
+          verseIcon.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
+          const verseText = document.createElement('span');
+          verseText.className = 'schedule-verse-text';
+          verseText.textContent = 'Unknown';
+          verseItem.appendChild(verseIcon);
+          verseItem.appendChild(verseText);
         }
         
         verseItem.onclick = (e) => {
@@ -2637,7 +3409,18 @@ async function saveDividerPositions() {
 
 async function restoreDividerPositions() {
   const settings = await ipcRenderer.invoke('load-settings') || {};
-  if (!settings.dividerPositions) return;
+  // Ensure defaults exist on fresh installs and persist them so restore sees explicit values
+  if (!settings.dividerPositions) {
+    settings.dividerPositions = {
+      scheduleWidthPx: 250,
+      previewPercent: 50,
+      verseHeightPx: 350,
+      scheduleWidth: '250px',
+      previewFlex: '0 0 50%',
+      verseHeight: '0 0 350px'
+    };
+    try { await ipcRenderer.invoke('update-settings', { dividerPositions: settings.dividerPositions }); } catch (e) { console.warn('Failed to persist default divider positions:', e); }
+  }
   
   const scheduleSidebar = document.getElementById('schedule-sidebar');
   const slidePreview = document.getElementById('slide-preview');
@@ -2664,7 +3447,7 @@ async function restoreDividerPositions() {
     const m = settings.dividerPositions.verseHeight.match(/(\d+)px/);
     if (m) verseHeightPx = parseInt(m[1], 10);
   }
-  if (!verseHeightPx) verseHeightPx = 200;
+  if (!verseHeightPx) verseHeightPx = 350; // default moved up to give more top area on clean installs
 
   // Validate and clamp to safe ranges based on current window size
   scheduleWidthPx = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
@@ -2813,8 +3596,11 @@ function renderSongList(songs) {
     // Highlight matched text if there's a search query
     if (currentSearchQuery) {
       songItem.innerHTML = highlightText(song.title, currentSearchQuery);
+      // Also set title attribute so full text is visible on hover
+      songItem.title = song.title;
     } else {
       songItem.textContent = song.title;
+      songItem.title = song.title;
     }
     
     songItem.setAttribute('data-index', actualIndex);
@@ -2951,8 +3737,8 @@ function displaySelectedSong() {
       verses.forEach((verse, verseIndex) => {
         const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
         const isSelected = selectedSongVerseIndex === globalVerseIndex;
-        const verseText = currentSearchQuery ? highlightText(verse, currentSearchQuery) : verse;
-        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseText}</p>`;
+        const verseHtml = (currentSearchQuery && currentSearchQuery.trim()) ? renderSongVerse(verse, currentSearchQuery) : parseMarkdown(verse);
+        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseHtml}</p>`;
       });
     });
   }
@@ -3028,12 +3814,14 @@ async function updatePreviewFromSongVerse(verseIndex) {
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getCanvasStylesFor('song');
     renderToCanvas(previewCanvas, {
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
       showHint: null,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     }, width, height);
   }
 }
@@ -3052,6 +3840,7 @@ async function updateLiveFromSongVerse(verseIndex) {
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getCanvasStylesFor('song');
     window.currentContent = {
       number: '',
       text: verseData.text,
@@ -3059,7 +3848,8 @@ async function updateLiveFromSongVerse(verseIndex) {
       showHint: null,
       width: width,
       height: height,
-      backgroundMedia: backgroundMedia
+      backgroundMedia: backgroundMedia,
+      styles
     };
     renderToCanvas(liveCanvas, window.currentContent, width, height);
   }
@@ -3072,6 +3862,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     showingCount: 1,
     totalSelected: 1,
     backgroundMedia: backgroundMedia,
+    styles: getCanvasStylesFor('song'),
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
@@ -3173,12 +3964,29 @@ function showSongContextMenu(x, y) {
   const menu = document.getElementById('song-context-menu');
   if (!menu) return;
   
-  // Show/hide edit option based on selection
   const editOption = document.getElementById('song-context-edit');
-  if (editOption) {
-    editOption.style.display = selectedSongIndices.length === 1 ? 'block' : 'none';
+  const deleteOption = document.getElementById('song-context-delete');
+  const exportOption = document.getElementById('song-context-export');
+  const importOption = document.getElementById('song-context-import');
+
+  // Configure options based on selection
+  if (selectedSongIndices.length === 0) {
+    if (editOption) editOption.style.display = 'none';
+    if (deleteOption) deleteOption.style.display = 'none';
+    if (exportOption) exportOption.style.display = 'none';
+  } else if (selectedSongIndices.length === 1) {
+    if (editOption) editOption.style.display = 'block';
+    if (deleteOption) deleteOption.style.display = 'block';
+    if (exportOption) exportOption.style.display = 'block';
+  } else {
+    if (editOption) editOption.style.display = 'none';
+    if (deleteOption) deleteOption.style.display = 'block';
+    if (exportOption) exportOption.style.display = 'block';
   }
-  
+
+  // Import should always be visible
+  if (importOption) importOption.style.display = 'block';
+
   // Position menu initially to measure its size
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -3209,6 +4017,12 @@ function showSongContextMenu(x, y) {
   setTimeout(() => document.addEventListener('click', closeMenu), 0);
 }
 
+// Generic helper: close a context menu by id
+function closeContextMenu(id) {
+  const m = document.getElementById(id);
+  if (m) m.style.display = 'none';
+}
+
 function initSongContextMenu() {
   const editBtn = document.getElementById('song-context-edit');
   const deleteBtn = document.getElementById('song-context-delete');
@@ -3217,6 +4031,7 @@ function initSongContextMenu() {
   
   if (editBtn) {
     editBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       if (selectedSongIndices.length === 1) {
         editSong(selectedSongIndices[0]);
       }
@@ -3225,19 +4040,49 @@ function initSongContextMenu() {
   
   if (deleteBtn) {
     deleteBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       deleteSongs(selectedSongIndices);
     });
   }
   
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       exportSongs(selectedSongIndices);
     });
   }
   
   if (importBtn) {
     importBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
       importSongs();
+    });
+  }
+
+  // Allow right-click anywhere in the song list to open the context menu (useful when there are no songs)
+  const songListEl = document.getElementById('song-list');
+  if (songListEl) {
+    songListEl.addEventListener('contextmenu', (e) => {
+      // If user right-clicked on a specific song item, let that handler run instead
+      if (e.target.closest('[data-index]')) return;
+      e.preventDefault();
+      // Don't change selection; show menu with import enabled
+      showSongContextMenu(e.clientX, e.clientY);
+    });
+
+    // Ctrl/Cmd + A when the song list is focused should select all displayed songs
+    songListEl.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const dataset = (filteredSongs && filteredSongs.length > 0) ? filteredSongs : allSongs;
+        if (!dataset || dataset.length === 0) return;
+        // Map the displayed songs back to their indices in allSongs
+        const indices = dataset.map(s => allSongs.findIndex(x => x.title === s.title && x.author === s.author)).filter(i => i >= 0);
+        if (indices.length === 0) return;
+        selectedSongIndices = indices;
+        renderSongList(dataset);
+        displaySelectedSong();
+      }
     });
   }
 }
@@ -3262,7 +4107,8 @@ function editSong(songIndex) {
     // Convert song lyrics back to plain text with [Section] tags
     const lyricsText = song.lyrics.map(section => `[${section.section}]\n${section.text}`).join('\n\n');
     lyricsDiv.textContent = lyricsText;
-    updateInlineSongFormatting();
+    const previewEl = document.getElementById('song-editor-preview');
+    if (previewEl) previewEl.style.display = 'none';
     
     titleInput.focus();
   }
@@ -3455,17 +4301,19 @@ function parseSongText(title, lyricsText) {
   sectionTexts.forEach((text) => {
     let sectionLabel = '';
     let sectionContent = text.trim();
-    
-    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
-    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
-    if (tagMatch) {
-      sectionLabel = tagMatch[1].trim();
-      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+
+    // Only treat a top-line that is exactly a tag as a section label
+    const lines = sectionContent.split('\n');
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    if (tagLineMatch) {
+      sectionLabel = tagLineMatch[1].trim();
+      lines.shift();
+      sectionContent = lines.join('\n').trim();
     } else {
-      // Default to "Verse" if no tag
       sectionLabel = 'Verse';
     }
-    
+
     sections.push({
       section: sectionLabel,
       text: sectionContent
@@ -3503,7 +4351,72 @@ function initSongEditor() {
   if (saveBtn) {
     saveBtn.addEventListener('click', saveSongFromEditor);
   }
-  
+
+  // Preview toggle button (added dynamically if not present)
+  let previewToggle = document.getElementById('song-editor-preview-toggle');
+  if (!previewToggle) {
+    previewToggle = document.createElement('button');
+    previewToggle.id = 'song-editor-preview-toggle';
+    previewToggle.textContent = 'Show Preview';
+    previewToggle.style.padding = '8px 12px';
+    previewToggle.style.cursor = 'pointer';
+    previewToggle.style.marginRight = '8px';
+    const footer = document.querySelector('.song-editor-footer');
+    if (footer) footer.insertBefore(previewToggle, footer.firstChild);
+  }
+
+  previewToggle.addEventListener('click', () => {
+    const previewEl = document.getElementById('song-editor-preview');
+    if (!previewEl) return;
+    if (previewEl.style.display === 'none' || previewEl.style.display === '') {
+      updateSongPreview();
+      previewEl.style.display = 'block';
+      previewToggle.textContent = 'Hide Preview';
+    } else {
+      previewEl.style.display = 'none';
+      previewToggle.textContent = 'Show Preview';
+    }
+  });
+
+  // Edit Styles button (opens popover for editing song styles)
+  let editStylesBtn = document.getElementById('song-editor-edit-styles');
+  if (!editStylesBtn) {
+    editStylesBtn = document.createElement('button');
+    editStylesBtn.id = 'song-editor-edit-styles';
+    editStylesBtn.textContent = 'Edit Styles';
+    editStylesBtn.style.padding = '8px 12px';
+    editStylesBtn.style.cursor = 'pointer';
+    editStylesBtn.style.marginRight = '8px';
+    const footer = document.querySelector('.song-editor-footer');
+    if (footer) footer.insertBefore(editStylesBtn, footer.firstChild);
+  }
+
+  editStylesBtn.addEventListener('click', () => {
+    // Simple menu to choose which song style to edit
+    const menu = document.createElement('div');
+    menu.style.position = 'absolute';
+    menu.style.bottom = '60px';
+    menu.style.left = '20px';
+    menu.style.background = 'white';
+    menu.style.border = '1px solid #ccc';
+    menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    menu.style.zIndex = 3000;
+    menu.style.padding = '8px';
+    menu.innerHTML = `<div style="padding:6px; cursor:pointer;">Edit Song Title Style</div>
+                      <div style="padding:6px; cursor:pointer;">Edit Song Text Style</div>
+                      <div style="padding:6px; cursor:pointer;">Edit Song Reference Style</div>`;
+    document.body.appendChild(menu);
+
+    const removeMenu = () => { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); };
+
+    menu.children[0].addEventListener('click', () => { removeMenu(); showPopover('Song Title', 'songTitle'); });
+    menu.children[1].addEventListener('click', () => { removeMenu(); showPopover('Song Text', 'songText'); });
+    menu.children[2].addEventListener('click', () => { removeMenu(); showPopover('Song Reference', 'songReference'); });
+
+    // Close the menu on any click outside
+    setTimeout(() => document.addEventListener('click', removeMenu, { once: true }), 0);
+  });
+
   // Close on backdrop click
   if (modal) {
     modal.addEventListener('click', (e) => {
@@ -3529,6 +4442,8 @@ function openSongEditor() {
     if (authorInput) authorInput.value = '';
     if (lyricsInput) {
       lyricsInput.textContent = '';
+      const previewEl = document.getElementById('song-editor-preview');
+      if (previewEl) previewEl.style.display = 'none';
       lyricsInput.focus();
     }
     if (titleInput) titleInput.focus();
@@ -3542,12 +4457,71 @@ function closeSongEditor() {
   }
 }
 
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function parseMarkdown(text) {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(.+?)__/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/_(.+?)_/g, '<em>$1</em>');
+  // simple, safe Markdown for bold and italics
+  let t = escapeHtml(text);
+  // Bold: **text** or __text__
+  t = t.replace(/(\*\*|__)([\s\S]+?)\1/g, '<strong>$2</strong>');
+  // Italic: *text* or _text_
+  t = t.replace(/(\*|_)([\s\S]+?)\1/g, '<em>$2</em>');
+  // Preserve single line breaks as <br>
+  t = t.replace(/\n/g, '<br>');
+  return t;
+}
+
+// Render lyrics plain text into HTML for the contenteditable editor
+function renderLyricsHtml(text) {
+  const sections = text.split(/\n\n+/).filter(s => s.trim() !== '');
+  const parts = sections.map(section => {
+    const lines = section.split('\n');
+    // detect tag only if the first line is exactly a tag on its own line
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    let html = '';
+    if (tagMatch) {
+      const label = escapeHtml(tagMatch[1].trim());
+      html += `<div class="song-tag">[${label}]</div>`;
+      lines.shift(); // remove tag line
+    }
+    const content = lines.join('\n').trim();
+    if (content) {
+      html += `<div class="song-section">${parseMarkdown(content)}</div>`;
+    }
+    return html;
+  });
+  return parts.join('<div class="song-section-sep"></div>');
+}
+
+function updateInlineSongFormatting() {
+  // Deprecated: inline replacement caused editing issues. Use updateSongPreview() to render a preview instead.
+}
+
+function updateSongPreview() {
+  const lyricsDiv = document.getElementById('song-editor-lyrics');
+  const previewEl = document.getElementById('song-editor-preview');
+  if (!lyricsDiv || !previewEl) return;
+  const text = lyricsDiv.innerText || lyricsDiv.textContent || '';
+  previewEl.innerHTML = renderLyricsHtml(text);
+}
+// Render a single verse with optional search highlighting
+function renderSongVerse(verseText, query) {
+  if (!query || !query.trim()) return parseMarkdown(verseText);
+  const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${q})`, 'gi');
+  // Use safe markers that won't be interpreted by HTML escaping
+  const START = '___HIGHLIGHT_START___';
+  const END = '___HIGHLIGHT_END___';
+  const marked = verseText.replace(regex, `${START}$1${END}`);
+  // Parse markdown which will escape HTML and convert markdown
+  let html = parseMarkdown(marked);
+  // Now replace markers with actual span tags (escaped content inside is safe)
+  html = html.replace(new RegExp(START, 'g'), '<span class="search-highlight">');
+  html = html.replace(new RegExp(END, 'g'), '</span>');
+  return html;
 }
 
 async function saveSongFromEditor() {
@@ -3580,16 +4554,18 @@ async function saveSongFromEditor() {
     let sectionLabel = '';
     let sectionContent = text.trim();
     
-    // Check for tag at start of section: [Tag], {Tag}, or (Tag)
-    const tagMatch = sectionContent.match(/^[\[\{\(](.+?)[\]\}\)]\s*\n?/);
-    if (tagMatch) {
-      sectionLabel = tagMatch[1].trim();
-      sectionContent = sectionContent.substring(tagMatch[0].length).trim();
+    // Only treat a top-line that is exactly a tag as a section label
+    const lines = sectionContent.split('\n');
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    if (tagLineMatch) {
+      sectionLabel = tagLineMatch[1].trim();
+      lines.shift();
+      sectionContent = lines.join('\n').trim();
     } else {
-      // Default to "Verse" if no tag
       sectionLabel = 'Verse';
     }
-    
+
     sections.push({
       section: sectionLabel,
       text: sectionContent
