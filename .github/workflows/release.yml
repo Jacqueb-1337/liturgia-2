@@ -125,7 +125,7 @@ jobs:
                 echo "Failed to upload $file after 5 attempts. Marking for retry later."
                 failures+=("$file")
               fi
-            done < <(find dist -type f -print0)
+            done < <(find dist -type f \( -iname '*.AppImage' -o -iname '*.deb' -o -iname '*.rpm' -o -iname '*.snap' -o -iname '*.dmg' -o -iname '*.dmg.blockmap' -o -iname '*.exe' -o -iname '*.zip' -o -iname '*.msi' -o -iname '*.pkg' -o -iname '*.blockmap' -o -iname 'latest*.yml' -o -iname 'liturgia.*' \) -print0)
 
             if [ ${#failures[@]} -ne 0 ]; then
               echo "\nThe following files failed to upload:\n"
