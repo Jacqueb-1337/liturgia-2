@@ -656,21 +656,6 @@ async function createWindow() {
       contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
     }
   };
-<<<<<<< HEAD
-=======
-
-  mainWindow = new BrowserWindow(opts);
-
-  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
-  try {
-    let settings = {};
-    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
-    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
-  } catch (e) { console.warn('Default dark theme check failed', e); }
-
-  if (winState.maximized) mainWindow.maximize();
-  if (winState.fullscreen) mainWindow.setFullScreen(true);
->>>>>>> origin/main
 
   // Create the main window instance
   mainWindow = new BrowserWindow(opts);
@@ -764,11 +749,7 @@ async function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
-<<<<<<< HEAD
               icon: getIconPath(),
-=======
-              icon: iconPath,
->>>>>>> origin/main
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -879,7 +860,6 @@ app.whenReady().then(async () => {
     if (settings.autoCheckUpdates) {
       const res = await checkForUpdates();
       if (res && res.updateAvailable && mainWindow) {
-<<<<<<< HEAD
         // Send update info to renderer. If the renderer isn't ready yet (still loading), store
         // the update info and deliver it when the window finishes loading so the user sees the
         // in-app modal on startup reliably.
@@ -892,11 +872,7 @@ app.whenReady().then(async () => {
         } else {
           try { mainWindow.webContents.send('update-available', res); } catch(e) {}
         }
-=======
-        // Send update info to renderer only; renderer handles UI and download flow.
-        mainWindow.webContents.send('update-available', res);
-        // No native dialog here — keep update UX consistent inside the app.
->>>>>>> origin/main
+
       }
     }
   } catch (e) { console.warn('Startup update check failed', e); }
@@ -1179,11 +1155,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
-<<<<<<< HEAD
       icon: getIconPath(),
-=======
-      icon: iconPath,
->>>>>>> origin/main
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
