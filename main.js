@@ -945,9 +945,7 @@ ipcMain.handle('get-pending-update', async () => {
 });
 
 // In-memory map of active downloads
-// Use a global storage to avoid "Identifier 'downloads' has already been declared" if the file
-// ends up loaded more than once (packaged apps or accidental duplication).
-global.downloads = global.downloads || {};
+const downloads = global.downloads = global.downloads || {};
 
 // Download an update asset (renderer requests with a browser_download_url)
 ipcMain.handle('download-update', async (event, { url }) => {
@@ -1007,6 +1005,7 @@ ipcMain.handle('run-installer', async (event, file) => {
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
 });
+
 
 
 async function loadAllVersesFromDiskMain(baseDir) {
