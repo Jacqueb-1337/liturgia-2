@@ -131,27 +131,36 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
           REPO="${{ github.repository }}"
           echo "Uploading to release $TAG in $REPO"
+
           if [ -d dist ]; then
+            echo "--- dist contents (pre-upload diagnostics) ---"
+            ls -la dist || true
+            echo "--- top-level files ---"
+            find dist -maxdepth 1 -type f -print || true
+
+            # Make globbing safe: don't treat literal patterns when no matches
+            shopt -s nullglob
+
             failures=()
             files_to_upload=()
 
             # collect only top-level installer artifacts and metadata (avoid nested runtime files)
-            for pattern in "dist/*.AppImage" "dist/*.deb" "dist/*.dmg" "dist/*.dmg.blockmap" "dist/*.exe" "dist/*.zip" "dist/*.msi" "dist/*.pkg" "dist/*.blockmap" "dist/liturgia.*"; do
-              for f in $pattern; do
-                if [ -f "$f" ]; then
-                  # Explicitly skip YML files as requested
-                  case "$f" in
-                    *.yml) echo "Skipping YAML metadata file: $f" ; continue ;;
-                  esac
-                  files_to_upload+=("$f")
-                fi
-              done
+            for f in dist/*.AppImage dist/*.deb dist/*.dmg dist/*.dmg.blockmap dist/*.exe dist/*.zip dist/*.msi dist/*.pkg dist/*.blockmap dist/liturgia.*; do
+              if [ -f "$f" ]; then
+                # Explicitly skip YML files as requested
+                case "$f" in
+                  *.yml) echo "Skipping YAML metadata file: $f" ; continue ;;
+                esac
+                files_to_upload+=("$f")
+              fi
             done
+
+            echo "files_to_upload_count=${#files_to_upload[@]}"
 
             if [ ${#files_to_upload[@]} -eq 0 ]; then
               echo "No installer artifacts found in top-level dist/; nothing to upload"
             else
-              echo "Found ${#files_to_upload[@]} files to upload"
+              echo "Found ${#files_to_upload[@]} files to upload: ${files_to_upload[*]}"
               for file in "${files_to_upload[@]}"; do
                 echo "\nUploading $file ..."
                 attempt=1
@@ -182,7 +191,7 @@ jobs:
           fi
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}]}]
 
   finalize:
     name: Finalize
