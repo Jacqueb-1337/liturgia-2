@@ -1,11 +1,15 @@
 {
   "name": "liturgia",
-  "version": "2.3.0",
+  "version": "2.3.5",
+  "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "prebuild": "node scripts/clean-old-exe.js",
     "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --mac || true && electron-builder --linux || true && electron-builder --win || true",
     "make-icon": "node scripts/make-icon.js",
     "rebuild-native": "npx electron-rebuild -f -w keytar --module-dir .",
     "test": "jest --runInBand"
@@ -16,10 +20,20 @@
   "build": {
     "appId": "com.jacqueb.liturgia",
     "productName": "Liturgia",
-    "icon": "build/icon.ico",
+    "icon": "build/icon",
+    "artifactName": "liturgia.${ext}",
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "build/icon.png",
+      "category": "AudioVideo"
     },
     "nsis": {
       "oneClick": false,
@@ -31,16 +45,24 @@
       "runAfterFinish": false,
       "include": "build/installer.nsh"
     },
+    "files": [
+      "dist/**/*",
+      "build/**/*",
+      "**/*",
+      "!node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/test",
+      "!**/*.map"
+    ],
     "asarUnpack": [
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
     "extraResources": [
+      { "from": "build/extraResources", "to": "resources" },
       {
         "from": "node_modules/sql.js/dist/sql-wasm.wasm",
         "to": "sql-wasm.wasm"
       }
-    ],
-    "artifactName": "liturgia.exe"
+    ]
   },
   "devDependencies": {
     "electron": "^25.9.8",

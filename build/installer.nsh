@@ -2,6 +2,7 @@
 !include "LogicLib.nsh"
 
 Var AUTOCHECK
+Var AUTOCHECK_CTRL
 
 Function CreateAutoUpdatePage
   ; Default to enabled
@@ -18,17 +19,17 @@ Function CreateAutoUpdatePage
 
   ; Checkbox
   ${NSD_CreateCheckBox} 10u 30u 100% 12u "Check for updates on startup"
-  Pop $2
-  ${NSD_Check} $2
+  Pop $AUTOCHECK_CTRL
+  ${NSD_Check} $AUTOCHECK_CTRL
 
-  ; Set initial value from registry if present
+  ; Set initial value from registry if present (preserve explicit user choice on upgrades)
   ClearErrors
   ReadRegStr $R0 HKCU "Software\Liturgia" "AutoCheckForUpdates"
   ${If} ${Errors}
     ; nothing
   ${Else}
     ${If} $R0 == 0
-      ${NSD_UnCheck} $2
+      ${NSD_UnCheck} $AUTOCHECK_CTRL
       StrCpy $AUTOCHECK 0
     ${EndIf}
   ${EndIf}
@@ -40,7 +41,7 @@ Page custom CreateAutoUpdatePage
 
 Function .onInstSuccess
   ; Write choice to registry so installer choice persists
-  ${NSD_GetState} $2 $R1
+  ${NSD_GetState} $AUTOCHECK_CTRL $R1
   ${If} $R1 == 1
     WriteRegStr HKCU "Software\Liturgia" "AutoCheckForUpdates" "1"
   ${Else}

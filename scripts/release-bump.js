@@ -63,6 +63,15 @@ async function prompt(q){
     execSync(`git tag -a v${newVer} -m "Release v${newVer}"`, { stdio: 'inherit' });
     execSync(`git push origin v${newVer}`, { stdio: 'inherit' });
 
+<<<<<<< HEAD
+    // Ensure icon exists (so Windows taskbar and installer use it)
+    try {
+      console.log('Generating icon...');
+      execSync('npm run make-icon', { stdio: 'inherit' });
+    } catch (e) { console.warn('make-icon failed or not available:', e.message || e); }
+
+=======
+>>>>>>> origin/main
     // Build
     execSync('npm run build', { stdio: 'inherit' });
 

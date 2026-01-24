@@ -111,7 +111,11 @@
 
 5. **Commit Policy (CRITICAL)**
    - **Never** add, stage, commit, or push any files to the repository unless explicitly instructed by the repository owner. Only make local edits and propose changes if you do not have explicit approval to commit.
+<<<<<<< HEAD
+  - **Policy update:** Going forward, do **not** commit or push changes. Use the local `scripts/release-bump.js` helper (or explicit, user-approved commits) to perform version bumps, tagging, and releases — do not create commits/tags/pushes yourself unless explicitly instructed.
+=======
    - Do **not** stage or commit files from the `/liturgia/` directory; treat that folder as local-only and containing sensitive data. Keep it listed in `.gitignore` and never override it without permission.
+>>>>>>> origin/main
    - When you need to propose changes to the site or other sensitive files, create a patch/diff and request explicit approval before committing or pushing.
   - NOTE: In all conversations and instructions, when the user references the "site" or asks for changes to the site, treat that as referring specifically to the files in the `./liturgia/` directory (the web site and server-side PHP files).
 

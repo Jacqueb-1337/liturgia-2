@@ -542,6 +542,16 @@ body.dark-theme .media-item div[style*="color: #666"] {
   color: #999 !important;
 }
 
+/* Media thumbnail helpers */
+.media-thumb { position: relative; }
+.media-thumb .fa-badge { position: absolute; width: 18px; height: 18px; padding: 2px; border-radius: 50%; display: inline-flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.55); }
+.media-thumb .fa-badge svg { width: 14px; height: 14px; fill: #fff; }
+.media-thumb .fa-bottom-right { right: 6px; bottom: 6px; }
+.media-thumb .fa-bottom-left { left: 6px; bottom: 6px; }
+
+/* Smaller badge on color/media create tile */
+.media-item.media-create-color .fa-badge { width: 20px; height: 20px; }
+
 /* Media Context Menu */
 #media-context-menu {
   display: none;

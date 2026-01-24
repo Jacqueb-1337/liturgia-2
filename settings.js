@@ -66,7 +66,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Populate account/subscription info
   try {
-    const license = await ipcRenderer.invoke('get-current-license-status');
+    let license = await ipcRenderer.invoke('get-current-license-status');
+    // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+    try {
+      const token = await ipcRenderer.invoke('secure-get-token');
+      if (!token) license = null;
+    } catch (e) { /* ignore secure errors */ }
+
     const ai = document.getElementById('account-info');
     const si = document.getElementById('subscription-info');
     const signInBtn = document.getElementById('btn-sign-in');
@@ -122,7 +128,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (e) {
     console.error('Failed to load license status for settings:', e);
   }
-
   await loadDisplays();
 
   // Manual check for updates button

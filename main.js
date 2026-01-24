@@ -1,6 +1,20 @@
 // main.js
 
 const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } = require('electron');
+
+// Instrument dialog.showMessageBox during development to find stray native dialogs
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const _origShow = dialog.showMessageBox;
+    dialog.showMessageBox = async function(windowOrOptions, options) {
+      // Normalize parameters
+      const stack = new Error().stack;
+      console.warn('dialog.showMessageBox called. Stack trace:\n', stack);
+      // Forward call
+      return await _origShow.apply(dialog, arguments);
+    };
+  } catch (e) { console.warn('Failed to instrument dialog.showMessageBox', e); }
+}
 const os = require('os');
 
 // Main process in-memory log buffer
@@ -19,8 +33,20 @@ console.warn = function(...args) { _pushMainLog('warn', args); _origConsoleWarn.
 console.error = function(...args) { _pushMainLog('error', args); _origConsoleError.apply(console, args); };
 const path = require('path');
 const fs = require('fs');
+
+// Helper to determine the best icon path for windows/taskbar (works in dev and packaged)
+function getIconPath() {
+  try {
+    const devIco = path.join(__dirname, 'build', 'icon.ico');
+    if (fs.existsSync(devIco)) return devIco;
+    const { getIconPath } = require('./lib/paths');
+    return getIconPath(app);
+  } catch (e) { return path.join(__dirname, 'logo.png'); }
+}
 let SqlJsInit = null;
 let SQL = null;
+let pendingUpdate = null;
+let lastUpdateCheck = null;
 async function ensureSqlJs() {
   if (SQL) return SQL;
   if (SqlJsInit === null) {
@@ -103,6 +129,7 @@ let splashWindow = null;
 let splashClosed = false;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
+
 
 // --- EasyWorship Import Helpers ---
 function stripRtf(rtf) {
@@ -239,7 +266,8 @@ async function importEasyWorshipHandler() {
   }
 
   // Merge into songs.json in userData
-  const songsPath = path.join(app.getPath('userData'), 'songs.json');
+  const { getUserDataDir } = require('./lib/paths');
+  const songsPath = path.join(getUserDataDir(app), 'songs.json');
   let existing = [];
   try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
 
@@ -264,7 +292,8 @@ async function importEasyWorshipHandler() {
 // ---------------------------
 
 
-const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+const { getUserDataDir } = require('./lib/paths');
+const settingsPath = path.join(getUserDataDir(app), 'settings.json');
 
 // Atomic settings write with backup. Writes to a tmp file then renames to avoid truncation and
 // copies the previous non-empty file to settings.json.bak so we can recover if something goes wrong.
@@ -465,11 +494,12 @@ async function startSaveReport() {
   }
 
   // Read files and settings
+  const { resolveProjectPath } = require('./lib/paths');
   let indexHtml = '';
   let liveHtml = '';
   let settingsFile = '';
-  try { indexHtml = await fs.promises.readFile(path.join(__dirname, 'index.html'), 'utf8'); } catch (e) {}
-  try { liveHtml = await fs.promises.readFile(path.join(__dirname, 'live.html'), 'utf8'); } catch (e) {}
+  try { indexHtml = await fs.promises.readFile(resolveProjectPath('index.html'), 'utf8'); } catch (e) {}
+  try { liveHtml = await fs.promises.readFile(resolveProjectPath('live.html'), 'utf8'); } catch (e) {}
   try { settingsFile = await fs.promises.readFile(settingsPath, 'utf8'); } catch (e) {}
 
   // Collect system info
@@ -534,9 +564,10 @@ async function startSaveReport() {
   const reportContent = parts.join('\n\n');
 
   // Ask user where to save
+  const { getDesktopPath } = require('./lib/paths');
   const { filePath, canceled } = await dialog.showSaveDialog({
     title: 'Save diagnostic report',
-    defaultPath: path.join(app.getPath('desktop'), defaultName),
+    defaultPath: path.join(getDesktopPath(app), defaultName),
     filters: [{ name: 'Report', extensions: ['txt'] }]
   });
 
@@ -613,23 +644,20 @@ function loadWindowState() {
 async function createWindow() {
   // Restore previous window bounds/state when available
   const winState = loadWindowState();
-  // Pick appropriate icon for packaged vs dev
-  let iconPath = path.join(__dirname, 'logo.png');
-  try { if (app.isPackaged) iconPath = path.join(process.resourcesPath, 'build', 'icon.ico'); } catch(e){}
-
   const opts = {
     width: winState.width || 1000,
     height: winState.height || 700,
     x: typeof winState.x === 'number' ? winState.x : undefined,
     y: typeof winState.y === 'number' ? winState.y : undefined,
-    icon: iconPath,
+    icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
-      contextIsolation: false   // allow require() in renderer
+      contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
     }
   };
 
+  // Create the main window instance
   mainWindow = new BrowserWindow(opts);
 
   // Ensure fresh installs default to dark theme so UI is initialized in dark mode
@@ -721,7 +749,7 @@ async function createWindow() {
               height: 400,
               parent: mainWindow,
               modal: true,
-              icon: iconPath,
+              icon: getIconPath(),
               webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false
@@ -832,9 +860,19 @@ app.whenReady().then(async () => {
     if (settings.autoCheckUpdates) {
       const res = await checkForUpdates();
       if (res && res.updateAvailable && mainWindow) {
-        // Send update info to renderer only; renderer handles UI and download flow.
-        mainWindow.webContents.send('update-available', res);
-        // No native dialog here — keep update UX consistent inside the app.
+        // Send update info to renderer. If the renderer isn't ready yet (still loading), store
+        // the update info and deliver it when the window finishes loading so the user sees the
+        // in-app modal on startup reliably.
+        if (mainWindow.webContents && mainWindow.webContents.isLoading && mainWindow.webContents.isLoading()) {
+          pendingUpdate = res;
+          // Ensure we send it once the renderer finishes loading
+          mainWindow.webContents.once('did-finish-load', () => {
+            try { if (pendingUpdate && mainWindow && mainWindow.webContents) { mainWindow.webContents.send('update-available', pendingUpdate); pendingUpdate = null; } } catch(e) {}
+          });
+        } else {
+          try { mainWindow.webContents.send('update-available', res); } catch(e) {}
+        }
+
       }
     }
   } catch (e) { console.warn('Startup update check failed', e); }
@@ -850,7 +888,8 @@ app.on('activate', () => {
 
 // Expose userData path to renderer
 ipcMain.handle('get-user-data-path', () => {
-  return app.getPath('userData');
+  const { getUserDataDir } = require('./lib/paths');
+  return getUserDataDir(app);
 });
 
 // Semantic version compare: returns 1 if a>b, -1 if a<b, 0 if equal
@@ -871,9 +910,16 @@ function semverCompare(a, b) {
 // Check for updates against GitHub releases
 async function checkForUpdates() {
   try {
-    const fetch = require('node-fetch');
+    // Prefer global fetch (Node 18+). Fall back to node-fetch when available.
+    let fetchFn = (typeof fetch === 'function') ? fetch : null;
+    if (!fetchFn) {
+      try { fetchFn = require('node-fetch'); } catch (e) {
+        console.warn('checkForUpdates disabled: fetch not available', e);
+        return { ok:false, error: 'fetch not available' };
+      }
+    }
     const api = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases/latest';
-    const r = await fetch(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+    const r = await fetchFn(api, { headers: { 'User-Agent': 'Liturgia-Updater' } });
     if (!r.ok) return { ok:false, error: `GitHub API returned ${r.status}` };
     const j = await r.json();
     const latest = (j.tag_name || j.name || '').toString();
@@ -881,7 +927,10 @@ async function checkForUpdates() {
     const cmp = semverCompare(latest, current);
     const updateAvailable = (cmp === 1);
     const assets = (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size }));
-    return { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
+    const result = { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
+    // Also cache the last check result (useful if renderer requests it later before another check)
+    lastUpdateCheck = result;
+    return result;
   } catch (e) { console.warn('checkForUpdates error', e); return { ok:false, error: String(e) }; }
 }
 
@@ -890,14 +939,20 @@ ipcMain.handle('check-for-updates-manual', async () => {
   return await checkForUpdates();
 });
 
+// Renderer can ask for any pending update that was found before it was ready
+ipcMain.handle('get-pending-update', async () => {
+  return pendingUpdate || lastUpdateCheck || { ok:false };
+});
+
 // In-memory map of active downloads
-const downloads = {};
+const downloads = global.downloads = global.downloads || {};
 
 // Download an update asset (renderer requests with a browser_download_url)
 ipcMain.handle('download-update', async (event, { url }) => {
   try {
     const fetch = require('node-fetch');
-    const tmpDir = app.getPath('temp');
+    const { getTempPath } = require('./lib/paths');
+    const tmpDir = getTempPath(app);
     const name = path.basename((url || '').split('?')[0]) || `liturgia-update-${Date.now()}.exe`;
     const dest = path.join(tmpDir, name);
     const r = await fetch(url);
@@ -951,6 +1006,8 @@ ipcMain.handle('run-installer', async (event, file) => {
   } catch (e) { return { ok:false, error: String(e) }; }
 });
 
+
+
 async function loadAllVersesFromDiskMain(baseDir) {
   const allVerses = [];
   const readPromises = [];
@@ -989,7 +1046,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow.focus();
     return;
   }
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  const settingsPath = path.join(getUserDataDir(app), 'settings.json');
   let settings = {};
   try {
     const data = await fs.promises.readFile(settingsPath, 'utf8');
@@ -1002,7 +1059,7 @@ ipcMain.handle('create-live-window', async () => {
     liveWindow = new BrowserWindow({
       parent: null,
       title: 'Liturgia Live',
-      icon: iconPath,
+      icon: getIconPath(),
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
