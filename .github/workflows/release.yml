@@ -22,8 +22,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        # Prefer the checkout ref (e.g., when dispatched with --ref <branch>), otherwise fall back to provided tag
         with:
-          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          ref: ${{ startsWith(github.ref, 'refs/heads/') && github.ref || github.event.inputs.tag || github.event.release.tag_name }}
           fetch-depth: 0
 
       - name: Use Node.js 22
@@ -36,6 +37,28 @@ jobs:
 
       - name: Run unit tests
         run: npm test
+
+      - name: Sanity: no stale downloads declaration (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          if grep -R "const downloads = {}" -n .; then
+            echo "Found stale 'const downloads = {}' declaration in source — aborting."
+            exit 1
+          else
+            echo "No stale downloads declaration found."
+          fi
+        shell: bash
+
+      - name: Sanity: no stale downloads declaration (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (Select-String -Path "**\main.js" -Pattern "const downloads = \{}\" -SimpleMatch -Quiet) {
+            Write-Error "Found stale 'const downloads = {}' declaration in source — aborting."
+            exit 1
+          } else {
+            Write-Output "No stale downloads declaration found."
+          }
+        shell: pwsh
 
       - name: Fix icon (Linux/macOS)
         if: matrix.os != 'windows-latest'
