@@ -103,13 +103,38 @@ jobs:
           }
         shell: pwsh
 
-      - name: Upload built artifacts to release (clobber duplicates)
+      - name: Upload built artifacts to release (retry per file)
         run: |
           TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
-          echo "Uploading to release $TAG"
+          REPO="${{ github.repository }}"
+          echo "Uploading to release $TAG in $REPO"
           if [ -d dist ]; then
-            echo "Finding files under dist/..."
-            find dist -type f -print0 | xargs -0 -n50 gh release upload "$TAG" --clobber --repo "${{ github.repository }}"
+            failures=()
+            # iterate over files (null-separated) to avoid issues with spaces/newlines
+            while IFS= read -r -d '' file; do
+              echo "\nUploading $file ..."
+              attempt=1
+              success=0
+              while [ $attempt -le 5 ]; do
+                gh release upload "$TAG" "$file" --clobber --repo "$REPO" && success=1 && break || rc=$?
+                echo "Upload failed for $file (attempt $attempt), exit $rc. Retrying in $((2 ** (attempt - 1)))s..."
+                sleep $((2 ** (attempt - 1)))
+                attempt=$((attempt + 1))
+              done
+              if [ $success -ne 1 ]; then
+                echo "Failed to upload $file after 5 attempts. Marking for retry later."
+                failures+=("$file")
+              fi
+            done < <(find dist -type f -print0)
+
+            if [ ${#failures[@]} -ne 0 ]; then
+              echo "\nThe following files failed to upload:\n"
+              for f in "${failures[@]}"; do echo " - $f"; done
+              echo "\nYou can re-run this workflow (same tag) to retry uploading the failed files."
+              # Do not fail the job so we can iteratively re-run until all succeed
+            else
+              echo "\nAll files uploaded successfully."
+            fi
           else
             echo "dist directory not found; nothing to upload"
           fi
