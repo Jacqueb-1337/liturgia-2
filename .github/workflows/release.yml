@@ -66,11 +66,11 @@ jobs:
         run: |
           echo "Building on $RUNNER_OS"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            npx electron-builder --win --x64
+            npx electron-builder --win --x64 --publish=never
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            npx electron-builder --mac
+            npx electron-builder --mac --publish=never
           else
-            npx electron-builder --linux
+            npx electron-builder --linux --publish=never
           fi
         shell: bash
         env:
