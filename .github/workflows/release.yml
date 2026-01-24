@@ -50,6 +50,18 @@ jobs:
           }
         shell: pwsh
 
+      - name: Ensure icon >= 256px (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          node scripts/ensure-icon.js
+        shell: bash
+
+      - name: Ensure icon >= 256px (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          node scripts/ensure-icon.js
+        shell: pwsh
+
       - name: Build packages
         run: |
           echo "Building on $RUNNER_OS"
