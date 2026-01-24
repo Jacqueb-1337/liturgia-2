@@ -10,14 +10,14 @@ const secure = {
   async deleteToken() { try { return await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('secure delete token error', e); return false; } }
 };
 let fetch;
-try {
-  fetch = require('node-fetch');
-} catch (e) {
-  if (typeof window !== 'undefined' && window.fetch) {
-    fetch = window.fetch.bind(window);
-    console.warn('node-fetch not available, using window.fetch fallback');
-  } else {
-    throw e; // rethrow if no fallback available
+if (typeof window !== 'undefined' && window.fetch) {
+  fetch = window.fetch.bind(window);
+} else {
+  try {
+    fetch = require('node-fetch');
+  } catch (e) {
+    console.warn('node-fetch not available and no global fetch available');
+    fetch = null;
   }
 }
 const {
@@ -543,150 +543,6 @@ ipcRenderer.on('update-available', (event, res) => {
 // Allow other windows (Settings) to request the setup modal
 ipcRenderer.on('show-setup-modal', () => {
   try { createSetupModal(); } catch (e) { console.error('Failed to open setup modal from IPC', e); }
-});
-// Handle default-bible updates from main process
-ipcRenderer.on('default-bible-changed', async (event, bible) => {
-  const userData = await ipcRenderer.invoke('get-user-data-path');
-  const baseName = bible.endsWith('.json') ? bible.replace('.json','') : bible;
-  const biblePath = path.join(userData, BIBLE_STORAGE_DIR, baseName);
-  const localBibleFile = path.join(biblePath, 'bible.json');
-  const legacyFile = path.join(userData, BIBLE_STORAGE_DIR, bible);
-
-
-      note.querySelector('[data-action="open-release"]').onclick = () => { require('electron').shell.openExternal(info.html_url); };
-      const downloadBtn = note.querySelector('[data-action="download"]');
-      const inlineProgress = note.querySelector('.inline-progress');
-      const progressInner = note.querySelector('.progress-inner');
-      const progressText = note.querySelector('.inline-progress-text');
-      let currentFile = null;
-      let downloading = false;
-      downloadBtn.onclick = async () => {
-        if (downloading) return;
-        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
-        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
-        downloading = true;
-        inlineProgress.style.display = 'block';
-        downloadBtn.disabled = true;
-        try {
-          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
-          if (res && res.ok && res.file) {
-            currentFile = res.file;
-            progressInner.style.width = '100%';
-            progressText.textContent = 'Download complete';
-            downloadBtn.textContent = 'Run';
-            downloadBtn.disabled = false;
-            downloadBtn.onclick = async () => { await ipcRenderer.invoke('run-installer', currentFile); };
-          } else {
-            alert('Download failed: ' + (res && res.error));
-            downloadBtn.disabled = false;
-            downloading = false;
-          }
-        } catch (e) {
-          alert('Download failed: ' + e);
-          downloadBtn.disabled = false;
-          downloading = false;
-        }
-      };
-
-      ipcRenderer.on('update-download-progress', (ev, p) => {
-        if (p && p.file) {
-          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
-          progressInner.style.width = (percent || 0) + '%';
-          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
-        }
-      });
-
-      return note;
-    }
-
-    // If the setup/login modal is open, attach an inline update notice there instead of creating a new modal
-    const setupModal = document.getElementById('setup-modal');
-    if (setupModal) {
-      const card = setupModal.querySelector('.setup-card');
-      if (card) {
-        createInlineUpdateNotice(res, card);
-        return;
-      }
-    }
-
-    function createUpdateModal(info) {
-      if (document.getElementById('update-modal')) return;
-      const modal = document.createElement('div');
-      modal.id = 'update-modal';
-      modal.className = 'update-overlay';
-      const releaseNote = (info.body || '').split('\n')[0] || '';
-      modal.innerHTML = `
-        <div class="setup-card">
-          <h2>Update available: ${info.latest || ''}</h2>
-          <div style="margin:8px 0;color:var(--muted,#666);font-size:0.9em;">${releaseNote}</div>
-          <div style="margin-top:12px;display:flex;gap:8px;">
-            <button id="update-open-release" class="btn">Open Release Page</button>
-            <button id="update-download" class="btn primary">Download & Install</button>
-            <button id="update-dismiss" class="btn">Dismiss</button>
-          </div>
-          <div id="update-progress" style="margin-top:12px;display:none;">
-            <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
-            <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modal);
-      document.getElementById('update-open-release').onclick = () => { require('electron').shell.openExternal(info.html_url); };
-      document.getElementById('update-dismiss').onclick = () => { modal.remove(); };
-
-      const downloadBtn = document.getElementById('update-download');
-      const progressEl = document.getElementById('update-progress');
-      const progressBar = modal.querySelector('.progress-inner');
-      const progressText = document.getElementById('update-progress-text');
-      let currentFile = null;
-      let downloading = false;
-      downloadBtn.onclick = async () => {
-        if (downloading) return;
-        const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
-        if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
-        downloading = true;
-        progressEl.style.display = 'block';
-        downloadBtn.disabled = true;
-        try {
-          const res = await ipcRenderer.invoke('download-update', { url: asset.url });
-          if (res && res.ok && res.file) {
-            currentFile = res.file;
-            progressBar.style.width = '100%';
-            progressText.textContent = 'Download complete';
-            downloadBtn.textContent = 'Run Installer';
-            downloadBtn.disabled = false;
-            downloadBtn.onclick = async () => {
-              await ipcRenderer.invoke('run-installer', currentFile);
-            };
-          } else {
-            alert('Download failed: ' + (res && res.error));
-            downloadBtn.disabled = false;
-            downloading = false;
-          }
-        } catch (e) {
-          alert('Download failed: ' + e);
-          downloadBtn.disabled = false;
-          downloading = false;
-        }
-      };
-
-      ipcRenderer.on('update-download-progress', (ev, p) => {
-        if (p && p.file) {
-          const percent = p.percent || (p.total ? Math.round(p.downloaded / p.total * 100) : 0);
-          progressBar.style.width = (percent || 0) + '%';
-          progressText.textContent = (percent ? percent + '%' : `${Math.round((p.downloaded || 0) / 1024)} KB`);
-        }
-      });
-
-      document.getElementById('update-cancel').onclick = async () => {
-        if (currentFile) {
-          await ipcRenderer.invoke('cancel-update-download', { file: currentFile });
-        }
-        modal.remove();
-      };
-    }
-    createUpdateModal(res);
-  } catch (e) { console.warn('update-available handler error', e); }
 });
 
 // Allow other windows (Settings) to request the setup modal
@@ -4457,9 +4313,6 @@ function closeSongEditor() {
   }
 }
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 function parseMarkdown(text) {
   // simple, safe Markdown for bold and italics
