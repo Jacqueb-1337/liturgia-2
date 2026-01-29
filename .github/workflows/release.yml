@@ -145,11 +145,12 @@ jobs:
             files_to_upload=()
 
             # collect only top-level installer artifacts and metadata (avoid nested runtime files)
-            for f in dist/*.AppImage dist/*.deb dist/*.dmg dist/*.dmg.blockmap dist/*.exe dist/*.zip dist/*.msi dist/*.pkg dist/*.blockmap dist/liturgia.*; do
+            for f in dist/*.AppImage dist/*.deb dist/*.dmg dist/*.exe dist/*.zip dist/*.msi dist/*.pkg dist/liturgia.*; do
               if [ -f "$f" ]; then
                 # Explicitly skip YML files as requested
                 case "$f" in
                   *.yml) echo "Skipping YAML metadata file: $f" ; continue ;;
+                  *.blockmap) echo "Skipping blockmap file: $f" ; continue ;;
                 esac
                 files_to_upload+=("$f")
               fi
