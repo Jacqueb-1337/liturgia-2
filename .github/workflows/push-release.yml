@@ -1,0 +1,138 @@
+name: Push-triggered Release Build
+
+on:
+  push:
+    branches:
+      - manual-release-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and upload (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Ensure icon >= 256px (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          node scripts/ensure-icon.js
+        shell: bash
+
+      - name: Ensure icon >= 256px (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          node scripts/ensure-icon.js
+        shell: pwsh
+
+      - name: Build packages
+        run: |
+          echo "Building on $RUNNER_OS"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            npx electron-builder --win --x64 --publish=never
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            npx electron-builder --mac --publish=never
+          else
+            npx electron-builder --linux --publish=never
+          fi
+        shell: bash
+        env:
+          CI: true
+
+      - name: List dist (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          ls -la dist || true
+        shell: bash
+
+      - name: List dist (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          if (Test-Path 'dist') {
+            Get-ChildItem 'dist' -Force
+          } else {
+            Write-Output 'dist not found'
+          }
+        shell: pwsh
+
+      - name: Upload built artifacts to release (retry per file)
+        run: |
+          TAG="manual-trigger-$(date +%s)"
+          REPO="${{ github.repository }}"
+          echo "Uploading to release $TAG in $REPO"
+
+          if [ -d dist ]; then
+            echo "--- dist contents (pre-upload diagnostics) ---"
+            ls -la dist || true
+            echo "--- top-level files ---"
+            find dist -maxdepth 1 -type f -print || true
+
+            shopt -s nullglob
+
+            failures=()
+            files_to_upload=()
+
+            for f in dist/*.AppImage dist/*.deb dist/*.dmg dist/*.dmg.blockmap dist/*.exe dist/*.zip dist/*.msi dist/*.pkg dist/*.blockmap dist/liturgia.*; do
+              if [ -f "$f" ]; then
+                case "$f" in
+                  *.yml) echo "Skipping YAML metadata file: $f" ; continue ;;
+                esac
+                files_to_upload+=("$f")
+              fi
+            done
+
+            echo "files_to_upload_count=${#files_to_upload[@]}"
+
+            if [ ${#files_to_upload[@]} -eq 0 ]; then
+              echo "No installer artifacts found in top-level dist/; nothing to upload"
+            else
+              echo "Found ${#files_to_upload[@]} files to upload: ${files_to_upload[*]}"
+              for file in "${files_to_upload[@]}"; do
+                echo "\nUploading $file ..."
+                attempt=1
+                success=0
+                while [ $attempt -le 5 ]; do
+                  gh release create "$TAG" --notes "CI artifacts" --repo "$REPO" >/dev/null 2>&1 || true
+                  gh release upload "$TAG" "$file" --clobber --repo "$REPO" && success=1 && break || rc=$?
+                  echo "Upload failed for $file (attempt $attempt), exit $rc. Retrying in $((2 ** (attempt - 1)))s..."
+                  sleep $((2 ** (attempt - 1)))
+                  attempt=$((attempt + 1))
+                done
+                if [ $success -ne 1 ]; then
+                  echo "Failed to upload $file after 5 attempts. Marking for retry later."
+                  failures+=("$file")
+                fi
+              done
+
+              if [ ${#failures[@]} -ne 0 ]; then
+                echo "\nThe following files failed to upload:\n"
+                for f in "${failures[@]}"; do echo " - $f"; done
+              else
+                echo "\nAll files uploaded successfully."
+              fi
+            fi
+          else
+            echo "dist directory not found; nothing to upload"
+          fi
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
