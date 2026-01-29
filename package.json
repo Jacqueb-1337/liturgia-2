@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "2.3.6",
+  "version": "2.3.9",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "scripts": {
