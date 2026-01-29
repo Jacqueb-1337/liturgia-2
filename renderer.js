@@ -205,7 +205,25 @@ function setupPopover() {
       // Retry after a short delay to allow UI to render
       setTimeout(() => attachPopoverTriggers(retries - 1), 250);
     } else {
-      console.warn('attachPopoverTriggers: could not find trigger elements after retries');
+      console.warn('attachPopoverTriggers: could not find trigger elements after retries — falling back to MutationObserver');
+      // Fallback: observe DOM mutations and attach listeners when elements appear
+      try {
+        const observer = new MutationObserver((mutations, obs) => {
+          const vn2 = document.getElementById('verse-number');
+          const vt2 = document.getElementById('verse-text');
+          const vr2 = document.getElementById('verse-reference');
+          if (vn2 || vt2 || vr2) {
+            if (vn2) vn2.addEventListener('click', () => showPopover('Verse Number', 'verseNumber'));
+            if (vt2) vt2.addEventListener('click', () => showPopover('Verse Text', 'verseText'));
+            if (vr2) vr2.addEventListener('click', () => showPopover('Verse Reference', 'verseReference'));
+            _triggersAttached = true;
+            obs.disconnect();
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      } catch (obsErr) {
+        console.warn('attachPopoverTriggers: MutationObserver fallback failed', obsErr);
+      }
     }
   }
   // Attempt to attach immediately
@@ -2048,16 +2066,21 @@ async function createSetupModal() {
       const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}`
       });
+      if (!res.ok) {
+        throw new Error('Network error: ' + res.status + ' ' + res.statusText);
+      }
       const json = await res.json();
-      if (json.ok) {
+      if (json && json.ok) {
         // Persist chosen server so the app remembers it across restarts
         try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
         document.getElementById('setup-status').textContent = 'Magic link sent — check your email (and spam/junk folder) and paste the token via "Enter Token".';
       } else {
-        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json.error||'');
+        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json && json.error ? json.error : 'Unknown error');
       }
-    } catch (e) { console.error(e); document.getElementById('setup-status').textContent = 'Error sending magic link'; }
-    finally { btn.disabled = false; }
+    } catch (e) {
+      console.error('Magic link request failed', e);
+      document.getElementById('setup-status').textContent = 'Error sending magic link: ' + (e && e.message ? e.message : 'Network/blocked by policy');
+    } finally { btn.disabled = false; }
   };
 
   document.getElementById('btn-enter-token').onclick = async () => {
