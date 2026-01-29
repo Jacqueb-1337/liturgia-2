@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload built artifacts to release (retry per file)
         run: |
-          TAG="manual-trigger-$(date +%s)"
+          TAG="manual-trigger-${{ github.run_id }}"
           REPO="${{ github.repository }}"
           echo "Uploading to release $TAG in $REPO"
 
