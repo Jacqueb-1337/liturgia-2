@@ -191,7 +191,7 @@ jobs:
           fi
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}]}]
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize:
     name: Finalize
