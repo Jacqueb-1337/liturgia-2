@@ -99,6 +99,15 @@ jobs:
           node scripts/ensure-icon.js
         shell: pwsh
 
+      - name: Diagnostics: verify GH token and submodules
+        run: |
+          echo "--- diagnostic: env GH_TOKEN set? ---"
+          if [ -n "$GH_TOKEN" ]; then echo "GH_TOKEN is set (length=${#GH_TOKEN})"; else echo "GH_TOKEN is NOT set"; fi
+          echo "--- diagnostic: gh auth status ---"
+          gh auth status || true
+          echo "--- diagnostic: git submodule status ---"
+          git submodule status --recursive || true
+
       - name: Build packages
         run: |
           echo "Building on $RUNNER_OS"
