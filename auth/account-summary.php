@@ -6,9 +6,26 @@ header('Content-Type: application/json; charset=utf-8');
 // If a JWT is provided, decode payload (without verifying signature) and return best-effort account info.
 // If no recognizable token is provided, returns 401.
 
+function get_request_headers() {
+    // robust header extraction for multiple SAPIs
+    if (function_exists('getallheaders')) return getallheaders();
+    $headers = [];
+    foreach ($_SERVER as $k => $v) {
+        if (strpos($k, 'HTTP_') === 0) {
+            $name = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($k, 5)))));
+            $headers[$name] = $v;
+        }
+    }
+    // Accept CONTENT_TYPE and CONTENT_LENGTH too
+    if (isset($_SERVER['CONTENT_TYPE'])) $headers['Content-Type'] = $_SERVER['CONTENT_TYPE'];
+    if (isset($_SERVER['CONTENT_LENGTH'])) $headers['Content-Length'] = $_SERVER['CONTENT_LENGTH'];
+    return $headers;
+}
+
 function get_raw_token() {
     $hdr = null;
-    foreach (getallheaders() as $k => $v) {
+    $all = get_request_headers();
+    foreach ($all as $k => $v) {
         if (strtolower($k) === 'authorization') { $hdr = $v; break; }
     }
     if ($hdr) {
