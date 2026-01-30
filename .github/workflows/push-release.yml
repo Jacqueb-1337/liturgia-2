@@ -89,6 +89,7 @@ jobs:
       - name: Upload built artifacts to release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           # If manually dispatched, allow overriding tag input
@@ -121,6 +122,8 @@ jobs:
         shell: bash
 
       - name: Post-upload checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view ${GITHUB_REF#refs/tags/} --repo $REPO --json tagName,assets | jq '.assets | map({name: .name, size: .size})'
         shell: bash
