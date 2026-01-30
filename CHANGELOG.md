@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.13 - 2026-01-30
+
+- bump patch release
+
 ## 2.3.12 - 2026-01-29
 
 - fixed some errors i forgot about
