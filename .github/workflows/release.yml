@@ -128,8 +128,20 @@ jobs:
 
       - name: Upload built artifacts to release (retry per file)
         run: |
-          TAG="${{ github.event.inputs.tag || github.event.release.tag_name }}"
+          # Determine target tag: prefer explicit input or release event tag, otherwise resolve the latest release tag
+          TAG="${{ github.event.inputs.tag || github.event.release.tag_name || '' }}"
           REPO="${{ github.repository }}"
+
+          if [ -z "$TAG" ]; then
+            echo "No tag provided; resolving latest release tag via gh..."
+            TAG=$(gh release view --json tagName -q .tagName) || true
+            if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+              echo "Failed to determine latest release tag via gh; aborting upload step"
+              exit 1
+            fi
+            echo "Resolved latest release tag: $TAG"
+          fi
+
           echo "Uploading to release $TAG in $REPO"
 
           if [ -d dist ]; then
@@ -147,7 +159,7 @@ jobs:
             # collect only top-level installer artifacts and metadata (avoid nested runtime files)
             for f in dist/*.AppImage dist/*.deb dist/*.dmg dist/*.exe dist/*.zip dist/*.msi dist/*.pkg dist/liturgia.*; do
               if [ -f "$f" ]; then
-                # Explicitly skip YML files as requested
+                # Explicitly skip YML and blockmap files as requested
                 case "$f" in
                   *.yml) echo "Skipping YAML metadata file: $f" ; continue ;;
                   *.blockmap) echo "Skipping blockmap file: $f" ; continue ;;
@@ -192,7 +204,8 @@ jobs:
           fi
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}}]}]
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize:
     name: Finalize

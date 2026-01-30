@@ -3,9 +3,11 @@
   "version": "2.3.12",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
+  "description": "Liturgia — presentation software",
   "scripts": {
     "start": "electron .",
     "prebuild": "node scripts/clean-old-exe.js",
+    "postinstall": "electron-builder install-app-deps",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
@@ -73,12 +75,14 @@
   "devDependencies": {
     "electron": "^25.9.8",
     "electron-builder": "^26.4.0",
-    "electron-rebuild": "^3.2.5",
     "jimp": "^1.6.0",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5",
     "jest": "^29.6.1",
     "jest-environment-jsdom": "^30.2.0"
+  },
+  "optionalDependencies": {
+    "electron-rebuild": "^3.2.5"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
