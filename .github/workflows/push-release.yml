@@ -74,6 +74,7 @@ jobs:
         run: |
           echo "--- dist contents ---"
           ls -la dist || true
+        shell: bash
 
       - name: Compute checksums
         run: |
