@@ -76,8 +76,18 @@ jobs:
 
       - name: Upload built artifacts to release (retry per file)
         run: |
-          TAG="manual-trigger-${{ github.run_id }}"
           REPO="${{ github.repository }}"
+
+          # Prefer the latest published release tag; if none found, create a manual-trigger release
+          TAG=$(gh release view --json tagName -q .tagName) || true
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "No existing release found; will create a manual-trigger release"
+            TAG="manual-trigger-${{ github.run_id }}"
+            gh release create "$TAG" --notes "CI artifacts" --repo "$REPO" >/dev/null 2>&1 || true
+          else
+            echo "Resolved existing latest release tag: $TAG"
+          fi
+
           echo "Uploading to release $TAG in $REPO"
 
           if [ -d dist ]; then
@@ -112,7 +122,6 @@ jobs:
                 attempt=1
                 success=0
                 while [ $attempt -le 5 ]; do
-                  gh release create "$TAG" --notes "CI artifacts" --repo "$REPO" >/dev/null 2>&1 || true
                   gh release upload "$TAG" "$file" --clobber --repo "$REPO" && success=1 && break || rc=$?
                   echo "Upload failed for $file (attempt $attempt), exit $rc. Retrying in $((2 ** (attempt - 1)))s..."
                   sleep $((2 ** (attempt - 1)))
@@ -137,3 +146,4 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
