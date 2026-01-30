@@ -3,7 +3,7 @@ name: Push-triggered Release Build
 on:
   push:
     branches:
-      - manual-release-trigger
+      - main
 
 permissions:
   contents: write
