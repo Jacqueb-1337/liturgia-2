@@ -2210,6 +2210,8 @@ async function validateTokenAndActivate(token, serverUrl) {
 
     if (res.status === 200) {
       const j = await res.json();
+      // Mark as authoritative server response
+      try { j.source = j.source || 'server'; } catch(e) {}
       // Broadcast license status to main->live window
       ipcRenderer.send('license-status-update', j);
       // Accept token if the server accepted it (200), even if not currently active.
@@ -2231,6 +2233,7 @@ async function validateTokenAndActivate(token, serverUrl) {
                 const aj = await as.json().catch(()=>null);
                 if (aj && aj.ok && aj.status) {
                   const status = Object.assign({}, aj.status, { sessions: lj.tokens });
+                  try { status.source = status.source || 'server'; } catch(e) {}
                   ipcRenderer.send('license-status-update', status);
                   return { ok: true, active: !!aj.status.active, status };
                 }
@@ -2245,12 +2248,14 @@ async function validateTokenAndActivate(token, serverUrl) {
                 const pExp = payload.exp ? payload.exp : null;
                 const status = { email: pEmail || email, active: true, plan: 'token', sessions: lj.tokens };
                 if (pExp) status.expires_at = pExp;
+                try { status.source = 'jwt-fallback'; } catch(e) {}
                 ipcRenderer.send('license-status-update', status);
                 return { ok: true, active: true, status };
               }
             } catch (e) { /* ignore */ }
 
             const status = { email, active: true, plan: 'token', sessions: lj.tokens };
+            try { status.source = 'session-fallback'; } catch(e) {}
             ipcRenderer.send('license-status-update', status);
             return { ok: true, active: true, status };
           }
