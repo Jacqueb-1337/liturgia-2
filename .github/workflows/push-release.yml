@@ -15,6 +15,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +34,15 @@ jobs:
 
       - name: Run unit tests
         run: npm test
+
+      - name: Diagnostics: verify GH token and submodules
+        run: |
+          echo "--- diagnostic: env GH_TOKEN set? ---"
+          if [ -n "$GH_TOKEN" ]; then echo "GH_TOKEN is set (length=${#GH_TOKEN})"; else echo "GH_TOKEN is NOT set"; fi
+          echo "--- diagnostic: gh auth status ---"
+          gh auth status || true
+          echo "--- diagnostic: git submodule status ---"
+          git submodule status --recursive || true
 
       - name: Ensure icon >= 256px (Unix)
         if: matrix.os != 'windows-latest'
