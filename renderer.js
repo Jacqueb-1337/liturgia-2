@@ -2176,6 +2176,19 @@ async function createSetupModal() {
 
 function closeSetupModal() { const m = document.getElementById('setup-modal'); if (m) m.remove(); }
 
+// Helper: decode JWT payload without verification (UI-only)
+function decodeJwtPayload(token) {
+  try {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const json = atob(b64);
+    return JSON.parse(json);
+  } catch (e) { return null; }
+}
+
 async function validateTokenAndActivate(token, serverUrl) {
   try {
     const settings = await ipcRenderer.invoke('load-settings') || {};
@@ -2223,6 +2236,20 @@ async function validateTokenAndActivate(token, serverUrl) {
                 }
               }
             } catch(e) { /* ignore */ }
+
+            // If account-summary failed (500) or didn't return usable status, try to decode JWT payload locally as a fallback
+            try {
+              const payload = decodeJwtPayload(token);
+              if (payload) {
+                const pEmail = payload.email || payload.sub || '';
+                const pExp = payload.exp ? payload.exp : null;
+                const status = { email: pEmail || email, active: true, plan: 'token', sessions: lj.tokens };
+                if (pExp) status.expires_at = pExp;
+                ipcRenderer.send('license-status-update', status);
+                return { ok: true, active: true, status };
+              }
+            } catch (e) { /* ignore */ }
+
             const status = { email, active: true, plan: 'token', sessions: lj.tokens };
             ipcRenderer.send('license-status-update', status);
             return { ok: true, active: true, status };
