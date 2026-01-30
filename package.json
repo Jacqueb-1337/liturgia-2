@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "2.3.10",
+  "version": "2.3.11",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "scripts": {
@@ -31,7 +31,10 @@
       "icon": "build/icon.icns"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "build/icon.png",
       "category": "AudioVideo"
     },
@@ -57,7 +60,10 @@
       "node_modules/sql.js/dist/sql-wasm.wasm"
     ],
     "extraResources": [
-      { "from": "build/extraResources", "to": "resources" },
+      {
+        "from": "build/extraResources",
+        "to": "resources"
+      },
       {
         "from": "node_modules/sql.js/dist/sql-wasm.wasm",
         "to": "sql-wasm.wasm"
