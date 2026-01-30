@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.3.12 - 2026-01-29
+
+- fixed some errors i forgot about
+
 ## 2.2.3 - 2026-01-23
 
 - test version
