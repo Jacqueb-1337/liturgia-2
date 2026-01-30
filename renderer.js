@@ -2066,16 +2066,19 @@ async function createSetupModal() {
       const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}`
       });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch (err) { json = null; }
       if (!res.ok) {
-        throw new Error('Network error: ' + res.status + ' ' + res.statusText);
+        const errMsg = (json && (json.error || json.message)) ? (json.error || json.message) : (res.status + ' ' + res.statusText);
+        throw new Error('Network error: ' + errMsg);
       }
-      const json = await res.json();
       if (json && json.ok) {
         // Persist chosen server so the app remembers it across restarts
         try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
         document.getElementById('setup-status').textContent = 'Magic link sent — check your email (and spam/junk folder) and paste the token via "Enter Token".';
       } else {
-        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json && json.error ? json.error : 'Unknown error');
+        document.getElementById('setup-status').textContent = 'Failed to send: ' + (json && (json.error || json.message) ? (json.error || json.message) : 'Unknown error');
       }
     } catch (e) {
       console.error('Magic link request failed', e);
@@ -2197,23 +2200,33 @@ async function validateTokenAndActivate(token, serverUrl) {
       ipcRenderer.send('license-status-update', { active: false, reason: 'no-server' });
       return { ok: false, reason: 'no-server' };
     }
-    // First try using Authorization header
-    let res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
-    if (res.status !== 200) {
-      // Retry using query param token as a fallback (some hosts strip Authorization header)
-      try {
-        res = await fetch(server + '/license-status.php?token=' + encodeURIComponent(token));
-      } catch (e) {
-        // ignore, will handle below
+    // Prefer query param first to avoid noisy 401s when Authorization header is stripped by proxies
+    let res = null;
+    try {
+      res = await fetch(server + '/license-status.php?token=' + encodeURIComponent(token));
+      if (res && res.status === 401) {
+        try {
+          console.warn('runCheck: license-status query-param rejected (401), trying Authorization header');
+          res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } });
+        } catch (e) { /* ignore */ }
       }
+    } catch (e) {
+      // network or URL error, try Authorization header as fallback
+      try { res = await fetch(server + '/license-status.php', { headers: { 'Authorization': 'Bearer ' + token } }); } catch (e2) { /* ignore */ }
+    }
+    if (res && res.status && res.status !== 200) {
+      try { console.warn('runCheck: license-status final response code', res.status); } catch(e) {}
     }
 
     if (res.status === 200) {
       const j = await res.json();
+      try { console.info('runCheck: license-status response', j); } catch(e) {}
       // Mark as authoritative server response
       try { j.source = j.source || 'server'; } catch(e) {}
       // Broadcast license status to main->live window
       ipcRenderer.send('license-status-update', j);
+      // Update fixed founder immediately in this renderer (avoid timing race)
+      try { setFounderFixed(!!j.founder); } catch(e) { /* ignore */ }
       // Accept token if the server accepted it (200), even if not currently active.
       return { ok: true, active: !!j.active, status: j };
     }
@@ -2228,13 +2241,14 @@ async function validateTokenAndActivate(token, serverUrl) {
               const email = lj.tokens[0].email || '';
             // Try to fetch richer account summary (plan & expiry) for this email
             try {
-              const as = await fetch(server + '/auth/account-summary.php?token=' + encodeURIComponent(token));
+              const as = await fetch(server + '/license-status.php?token=' + encodeURIComponent(token));
               if (as && as.ok) {
                 const aj = await as.json().catch(()=>null);
                 if (aj && aj.ok && aj.status) {
                   const status = Object.assign({}, aj.status, { sessions: lj.tokens });
                   try { status.source = status.source || 'server'; } catch(e) {}
                   ipcRenderer.send('license-status-update', status);
+                  try { setFounderFixed(!!status.founder); } catch(e) {}
                   return { ok: true, active: !!aj.status.active, status };
                 }
               }
@@ -2326,11 +2340,49 @@ async function ensureAuthSetup() {
         if (!token) { if (!document.getElementById('setup-modal')) createSetupModal(); }
       }
     } catch(e) { /* ignore */ }
+
+    // Create and manage a fixed founder subtext in the bottom-right for founder users
+    try {
+
+
+      // Apply initial state if there is already a license status cached in main
+      try {
+        const s = await ipcRenderer.invoke('get-current-license-status');
+        if (s && (s.founder || (s.token_payload && s.token_payload.founder))) {
+          try { setFounderFixed(true); console.info && console.info('founder-fixed initial visible via cached status', s); } catch(e) {}
+        }
+      } catch(e) { /* ignore */ }
+
+      // Toggle on live updates
+      ipcRenderer.on('license-status', (event, status) => {
+        try {
+          const isFounder = !!(status && (status.founder || status.is_founder || (status.token_payload && status.token_payload.founder)));
+          try { console.info('founder-fixed toggle; isFounder=', isFounder, 'status=', status); } catch(e) {}
+          try { setFounderFixed(isFounder); } catch(e) { console.warn('setFounderFixed failed in license-status handler', e); }
+        } catch (e) { console.warn('founder fixed toggle failed', e); }
+      });
+    } catch(e) { console.warn('founder fixed init failed', e); }
   })();
 }
 
 // Poll license status periodically (runs immediately and every 15 minutes)
 let _licensePollIntervalId = null;
+
+// Helper to show/hide the fixed founder subtext immediately from renderer responses
+function setFounderFixed(isFounder) {
+  try {
+    let el = document.getElementById('founder-fixed-msg');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'founder-fixed-msg';
+      el.className = 'founder-subtext-fixed';
+      el.textContent = 'You are a founding church — thank you for your support.';
+      document.body.appendChild(el);
+    }
+    if (isFounder) { el.classList.add('visible'); el.style.display = ''; } else { el.classList.remove('visible'); el.style.display = ''; }
+  } catch (e) { console.warn('setFounderFixed failed', e); }
+}
+
 function scheduleLicensePolling() {
   if (_licensePollIntervalId) clearInterval(_licensePollIntervalId);
   const runCheck = async () => {

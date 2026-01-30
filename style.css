@@ -1338,3 +1338,26 @@ body.dark-theme .verse-item.selected {
 #schedule-list.drag-over {
   background: rgba(0, 120, 212, 0.1);
 }
+
+/* Founder badge styles */
+.acct-badge .founder-badge {
+  display: inline-block;
+  background: linear-gradient(135deg,#ffd777 0%, #ffb200 30%);
+  color: #2a2a2a;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+}
+
+body.dark-theme .acct-badge .founder-badge {
+  background: linear-gradient(135deg,#ffda7a 0%, #ffb400 30%);
+  color: #111;
+}
+
+/* Slight accent on plan card when founder */
+.founder-active .plan-card {
+  border: 1px solid rgba(255, 180, 0, 0.15);
+  box-shadow: 0 6px 20px rgba(255, 176, 0, 0.02);
+}

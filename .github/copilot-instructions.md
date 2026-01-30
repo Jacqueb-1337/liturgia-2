@@ -123,6 +123,12 @@
   - **Avoid** using the literal string `(chore)` in commit messages. Use clear semantic prefixes like `release:`, `fix:`, `feat:`, `refactor:`, or `docs:` instead.
   - **Do not** include phrases like `bump to <version>` in commit messages or changelog entries. Prefer messages like `release: 2.2.2 — In-app update download` or `fix: remove unused theme textbox` which describe intent and the user-facing change.
   - Keep changelog entries concise, actionable, and focused on user-visible changes rather than internal version bump mechanics.
+
+### Operational Safety (Deployment & Large Files)
+- **Do not** run FTP commands or upload files manually from local scripts. Use the SFTP / VS Code extension (uploadOnSave) for deployments and directory creation; avoid ad-hoc FTP scripts or commands from your workstation.
+- Avoid reading or loading very large files or full logs into memory in automation or diagnostics; prefer targeted queries, streaming reads, `tail`/`head`, or small diagnostic endpoints that return concise JSON. When inspecting logs, fetch only the needed ranges to prevent context overrun.
+- Add lightweight shutdown/exception handlers on servers to write concise, structured errors to a log file (e.g., `data/auth.log`) rather than returning raw traces to clients.
+
 - Support newline rendering for songs (`content.text.split('\n')`)
 - Handle verse numbers as subscripts
 - Auto-size fonts to fill available space
