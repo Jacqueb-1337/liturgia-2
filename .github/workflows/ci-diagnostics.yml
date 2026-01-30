@@ -1,0 +1,69 @@
+name: CI Diagnostics
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Print Git info 🔧
+        run: |
+          echo "=== GIT INFO ==="
+          echo "Ref: $GITHUB_REF"
+          echo "Commit: $(git rev-parse HEAD)"
+          echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
+          echo "Last commit:"
+          git --no-pager log -1 --pretty=fuller
+
+      - name: Show package.json version 🧾
+        run: |
+          node -v || true
+          echo "package.json version: $(node -p "require('./package.json').version")"
+
+      - name: Show recent tags and releases 🏷️
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Tags (recent):"
+          git tag --list --sort=-creatordate | head -n 10 || true
+          echo "Releases (gh cli):"
+          gh release list --limit 10 || true
+
+      - name: List repo files (top-level)
+        run: |
+          echo "=== ROOT FILES ==="
+          ls -la || true
+
+      - name: Print artifact checksums if present 🔐
+        run: |
+          if [ -d dist ]; then
+            echo "Found dist; computing sha256s:"
+            for f in dist/*; do
+              if [ -f "$f" ]; then sha256sum "$f"; fi
+            done
+          else
+            echo "No dist directory found"
+          fi
+
+      - name: Compute checksums on Windows (if runner)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          if (Test-Path -Path 'dist') {
+            Get-ChildItem -Path dist -File | ForEach-Object { Write-Output "$($_.FullName) : $(Get-FileHash $_.FullName -Algorithm SHA256).Hash" }
+          } else { Write-Output 'No dist folder' }
