@@ -1,0 +1,8 @@
+*** Begin Patch
+*** Update File: liturgia/account.php
+@@
+-const serverBase = './'; // relative in this simple installer
++// Default server base: use local relative paths when hosted, but if running from file:// or localhost fall back to the production license server
++// This prevents the account UI from showing the token-only fallback when a local PHP backend is not running.
++const serverBase = (location && (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) ? 'https://jacqueb.me/liturgia' : './'; // relative in this simple installer
+*** End Patch

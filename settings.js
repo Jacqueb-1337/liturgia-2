@@ -82,7 +82,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     if (license) {
       // Prefer explicit email from token_payload or user_row if present
-      const email = (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
+      const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
       let displayEmail = email;
       if (!displayEmail) {
         // Try to read mirrored token from settings as a fallback
@@ -304,7 +304,7 @@ document.getElementById('close-live-window').addEventListener('click', async () 
     const si = document.getElementById('subscription-info');
     if (!ai || !si) return;
     if (status) {
-      const email = (status.token_payload && status.token_payload.email) || (status.user_row && status.user_row.email) || null;
+      const email = (status.email) || (status.token_payload && status.token_payload.email) || (status.user_row && status.user_row.email) || null;
       let displayEmail = email;
       if (!displayEmail) {
         try {

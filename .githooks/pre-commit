@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit hook to prevent accidental adding/committing of site files under ./liturgia/
+FILES=$(git diff --cached --name-only)
+for f in $FILES; do
+  case "$f" in
+    liturgia/*)
+      echo "ERROR: Attempt to commit files under 'liturgia/'. These files must not be committed to the repository. Aborting." >&2
+      exit 1
+      ;;
+  esac
+done
+exit 0

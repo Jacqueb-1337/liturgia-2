@@ -173,6 +173,54 @@
       background: #0074d9 !important;
       color: white !important;
     }
+
+    /* Founder fixed bottom-right subtext */
+    .founder-subtext-fixed {
+      position: fixed;
+      right: 12px;
+      bottom: -2px; /* moved DOWN closer to the bottom edge */
+      z-index: 99999;
+      font-size: 12px;
+      color: #111; /* black in light mode */
+      background: transparent; /* no solid background; use subtle glow */
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 220ms ease, transform 220ms ease;
+      visibility: hidden;
+      position: fixed;
+      will-change: opacity, transform;
+    }
+    .founder-subtext-fixed::before {
+      content: "";
+      position: absolute;
+      left: -4px; right: -4px; top: -2px; bottom: -2px; /* tighter, focused glow */
+      border-radius: 999px; /* make pill-shaped to avoid boxy corners */
+      /* replace rectangular color with an elliptical radial gradient centered under text */
+      background: radial-gradient(ellipse at 50% 55%, rgba(255,180,0,0.10) 0%, rgba(255,180,0,0.06) 30%, rgba(255,180,0,0.02) 55%, transparent 70%);
+      filter: blur(6px);
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 140ms ease;
+      pointer-events: none;
+    }
+    .founder-subtext-fixed.visible::before { opacity: 1; }
+    .founder-subtext-fixed.visible {
+      opacity: 1;
+      transform: translateY(0);
+      visibility: visible;
+      /* minimal text glow so letters remain crisp but gently lit */
+      text-shadow: 0 0 2px rgba(255,190,0,0.12);
+    }
+    body.dark-theme .founder-subtext-fixed {
+      color: #fff; /* white text in dark mode */
+    }
+    body.dark-theme .founder-subtext-fixed::before {
+      background: rgba(255,170,0,0.05);
+    }
   </style>
 </head>
 <body>
