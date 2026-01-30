@@ -2201,10 +2201,38 @@ async function validateTokenAndActivate(token, serverUrl) {
       ipcRenderer.send('license-status-update', j);
       // Accept token if the server accepted it (200), even if not currently active.
       return { ok: true, active: !!j.active, status: j };
-    } else {
-      ipcRenderer.send('license-status-update', { active: false, reason: 'http-' + res.status });
-      return { ok: false, reason: 'http-' + res.status };
     }
+
+    // If server rejects (401), allow device tokens validated via the sessions listing
+    if (res.status === 401) {
+      try {
+        const li = await fetch(server + '/auth/list-tokens.php?token=' + encodeURIComponent(token));
+        if (li && li.ok) {
+          const lj = await li.json().catch(()=>null);
+          if (lj && Array.isArray(lj.tokens) && lj.tokens.length > 0) {
+              const email = lj.tokens[0].email || '';
+            // Try to fetch richer account summary (plan & expiry) for this email
+            try {
+              const as = await fetch(server + '/auth/account-summary.php?token=' + encodeURIComponent(token));
+              if (as && as.ok) {
+                const aj = await as.json().catch(()=>null);
+                if (aj && aj.ok && aj.status) {
+                  const status = Object.assign({}, aj.status, { sessions: lj.tokens });
+                  ipcRenderer.send('license-status-update', status);
+                  return { ok: true, active: !!aj.status.active, status };
+                }
+              }
+            } catch(e) { /* ignore */ }
+            const status = { email, active: true, plan: 'token', sessions: lj.tokens };
+            ipcRenderer.send('license-status-update', status);
+            return { ok: true, active: true, status };
+          }
+        }
+      } catch(e) { /* ignore */ }
+    }
+
+    ipcRenderer.send('license-status-update', { active: false, reason: 'http-' + res.status });
+    return { ok: false, reason: 'http-' + res.status };
   } catch (e) {
     console.error('validate error', e);
     ipcRenderer.send('license-status-update', { active: false, reason: 'error', error: e.message });

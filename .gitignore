@@ -6,6 +6,7 @@ dist/
 /payload.json
 /release_body*
 tmp*
+/releases/
 
 # Copilot instructions
 .github/copilot-instructions.md
