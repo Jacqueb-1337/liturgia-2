@@ -34,7 +34,6 @@ const {
 
 const desktopRuntime = (typeof window !== 'undefined') ? window.desktopRuntime : null;
 const AI_HINT_MESSAGE = 'Live suggestions will appear once Liturgia hears you.';
-const AI_SUGGESTION_EMPTY_MESSAGE = 'Waiting for the next verse suggestion…';
 const aiSuggestionState = { 
   enabled: true, 
   disposers: [], 
@@ -316,7 +315,6 @@ function renderAiSuggestionPayload(payload, ui, state) {
       return;
     }
     if (state.suggestionGroups.length === 0) {
-      ui.list.appendChild(createSuggestionEmptyRow(AI_SUGGESTION_EMPTY_MESSAGE));
       state.newGroupCount = 0;
       return;
     }

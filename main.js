@@ -1353,7 +1353,13 @@ async function createWindow() {
       liveWindow.close();
       liveWindow = null;
     }
+    if (aiSpeechWorkerWindow) {
+      aiSpeechWorkerWindow.destroy();
+      aiSpeechWorkerWindow = null;
+    }
     mainWindow = null;
+    // Explicitly quit the app when main window closes (ensures window-all-closed fires)
+    app.quit();
   });
 
   // Define the menu template
