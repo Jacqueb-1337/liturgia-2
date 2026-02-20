@@ -99,72 +99,98 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
   }
 
-  // Populate account/subscription info
-  try {
-    initAiTab(settings || {});
-    let license = await ipcRenderer.invoke('get-current-license-status');
-    // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+  // Initialize AI tab early (non-blocking)
+  initAiTab(settings || {});
+  Promise.resolve().then(async () => {
     try {
-      const token = await ipcRenderer.invoke('secure-get-token');
-      if (!token) license = null;
-    } catch (e) { /* ignore secure errors */ }
+      const ai = document.getElementById('account-info');
+      const si = document.getElementById('subscription-info');
+      const signInBtn = document.getElementById('btn-sign-in');
+      const signOutBtn = document.getElementById('btn-sign-out');
+      const viewSubBtn = document.getElementById('btn-view-subscription');
+      const purchaseBtn = document.getElementById('btn-purchase-subscription');
 
-    const ai = document.getElementById('account-info');
-    const si = document.getElementById('subscription-info');
-    const signInBtn = document.getElementById('btn-sign-in');
-    const signOutBtn = document.getElementById('btn-sign-out');
-    const viewSubBtn = document.getElementById('btn-view-subscription');
-    const purchaseBtn = document.getElementById('btn-purchase-subscription');
-
-    if (license) {
-      // Prefer explicit email from token_payload or user_row if present
-      const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
-      let displayEmail = email;
-      if (!displayEmail) {
-        // Try to read mirrored token from settings as a fallback
+      // Run license and token checks in parallel, with a 3-second timeout to avoid blocking UI
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('License check timeout')), 3000)
+      );
+      
+      let license = null;
+      try {
+        license = await Promise.race([
+          ipcRenderer.invoke('get-current-license-status'),
+          timeoutPromise
+        ]);
+        
+        // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
         try {
-          const s = await ipcRenderer.invoke('load-settings');
-          if (s && s.auth && s.auth.token) {
-            const p = decodeJwtPayload(s.auth.token);
-            if (p && p.email) displayEmail = p.email;
-          }
-        } catch (e) { /* ignore */ }
+          const token = await Promise.race([
+            ipcRenderer.invoke('secure-get-token'),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Token check timeout')), 1000))
+          ]);
+          if (!token) license = null;
+        } catch (e) { /* ignore secure errors */ }
+      } catch (e) {
+        console.warn('License check timed out or failed:', e.message);
+        license = null;
       }
-      ai.textContent = displayEmail || 'Signed in';
 
-      // If this is a 'no-token' trial (user continued without signing in), show only Sign in
-      const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
-      if (isNoToken) {
-        si.textContent = `Not active (no-token).`; // keep short
+      if (license) {
+        // Prefer explicit email from token_payload or user_row if present
+        const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
+        let displayEmail = email;
+        if (!displayEmail) {
+          // Try to read mirrored token from settings as a fallback
+          try {
+            const s = await ipcRenderer.invoke('load-settings');
+            if (s && s.auth && s.auth.token) {
+              const p = decodeJwtPayload(s.auth.token);
+              if (p && p.email) displayEmail = p.email;
+            }
+          } catch (e) { /* ignore */ }
+        }
+        ai.textContent = displayEmail || 'Signed in';
+
+        // If this is a 'no-token' trial (user continued without signing in), show only Sign in
+        const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
+        if (isNoToken) {
+          si.textContent = `Not active (no-token).`; // keep short
+          if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+          if (signOutBtn) signOutBtn.style.display = 'none';
+          if (viewSubBtn) viewSubBtn.style.display = 'none';
+          if (purchaseBtn) purchaseBtn.style.display = 'none';
+        } else {
+          if (license.active) {
+            si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
+          } else {
+            si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
+          }
+
+          // Toggle UI controls for normal signed-in flow
+          if (signInBtn) signInBtn.style.display = 'none';
+          if (signOutBtn) signOutBtn.style.display = '';
+          if (viewSubBtn) viewSubBtn.style.display = '';
+          if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+        }
+      } else {
+        document.getElementById('account-info').textContent = 'Not signed in';
+        document.getElementById('subscription-info').textContent = '';
         if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
         if (signOutBtn) signOutBtn.style.display = 'none';
         if (viewSubBtn) viewSubBtn.style.display = 'none';
-        if (purchaseBtn) purchaseBtn.style.display = 'none';
-      } else {
-        if (license.active) {
-          si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
-        } else {
-          si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
-        }
-
-        // Toggle UI controls for normal signed-in flow
-        if (signInBtn) signInBtn.style.display = 'none';
-        if (signOutBtn) signOutBtn.style.display = '';
-        if (viewSubBtn) viewSubBtn.style.display = '';
-        if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+        if (purchaseBtn) purchaseBtn.style.display = '';
       }
-    } else {
-      document.getElementById('account-info').textContent = 'Not signed in';
-      document.getElementById('subscription-info').textContent = '';
-      if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
-      if (signOutBtn) signOutBtn.style.display = 'none';
-      if (viewSubBtn) viewSubBtn.style.display = 'none';
-      if (purchaseBtn) purchaseBtn.style.display = '';
+    } catch (e) {
+      console.error('Failed to load license status for settings:', e);
     }
+  }).catch(() => {});
+  
+  // Load displays in parallel
+  try {
+    await loadDisplays();
   } catch (e) {
-    console.error('Failed to load license status for settings:', e);
+    console.error('Failed to load displays:', e);
   }
-  await loadDisplays();
 
   // Manual check for updates button
   const checkBtn = document.getElementById('btn-check-updates');
