@@ -1695,20 +1695,16 @@ app.on('before-quit', async () => {
   }
   if (speechSidecarManager) {
     try { 
-      console.log('[main] Disposing speech sidecar');
+      console.log('[main] Disposing speech sidecar manager');
       speechSidecarManager.dispose(); 
       console.log('[main] Speech sidecar disposed');
+      // Give the process time to actually die (especially on Windows with taskkill)
+      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (err) { 
       console.warn('[speech-sidecar] dispose failed', err && err.message ? err.message : err); 
     }
   }
   console.log('[main] before-quit: cleanup complete');
-  
-  // Force exit after 2 seconds if something is still holding the process
-  setTimeout(() => {
-    console.warn('[main] Force exit: cleanup taking too long');
-    process.exit(0);
-  }, 2000);
 });
 
 app.on('activate', () => {

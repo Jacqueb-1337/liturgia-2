@@ -418,8 +418,31 @@ class SpeechSidecarManager extends EventEmitter {
 
   stopProcess() {
     if (!this.sidecarProcess) return;
-    this.expectedExitPid = this.sidecarProcess.pid;
-    try { this.sidecarProcess.kill(); } catch (_) {}
+    const pid = this.sidecarProcess.pid;
+    this.expectedExitPid = pid;
+    
+    try {
+      // Try graceful SIGTERM first
+      this.sidecarProcess.kill('SIGTERM');
+    } catch (err) {
+      console.warn('[speech-sidecar] SIGTERM failed', err.message || err);
+    }
+    
+    // On Windows, also try taskkill as backup if process is still running
+    if (process.platform === 'win32' && this.sidecarProcess) {
+      setTimeout(() => {
+        if (this.sidecarProcess && !this.sidecarProcess.killed) {
+          try {
+            const { execSync } = require('child_process');
+            execSync(`taskkill /PID ${pid} /F /T`, { stdio: 'pipe' });
+            console.log('[speech-sidecar] force-killed via taskkill PID', pid);
+          } catch (err) {
+            console.warn('[speech-sidecar] taskkill failed', err.message || err);
+          }
+        }
+      }, 500);
+    }
+    
     this.sidecarProcess = null;
     this.updateState({
       processRunning: false,
