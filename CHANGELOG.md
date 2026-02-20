@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.0 - 2026-02-20
+
+- release: AI verse suggestions with stable scrolling and automatic dependency installation
+- Added real-time AI verse suggestion ticker with smart grouping and refinement detection
+- Implemented smooth scroll animations, hover pause, and pending suggestion queue
+- Auto-detects and installs Python dependencies (vosk, websockets, numpy)
+- Cross-platform compatible (Windows, macOS, Linux)
+- Fixed suggestion view stability when new items arrive while hovering
+
 ## 2.3.13 - 2026-01-30
 
 - bump patch release
