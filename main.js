@@ -1407,19 +1407,7 @@ async function createWindow() {
     });
   }
 
-  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
-  try {
-    let settings = {};
-    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
-    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
-  } catch (e) { console.warn('Default dark theme check failed', e); }
-
-  if (winState.maximized) mainWindow.maximize();
-  if (winState.fullscreen) mainWindow.setFullScreen(true);
-
-  mainWindow.loadFile('index.html');
-  
-  // Create a splash overlay that covers the main window until the splash animation finishes
+  // Create splash BEFORE loading main window to prevent white flash
   try {
     const b = mainWindow.getBounds();
     splashWindow = new BrowserWindow({
@@ -1434,7 +1422,6 @@ async function createWindow() {
       resizable: false,
       movable: false,
       skipTaskbar: true,
-      parent: mainWindow,
       modal: false,
       show: false,
       webPreferences: { nodeIntegration: true, contextIsolation: false }
@@ -1442,32 +1429,46 @@ async function createWindow() {
     splashWindow.setMenuBarVisibility(false);
     splashWindow.loadFile('splash.html').catch(()=>{});
     splashWindow.once('ready-to-show', () => { try { splashWindow.show(); } catch(e){} });
+  } catch (e) { console.warn('Failed to create splash window', e); }
 
-    // Keep splash window bounds in sync while present
-    const syncSplashBounds = () => { try { if (splashWindow && mainWindow) splashWindow.setBounds(mainWindow.getBounds()); } catch(e){} };
-    mainWindow.on('move', syncSplashBounds);
-    mainWindow.on('resize', syncSplashBounds);
+  // NOW render the main window after splash is ready
+  mainWindow.loadFile('index.html');
+  
+  // Ensure fresh installs default to dark theme so UI is initialized in dark mode
+  try {
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) { settings = {}; }
+    if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
+  } catch (e) { console.warn('Default dark theme check failed', e); }
 
-    // Mark main window as ready when it's ready to show
-    mainWindow.once('ready-to-show', () => {
-      mainWindowReady = true;
-      tryCloseSplashScreen();
-    });
+  if (winState.maximized) mainWindow.maximize();
+  if (winState.fullscreen) mainWindow.setFullScreen(true);
 
-    // IPC to let renderer query splash state if it missed the event
-    const { ipcMain } = require('electron');
-    ipcMain.handle('is-splash-closed', () => splashClosed);
+  // Keep splash window bounds in sync while present
+  const syncSplashBounds = () => { try { if (splashWindow && mainWindow) splashWindow.setBounds(mainWindow.getBounds()); } catch(e){} };
+  mainWindow.on('move', syncSplashBounds);
+  mainWindow.on('resize', syncSplashBounds);
 
-    // Fallback close in case dependencies aren't met
-    setTimeout(() => { 
-      if (splashWindow) { 
-        splashClosed = true;
-        try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
-        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
-        try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
-      }
-    }, 10000);
-  } catch (e) { console.warn('Failed to create splash window', e); }  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
+  // Mark main window as ready when it's ready to show
+  mainWindow.once('ready-to-show', () => {
+    mainWindowReady = true;
+    tryCloseSplashScreen();
+  });
+
+  // IPC to let renderer query splash state if it missed the event
+  const { ipcMain } = require('electron');
+  ipcMain.handle('is-splash-closed', () => splashClosed);
+
+  // Fallback close in case dependencies aren't met within 10 seconds
+  setTimeout(() => { 
+    if (splashWindow) { 
+      splashClosed = true;
+      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+      try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
+    }
+  }, 10000);
+
+  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
   mainWindow.on('resize', saveWindowStateDebounced);
   mainWindow.on('move', saveWindowStateDebounced);
   mainWindow.on('maximize', () => { applySettingsPatch({ window: { maximized: true } }); });
