@@ -139,6 +139,7 @@ app.setName('liturgia');
 let mainWindow; // Add this at the top
 let splashWindow = null;
 let splashClosed = false;
+let settingsWindow = null; // Reference to settings window for IPC communication
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 let speechWindow = null;
@@ -1103,7 +1104,10 @@ ipcMain.handle('download-python', async (event) => {
           // Report progress every 5%
           if (percentComplete - lastReportedPercent >= 5) {
             lastReportedPercent = percentComplete;
-            event.sender.send('python-download-progress', { percent: percentComplete, size: downloadedSize, total: totalSize });
+            // Send to settings window if it's open
+            if (settingsWindow && !settingsWindow.isDestroyed()) {
+              settingsWindow.webContents.send('python-download-progress', { percent: percentComplete, size: downloadedSize, total: totalSize });
+            }
           }
         });
         
@@ -1468,7 +1472,7 @@ async function createWindow() {
         {
           label: 'Settings',
           click: () => {
-            const settingsWin = new BrowserWindow({
+            settingsWindow = new BrowserWindow({
               width: 600,
               height: 400,
               parent: mainWindow,
@@ -1480,8 +1484,11 @@ async function createWindow() {
                 contextIsolation: false
               }
             });
-            settingsWin.setMenuBarVisibility(false);
-            settingsWin.loadFile('settings.html');
+            settingsWindow.setMenuBarVisibility(false);
+            settingsWindow.loadFile('settings.html');
+            settingsWindow.on('closed', () => {
+              settingsWindow = null;
+            });
           }
         },
         {
