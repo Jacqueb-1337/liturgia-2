@@ -101,8 +101,36 @@ class RemoteServer {
     
     this.port = port || this.port;
     
-    // Start WebSocket server
-    this.wss = new WebSocket.Server({ port: this.port });
+    // Start WebSocket server with error handling for EADDRINUSE
+    try {
+      this.wss = new WebSocket.Server({ port: this.port });
+    } catch (err) {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[remote] Port ${this.port} is already in use. Another Liturgia instance may still be running.`);
+        console.error('[remote] Waiting 2 seconds and retrying...');
+        this.wss = null;
+        // Retry after delay
+        setTimeout(() => {
+          try {
+            this.wss = new WebSocket.Server({ port: this.port });
+            this.setupWebSocketHandlers();
+            this.startServices();
+          } catch (retryErr) {
+            console.error('[remote] Failed to start WebSocket server after retry:', retryErr.message);
+            this.wss = null;
+          }
+        }, 2000);
+        return;
+      }
+      throw err;
+    }
+    
+    this.setupWebSocketHandlers();
+    this.startServices();
+  }
+  
+  setupWebSocketHandlers() {
+    if (!this.wss) return;
     
     this.wss.on('connection', (ws) => {
       console.log('[remote] New WebSocket connection from', ws._socket.remoteAddress);
@@ -126,7 +154,9 @@ class RemoteServer {
     });
     
     console.log('[remote] WebSocket server started on port', this.port);
-    
+  }
+  
+  startServices() {
     // Start mDNS advertisement
     this.bonjour = new Bonjour();
     this.bonjourService = this.bonjour.publish({
