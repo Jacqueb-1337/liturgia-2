@@ -311,7 +311,6 @@ function renderAiSuggestionPayload(payload, ui, state) {
     // Clear and rebuild list
     ui.list.innerHTML = '';
     if (!state.enabled) {
-      ui.list.appendChild(createSuggestionEmptyRow('Enable AI in Settings to see live suggestions.'));
       return;
     }
     if (state.suggestionGroups.length === 0) {

@@ -1778,15 +1778,18 @@ ipcMain.handle('get-pending-update', async () => {
 // Check if Python and AI dependencies are available
 ipcMain.handle('check-python-available', async () => {
   try {
-    const { execSync } = require('child_process');
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const pathModule = require('path');
+    const fs = require('fs');
+    
     const candidates = [];
     const isWindows = process.platform === 'win32';
     
     // Check local venv
-    const pathModule = require('path');
     const winVenv = pathModule.join(app.getAppPath(), '.venv', 'Scripts', 'python.exe');
     const posixVenv = pathModule.join(app.getAppPath(), '.venv', 'bin', 'python');
-    const fs = require('fs');
     if (isWindows && fs.existsSync(winVenv)) candidates.push(winVenv);
     if (!isWindows && fs.existsSync(posixVenv)) candidates.push(posixVenv);
     
@@ -1797,8 +1800,8 @@ ipcMain.handle('check-python-available', async () => {
     let foundPython = null;
     for (const cmd of candidates) {
       try {
-        const version = execSync(`"${cmd}" --version`, { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
-        foundPython = { cmd, version: version.trim() };
+        const { stdout } = await execAsync(`"${cmd}" --version`, { timeout: 3000, encoding: 'utf8' });
+        foundPython = { cmd, version: stdout.trim() };
         break;
       } catch {}
     }
@@ -1807,13 +1810,13 @@ ipcMain.handle('check-python-available', async () => {
       return { available: false, pythonFound: false };
     }
     
-    // Check dependencies
+    // Check dependencies asynchronously with timeout
     const requiredPackages = ['vosk', 'websockets', 'numpy'];
     const missingPackages = [];
     
     for (const pkg of requiredPackages) {
       try {
-        execSync(`"${foundPython.cmd}" -m pip show ${pkg}`, { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+        await execAsync(`"${foundPython.cmd}" -m pip show ${pkg}`, { timeout: 5000, encoding: 'utf8' });
       } catch {
         missingPackages.push(pkg);
       }

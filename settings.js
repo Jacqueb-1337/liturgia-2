@@ -81,9 +81,9 @@ function applyDarkTheme(enabled) {
   ipcRenderer.send('set-dark-theme', enabled);
 }
 
-// Load settings on startup
-window.addEventListener('DOMContentLoaded', async () => {
-  // Load version from package.json
+// Load settings on startup - defer all async work to background
+window.addEventListener('DOMContentLoaded', () => {
+  // Load version from package.json - SYNC
   try {
     const packageJson = require('./package.json');
     const versionElement = document.getElementById('app-version');
@@ -93,103 +93,120 @@ window.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.error('Failed to load version:', err);
   }
-  
-  const settings = await ipcRenderer.invoke('load-settings');
-  cachedSettings = settings || {};
-  if (settings) {
-    // Back-compat: only set username field if it exists
-    const usernameEl = document.getElementById('username');
-    if (usernameEl) usernameEl.value = settings.username || '';
-    const themeEl = document.getElementById('theme');
-    if (themeEl) themeEl.value = settings.theme || '';
-    const darkEl = document.getElementById('dark-theme');
-    if (darkEl) darkEl.checked = !!settings.darkTheme;
-    applyDarkTheme(!!settings.darkTheme);
-    // Auto-update setting (default true for new installs)
-    const au = document.getElementById('auto-update-startup');
-    if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
-  }
 
-  // Populate account/subscription info
-  try {
-    initAiTab(settings || {});
-    
-    const ai = document.getElementById('account-info');
-    const si = document.getElementById('subscription-info');
-    const signInBtn = document.getElementById('btn-sign-in');
-    const signOutBtn = document.getElementById('btn-sign-out');
-    const viewSubBtn = document.getElementById('btn-view-subscription');
-    const purchaseBtn = document.getElementById('btn-purchase-subscription');
-
-    // Set initial state (not signed in) — will be updated in background
-    ai.textContent = 'Not signed in';
-    si.textContent = '';
-    if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
-    if (signOutBtn) signOutBtn.style.display = 'none';
-    if (viewSubBtn) viewSubBtn.style.display = 'none';
-    if (purchaseBtn) purchaseBtn.style.display = '';
-
-    // Fetch license status in background with timeout to prevent indefinite freeze
-    const licenseCheckTimeout = 3000; // 3 second timeout
-    const fetchLicenseTimeout = new Promise((resolve) => setTimeout(() => resolve(null), licenseCheckTimeout));
-    const fetchLicense = ipcRenderer.invoke('get-current-license-status').catch(() => null);
-    
-    Promise.race([fetchLicense, fetchLicenseTimeout]).then(async (license) => {
-      // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
-      if (license) {
-        try {
-          const token = await ipcRenderer.invoke('secure-get-token');
-          if (!token) license = null;
-        } catch (e) { /* ignore secure errors */ }
+  // Defer all async initialization to background - don't block the event
+  setImmediate(async () => {
+    try {
+      const settings = await ipcRenderer.invoke('load-settings');
+      cachedSettings = settings || {};
+      if (settings) {
+        // Back-compat: only set username field if it exists
+        const usernameEl = document.getElementById('username');
+        if (usernameEl) usernameEl.value = settings.username || '';
+        const themeEl = document.getElementById('theme');
+        if (themeEl) themeEl.value = settings.theme || '';
+        const darkEl = document.getElementById('dark-theme');
+        if (darkEl) darkEl.checked = !!settings.darkTheme;
+        applyDarkTheme(!!settings.darkTheme);
+        // Auto-update setting (default true for new installs)
+        const au = document.getElementById('auto-update-startup');
+        if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
       }
 
-      if (license) {
-        // Prefer explicit email from token_payload or user_row if present
-        const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
-        let displayEmail = email;
-        if (!displayEmail) {
-          // Try to read mirrored token from settings as a fallback
-          try {
-            const s = await ipcRenderer.invoke('load-settings');
-            if (s && s.auth && s.auth.token) {
-              const p = decodeJwtPayload(s.auth.token);
-              if (p && p.email) displayEmail = p.email;
-            }
-          } catch (e) { /* ignore */ }
-        }
-        ai.textContent = displayEmail || 'Signed in';
+      // Populate account/subscription info
+      try {
+        initAiTab(settings || {});
+        
+        const ai = document.getElementById('account-info');
+        const si = document.getElementById('subscription-info');
+        const signInBtn = document.getElementById('btn-sign-in');
+        const signOutBtn = document.getElementById('btn-sign-out');
+        const viewSubBtn = document.getElementById('btn-view-subscription');
+        const purchaseBtn = document.getElementById('btn-purchase-subscription');
 
-        // If this is a 'no-token' trial (user continued without signing in), show only Sign in
-        const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
-        if (isNoToken) {
-          si.textContent = `Not active (no-token).`; // keep short
-          if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
-          if (signOutBtn) signOutBtn.style.display = 'none';
-          if (viewSubBtn) viewSubBtn.style.display = 'none';
-          if (purchaseBtn) purchaseBtn.style.display = 'none';
-        } else {
-          if (license.active) {
-            si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
-          } else {
-            si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
+        // Set initial state (not signed in) — will be updated in background
+        ai.textContent = 'Not signed in';
+        si.textContent = '';
+        if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+        if (signOutBtn) signOutBtn.style.display = 'none';
+        if (viewSubBtn) viewSubBtn.style.display = 'none';
+        if (purchaseBtn) purchaseBtn.style.display = '';
+
+        // Fetch license status in background with timeout to prevent indefinite freeze
+        const licenseCheckTimeout = 3000; // 3 second timeout
+        const fetchLicenseTimeout = new Promise((resolve) => setTimeout(() => resolve(null), licenseCheckTimeout));
+        const fetchLicense = ipcRenderer.invoke('get-current-license-status').catch(() => null);
+        
+        Promise.race([fetchLicense, fetchLicenseTimeout]).then(async (license) => {
+          // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+          if (license) {
+            try {
+              const token = await ipcRenderer.invoke('secure-get-token');
+              if (!token) license = null;
+            } catch (e) { /* ignore secure errors */ }
           }
 
-          // Toggle UI controls for normal signed-in flow
-          if (signInBtn) signInBtn.style.display = 'none';
-          if (signOutBtn) signOutBtn.style.display = '';
-          if (viewSubBtn) viewSubBtn.style.display = '';
-          if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
-        }
-      }
-    }).catch((e) => {
-      console.error('Failed to load license status for settings:', e);
-    });
-  } catch (e) {
-    console.error('Failed to initialize settings:', e);
-  }
-  await loadDisplays();
+          if (license) {
+            // Prefer explicit email from token_payload or user_row if present
+            const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
+            let displayEmail = email;
+            if (!displayEmail) {
+              // Try to read mirrored token from settings as a fallback
+              try {
+                const s = await ipcRenderer.invoke('load-settings');
+                if (s && s.auth && s.auth.token) {
+                  const p = decodeJwtPayload(s.auth.token);
+                  if (p && p.email) displayEmail = p.email;
+                }
+              } catch (e) { /* ignore */ }
+            }
+            ai.textContent = displayEmail || 'Signed in';
 
-  // Manual check for updates button
+            // If this is a 'no-token' trial (user continued without signing in), show only Sign in
+            const isNoToken = (!license.active && (license.reason === 'no-token' || license.reason === 'no-token' || license.reason === 'no-token'));
+            if (isNoToken) {
+              si.textContent = `Not active (no-token).`; // keep short
+              if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+              if (signOutBtn) signOutBtn.style.display = 'none';
+              if (viewSubBtn) viewSubBtn.style.display = 'none';
+              if (purchaseBtn) purchaseBtn.style.display = 'none';
+            } else {
+              if (license.active) {
+                si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
+              } else {
+                si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
+              }
+
+              // Toggle UI controls for normal signed-in flow
+              if (signInBtn) signInBtn.style.display = 'none';
+              if (signOutBtn) signOutBtn.style.display = '';
+              if (viewSubBtn) viewSubBtn.style.display = '';
+              if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
+            }
+          }
+        }).catch((e) => {
+          console.error('Failed to load license status for settings:', e);
+        });
+      } catch (e) {
+        console.error('Failed to initialize settings:', e);
+      }
+      
+      // Load displays in background - don't block UI
+      loadDisplays().catch((e) => console.error('Failed to load displays:', e));
+
+      // Set default display selection
+      const defaultDisplaySelect = document.getElementById('default-display');
+      if (settings && settings.defaultDisplay) {
+        defaultDisplaySelect.value = settings.defaultDisplay;
+      } else {
+        defaultDisplaySelect.selectedIndex = 0; // Select first option if none saved
+      }
+    } catch (err) {
+      console.error('Error in deferred settings initialization:', err);
+    }
+  });
+
+  // Manual check for updates button - set up listener immediately (no await)
   const checkBtn = document.getElementById('btn-check-updates');
   if (checkBtn) {
     checkBtn.addEventListener('click', async () => {
@@ -208,6 +225,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => { const s = document.getElementById('update-status'); if (s) s.textContent = ''; }, 7000);
     });
   }
+});
 
 // Helper: decode JWT payload without verifying signature (base64url)
 function decodeJwtPayload(token) {
@@ -220,13 +238,6 @@ function decodeJwtPayload(token) {
     return JSON.parse(json);
   } catch (e) { return null; }
 }
-  const defaultDisplaySelect = document.getElementById('default-display');
-  if (settings && settings.defaultDisplay) {
-    defaultDisplaySelect.value = settings.defaultDisplay;
-  } else {
-    defaultDisplaySelect.selectedIndex = 0; // Select first option if none saved
-  }
-});
 
 // Save settings from any panel
 document.querySelectorAll('.save-settings').forEach(btn => {
@@ -945,8 +956,17 @@ function initAiTab(settings) {
     }
   }
 
-  // Check Python status when panel is opened
-  checkAndDisplayPythonStatus();
+  // Check Python status when AI tab is opened, not during init
+  const aiTabButton = document.querySelector('button[data-panel="ai"]');
+  if (aiTabButton && !aiTabButton._pythonCheckSetup) {
+    aiTabButton._pythonCheckSetup = true;
+    aiTabButton.addEventListener('click', () => {
+      // Show loading state immediately
+      if (pythonStatusEl) pythonStatusEl.textContent = 'Checking Python…';
+      // Check asynchronously in background
+      checkAndDisplayPythonStatus();
+    });
+  }
 
   // Button to download Python (opens python.org)
   const downloadPythonBtn = document.getElementById('ai-download-python');
