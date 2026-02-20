@@ -27,19 +27,27 @@ function resolvePythonCandidates(rootDir) {
   const candidates = [];
   const isWindows = process.platform === 'win32';
   
-  // Check local venv first
+  // Try local venv only if it clearly exists (for dev/npm start scenario)
   const winVenv = path.join(rootDir, '.venv', 'Scripts', 'python.exe');
   const posixVenv = path.join(rootDir, '.venv', 'bin', 'python');
-  if (isWindows && fs.existsSync(winVenv)) candidates.push({ cmd: winVenv, args: [] });
-  if (!isWindows && fs.existsSync(posixVenv)) candidates.push({ cmd: posixVenv, args: [] });
+  if (isWindows && fs.existsSync(winVenv)) {
+    console.log(`[python-candidate] Found local .venv: ${winVenv}`);
+    candidates.push({ cmd: winVenv, args: [] });
+  }
   
-  // Fall back to system Python
+  if (!isWindows && fs.existsSync(posixVenv)) {
+    console.log(`[python-candidate] Found local .venv: ${posixVenv}`);
+    candidates.push({ cmd: posixVenv, args: [] });
+  }
+  
+  // Fall back to system Python (primary method for production)
   candidates.push({ cmd: 'python', args: [] });
   candidates.push({ cmd: 'python3', args: [] });
   if (isWindows) {
     candidates.push({ cmd: 'py', args: ['-3'] });
   }
   
+  console.log(`[python-candidate] Trying candidates: ${candidates.map(c => c.cmd).join(', ')}`);
   return candidates;
 }
 
@@ -302,6 +310,8 @@ class SpeechSidecarManager extends EventEmitter {
     }
 
     const candidates = resolvePythonCandidates(this.rootDir);
+    const errors = [];
+    
     for (const candidate of candidates) {
       try {
         // Fire off dependency check in background (don't block startup)
@@ -321,21 +331,22 @@ class SpeechSidecarManager extends EventEmitter {
           env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize }
         });
 
+        // Set up error handler
+        let spawnError = null;
         child.on('error', (err) => {
-          console.error(`[speech-sidecar] spawn error: ${err.message} (${err.code})`);
-          this.updateState({
-            processRunning: false,
-            managedProcess: false,
-            portOpen: false,
-            modelReady: false,
-            statusMessage: 'sidecar-spawn-error',
-            lastError: err.code === 'ENOENT' 
-              ? 'Python 3.7+ required for AI features. Install from https://python.org and restart Liturgia.'
-              : `Failed to start speech engine: ${err.message}`,
-            runtimeCommand: candidate.cmd,
-            restarting: false
-          });
+          spawnError = err;
+          errors.push({ cmd: candidate.cmd, code: err.code, message: err.message });
+          console.warn(`[speech-sidecar] spawn error with candidate "${candidate.cmd}": ${err.message} (${err.code})`);
         });
+
+        // Wait very briefly to see if spawn fails immediately
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        // If spawn failed, continue to next candidate
+        if (spawnError) {
+          errors.push({ cmd: candidate.cmd, error: spawnError.message, code: spawnError.code });
+          continue;
+        }
 
         child.stdout.on('data', (buf) => {
           const text = buf.toString();
@@ -404,13 +415,23 @@ class SpeechSidecarManager extends EventEmitter {
       }
     }
 
+    // All candidates failed
+    const triedCandidates = candidates.map(c => c.cmd).join(', ');
+    console.error(`[speech-sidecar] Python startup failed. Tried: ${triedCandidates}`);
+    
     this.updateState({
       processRunning: false,
       managedProcess: false,
       portOpen: false,
       modelReady: false,
+      statusMessage: 'sidecar-spawn-error',
+      lastError: `Python 3.7+ is required. Install from https://python.org and add it to PATH, then restart Liturgia.`,
+      runtimeCommand: '',
+      restarting: false
+    });
+      modelReady: false,
       statusMessage: 'sidecar-python-missing',
-      lastError: 'Python 3.7+ is required for AI features. Please install from https://python.org and try again.',
+      lastError: `Python 3.7+ is required for AI features. Tried: ${errorSummary}. Please install from https://python.org and try again.`,
       restarting: false
     });
     return false;
