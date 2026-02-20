@@ -88,6 +88,7 @@ async function ensureSqlJs() {
   }
 }
 const { BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR } = require('./constants');
+const { getUserDataDir } = require('./lib/paths');
 
 // Keytar IPC: store tokens securely in main process. Falls back to settings file if keytar not available.
 let keytar = null;
@@ -99,22 +100,23 @@ ipcMain.handle('secure-get-token', async () => {
   try {
     if (keytar) return await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
     // fallback: read from settings
-    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); const settings = JSON.parse(txt); if (settings.auth && settings.auth.token) return settings.auth.token; } catch { }
-    // TESTING: return a test token if no real token exists (>20 chars to pass fallback auth)
-    console.log('[TEST] Returning fallback test token for relay testing');
-    return 'test_relay_token_ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  } catch (e) { console.error('secure-get-token error', e); return 'test_relay_token_ABCDEFGHIJKLMNOPQRSTUVWXYZ'; }
+    const settingsFilePath = path.join(getUserDataDir(app), 'settings.json');
+    try { const txt = await fs.promises.readFile(settingsFilePath, 'utf8'); const settings = JSON.parse(txt); if (settings.auth && settings.auth.token) return settings.auth.token; } catch { }
+    return null; // Return null instead of test token - this isn't a relay testing scenario
+  } catch (e) { console.error('secure-get-token error', e); return null; }
 });
 
 ipcMain.handle('secure-set-token', async (event, token) => {
   try {
     if (keytar) { await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token); return true; }
     // fallback: write to settings.json
+    const settingsFilePath = path.join(getUserDataDir(app), 'settings.json');
     let settings = {};
-    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); settings = JSON.parse(txt); } catch {}
+    try { const txt = await fs.promises.readFile(settingsFilePath, 'utf8'); settings = JSON.parse(txt); } catch {}
     settings.auth = settings.auth || {};
     settings.auth.token = token;
-    await writeSettingsSafe(settings);
+    // Write settings file safely
+    try { await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error('Failed to write token to settings', e); return false; }
     return true;
   } catch (e) { console.error('secure-set-token error', e); return false; }
 });
@@ -122,10 +124,12 @@ ipcMain.handle('secure-set-token', async (event, token) => {
 ipcMain.handle('secure-delete-token', async () => {
   try {
     if (keytar) { await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT); return true; }
+    const settingsFilePath = path.join(getUserDataDir(app), 'settings.json');
     let settings = {};
-    try { const txt = await fs.promises.readFile(settingsPath, 'utf8'); settings = JSON.parse(txt); } catch {}
+    try { const txt = await fs.promises.readFile(settingsFilePath, 'utf8'); settings = JSON.parse(txt); } catch {}
     if (settings.auth) delete settings.auth.token;
-    await writeSettingsSafe(settings);
+    // Write settings file safely
+    try { await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error('Failed to delete token from settings', e); return false; }
     return true;
   } catch (e) { console.error('secure-delete-token error', e); return false; }
 });
@@ -440,8 +444,6 @@ async function importEasyWorshipHandler() {
 
 // ---------------------------
 
-
-const { getUserDataDir } = require('./lib/paths');
 const settingsPath = path.join(getUserDataDir(app), 'settings.json');
 const SPEECH_WATCHDOG_INTERVAL_MS = 6000;
 

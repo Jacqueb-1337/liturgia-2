@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.6 - 2026-02-20
+
+- CRITICAL FIX: token handlers were returning test token instead of real token
+- Secure token handlers (get/set/delete) were using undefined settingsPath variable
+- This caused all signins to fail with 500 error and users to be signed out
+
 ## 3.0.5 - 2026-02-20
 
 - fix: add single instance lock to prevent multiple windows
