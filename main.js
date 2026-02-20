@@ -1454,11 +1454,8 @@ async function createWindow() {
       tryCloseSplashScreen();
     });
 
-    // Listen for splash finished message or try to close splash
-    const { ipcMain } = require('electron');
-    ipcMain.once('splash-finished', () => { tryCloseSplashScreen(); });
-
     // IPC to let renderer query splash state if it missed the event
+    const { ipcMain } = require('electron');
     ipcMain.handle('is-splash-closed', () => splashClosed);
 
     // Fallback close in case dependencies aren't met
@@ -1466,9 +1463,10 @@ async function createWindow() {
       if (splashWindow) { 
         splashClosed = true;
         try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
         try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
       }
-    }, 15000);
+    }, 10000);
   } catch (e) { console.warn('Failed to create splash window', e); }  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
   mainWindow.on('resize', saveWindowStateDebounced);
   mainWindow.on('move', saveWindowStateDebounced);
