@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.5 - 2026-02-20
+
+- fix: add single instance lock to prevent multiple windows
+- fix: improve remote server port cleanup and EADDRINUSE handling
+- improve: show dialog when user tries to open second instance
+
 ## 3.0.4 - 2026-02-20
 
 - bump patch release
