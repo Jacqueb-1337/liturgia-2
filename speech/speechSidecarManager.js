@@ -429,11 +429,6 @@ class SpeechSidecarManager extends EventEmitter {
       runtimeCommand: '',
       restarting: false
     });
-      modelReady: false,
-      statusMessage: 'sidecar-python-missing',
-      lastError: `Python 3.7+ is required for AI features. Tried: ${errorSummary}. Please install from https://python.org and try again.`,
-      restarting: false
-    });
     return false;
   }
 
