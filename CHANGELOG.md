@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.2 - 2026-02-20
+
+- improve: clearer error message when Python is not found
+
 ## 3.0.1 - 2026-02-20
 
 - fix: move Python dependency check to background to prevent startup hang
