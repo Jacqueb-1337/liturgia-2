@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1 - 2026-02-20
+
+- fix: move Python dependency check to background to prevent startup hang
+
 ## 3.0.0 - 2026-02-20
 
 - release: AI verse suggestions with stable scrolling and automatic dependency installation
