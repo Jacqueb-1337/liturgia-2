@@ -1722,6 +1722,62 @@ ipcMain.handle('get-pending-update', async () => {
   return pendingUpdate || lastUpdateCheck || { ok:false };
 });
 
+// Check if Python and AI dependencies are available
+ipcMain.handle('check-python-available', async () => {
+  try {
+    const { execSync } = require('child_process');
+    const candidates = [];
+    const isWindows = process.platform === 'win32';
+    
+    // Check local venv
+    const pathModule = require('path');
+    const winVenv = pathModule.join(app.getAppPath(), '.venv', 'Scripts', 'python.exe');
+    const posixVenv = pathModule.join(app.getAppPath(), '.venv', 'bin', 'python');
+    const fs = require('fs');
+    if (isWindows && fs.existsSync(winVenv)) candidates.push(winVenv);
+    if (!isWindows && fs.existsSync(posixVenv)) candidates.push(posixVenv);
+    
+    // Try system Python
+    candidates.push('python', 'python3');
+    if (isWindows) candidates.push('py');
+    
+    let foundPython = null;
+    for (const cmd of candidates) {
+      try {
+        const version = execSync(`"${cmd}" --version`, { encoding: 'utf8', stdio: 'pipe', timeout: 5000 });
+        foundPython = { cmd, version: version.trim() };
+        break;
+      } catch {}
+    }
+    
+    if (!foundPython) {
+      return { available: false, pythonFound: false };
+    }
+    
+    // Check dependencies
+    const requiredPackages = ['vosk', 'websockets', 'numpy'];
+    const missingPackages = [];
+    
+    for (const pkg of requiredPackages) {
+      try {
+        execSync(`"${foundPython.cmd}" -m pip show ${pkg}`, { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+      } catch {
+        missingPackages.push(pkg);
+      }
+    }
+    
+    return {
+      available: missingPackages.length === 0,
+      pythonFound: true,
+      pythonVersion: foundPython.version,
+      missingPackages: missingPackages.length > 0 ? missingPackages : null
+    };
+  } catch (e) {
+    console.error('[check-python-available] error:', e);
+    return { available: false, pythonFound: false, error: String(e) };
+  }
+});
+
 // In-memory map of active downloads
 const downloads = global.downloads = global.downloads || {};
 
@@ -1780,6 +1836,15 @@ ipcMain.handle('run-installer', async (event, file) => {
   try {
     if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
     await shell.openPath(file);
+    return { ok:true };
+  } catch (e) { return { ok:false, error: String(e) }; }
+});
+
+// Open external URLs
+ipcMain.handle('open-external-url', async (event, { url }) => {
+  try {
+    if (!url || typeof url !== 'string') return { ok:false, error:'Invalid URL' };
+    await shell.openExternal(url);
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
 });

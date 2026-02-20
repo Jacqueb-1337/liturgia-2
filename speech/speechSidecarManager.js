@@ -321,6 +321,22 @@ class SpeechSidecarManager extends EventEmitter {
           env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize }
         });
 
+        child.on('error', (err) => {
+          console.error(`[speech-sidecar] spawn error: ${err.message} (${err.code})`);
+          this.updateState({
+            processRunning: false,
+            managedProcess: false,
+            portOpen: false,
+            modelReady: false,
+            statusMessage: 'sidecar-spawn-error',
+            lastError: err.code === 'ENOENT' 
+              ? 'Python 3.7+ required for AI features. Install from https://python.org and restart Liturgia.'
+              : `Failed to start speech engine: ${err.message}`,
+            runtimeCommand: candidate.cmd,
+            restarting: false
+          });
+        });
+
         child.stdout.on('data', (buf) => {
           const text = buf.toString();
           text.split(/\r?\n/).forEach((line) => {

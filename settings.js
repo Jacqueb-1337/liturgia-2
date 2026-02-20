@@ -892,6 +892,67 @@ function initAiTab(settings) {
   }
 
   runtime.getSidecarStatus().then(renderSidecarStatus).catch(() => {});
+
+  // Check and display Python availability
+  const pythonMissingEl = document.getElementById('ai-python-missing');
+  const pythonStatusEl = document.getElementById('ai-python-status');
+  
+  async function checkAndDisplayPythonStatus() {
+    if (!pythonMissingEl) return;
+    try {
+      const result = await ipcRenderer.invoke('check-python-available');
+      if (result && result.available) {
+        // Python and dependencies are available
+        pythonMissingEl.style.display = 'none';
+      } else if (result && !result.pythonFound) {
+        // Python is not installed
+        pythonMissingEl.style.display = 'block';
+        if (pythonStatusEl) {
+          pythonStatusEl.textContent = 'Python not found. Click "Download Python" above to install it.';
+        }
+      } else if (result && result.missingPackages) {
+        // Python found but dependencies missing
+        pythonMissingEl.style.display = 'block';
+        if (pythonStatusEl) {
+          pythonStatusEl.textContent = `Missing packages: ${result.missingPackages.join(', ')}. Try the recheck button after installing Python.`;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check Python availability', err);
+    }
+  }
+
+  // Check Python status when panel is opened
+  checkAndDisplayPythonStatus();
+
+  // Button to download Python (opens python.org)
+  const downloadPythonBtn = document.getElementById('ai-download-python');
+  if (downloadPythonBtn) {
+    downloadPythonBtn.addEventListener('click', async () => {
+      await ipcRenderer.invoke('open-external-url', { url: 'https://www.python.org/downloads/' });
+    });
+  }
+
+  // Button to recheck Python/dependencies
+  const recheckPythonBtn = document.getElementById('ai-recheck-python');
+  if (recheckPythonBtn) {
+    recheckPythonBtn.addEventListener('click', async () => {
+      recheckPythonBtn.disabled = true;
+      if (pythonStatusEl) pythonStatusEl.textContent = 'Checking…';
+      try {
+        await checkAndDisplayPythonStatus();
+        if (pythonStatusEl && pythonMissingEl.style.display === 'none') {
+          pythonStatusEl.textContent = 'Re-checking dependencies…';
+          setTimeout(() => {
+            if (pythonStatusEl) pythonStatusEl.textContent = '';
+          }, 2000);
+        }
+      } finally {
+        recheckPythonBtn.disabled = false;
+      }
+    });
+  }
+
   if (typeof runtime.onSidecarStatus === 'function') {
     const dispose = runtime.onSidecarStatus(renderSidecarStatus);
     if (typeof dispose === 'function') state.disposers.push(dispose);

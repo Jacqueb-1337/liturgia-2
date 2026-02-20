@@ -381,6 +381,22 @@
         </div>
         <div class="ai-enable-note muted-text">Disabling stops the speech sidecar, microphone meter, and live verse suggestions.</div>
         <div id="ai-runtime-missing" class="ai-warning">Desktop runtime bridge unavailable. Re-open Settings from the main Liturgia window to manage AI features.</div>
+        
+        <!-- Python Requirement Warning -->
+        <div id="ai-python-missing" class="ai-warning" style="display: none;">
+          <div style="margin-bottom: 8px;">
+            <strong>Python 3.7+ is required for AI features</strong>
+          </div>
+          <div class="muted-text" style="margin-bottom: 12px; font-size: 0.9em;">
+            The speech recognition backend depends on Python and libraries (vosk, websockets, numpy) that are not bundled with Liturgia.
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="ai-download-python" class="btn primary">Download Python from python.org</button>
+            <button id="ai-recheck-python" class="btn">Recheck Dependencies</button>
+          </div>
+          <div id="ai-python-status" class="muted-text" style="margin-top: 8px; font-size: 0.9em;"></div>
+        </div>
+
         <div class="ai-grid">
           <section class="ai-card">
             <h3>Sidecar Status</h3>
