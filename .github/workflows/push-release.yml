@@ -105,8 +105,11 @@ jobs:
             echo "ERROR: Release tag $TAG does not match package.json version $PKG_TAG. Aborting upload."; exit 1
           fi
 
+          # Get the most recent commit message to use as release description
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
           # Ensure release exists or create it
-          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || gh release create "$TAG" --notes "CI artifacts for $TAG" --repo "$REPO"
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || gh release create "$TAG" --notes "$COMMIT_MSG" --repo "$REPO"
 
           files_to_upload=(dist/*)
           echo "Files to upload: ${files_to_upload[*]}"
