@@ -1085,7 +1085,6 @@ ipcMain.handle('download-python', async (event) => {
     const { platform } = process;
     const path = require('path');
     const fs = require('fs');
-    const { Download } = require('electron-dl');
     
     let downloadUrl = '';
     let filename = '';
@@ -1925,56 +1924,30 @@ ipcMain.handle('get-pending-update', async () => {
 // Check if Python and AI dependencies are available
 ipcMain.handle('check-python-available', async () => {
   try {
+    // If sidecar is running, Python is definitely available
+    if (speechSidecarManager && speechSidecarManager.getStatus && speechSidecarManager.getStatus().processRunning && speechSidecarManager.getStatus().modelReady) {
+      console.log('[check-python-available] Sidecar is running, Python is available');
+      return { available: true, pythonFound: true };
+    }
+    
+    // Otherwise, run a quick Python version check
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    const pathModule = require('path');
-    const fs = require('fs');
     
-    const candidates = [];
     const isWindows = process.platform === 'win32';
-    
-    // Check local venv
-    const winVenv = pathModule.join(app.getAppPath(), '.venv', 'Scripts', 'python.exe');
-    const posixVenv = pathModule.join(app.getAppPath(), '.venv', 'bin', 'python');
-    if (isWindows && fs.existsSync(winVenv)) candidates.push(winVenv);
-    if (!isWindows && fs.existsSync(posixVenv)) candidates.push(posixVenv);
-    
-    // Try system Python
-    candidates.push('python', 'python3');
+    const candidates = ['python', 'python3'];
     if (isWindows) candidates.push('py');
     
-    let foundPython = null;
     for (const cmd of candidates) {
       try {
-        const { stdout } = await execAsync(`"${cmd}" --version`, { timeout: 3000, encoding: 'utf8' });
-        foundPython = { cmd, version: stdout.trim() };
-        break;
+        const { stdout } = await execAsync(`"${cmd}" --version`, { timeout: 1000, encoding: 'utf8' });
+        console.log(`[check-python-available] Found ${cmd}: ${stdout.trim()}`);
+        return { available: true, pythonFound: true, pythonVersion: stdout.trim() };
       } catch {}
     }
     
-    if (!foundPython) {
-      return { available: false, pythonFound: false };
-    }
-    
-    // Check dependencies asynchronously with timeout
-    const requiredPackages = ['vosk', 'websockets', 'numpy'];
-    const missingPackages = [];
-    
-    for (const pkg of requiredPackages) {
-      try {
-        await execAsync(`"${foundPython.cmd}" -m pip show ${pkg}`, { timeout: 5000, encoding: 'utf8' });
-      } catch {
-        missingPackages.push(pkg);
-      }
-    }
-    
-    return {
-      available: missingPackages.length === 0,
-      pythonFound: true,
-      pythonVersion: foundPython.version,
-      missingPackages: missingPackages.length > 0 ? missingPackages : null
-    };
+    return { available: false, pythonFound: false };
   } catch (e) {
     console.error('[check-python-available] error:', e);
     return { available: false, pythonFound: false, error: String(e) };
