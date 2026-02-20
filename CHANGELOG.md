@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.4 - 2026-02-20
+
+- bump patch release
+
 ## 3.0.3 - 2026-02-20
 
 - fix: add error handler for spawn() failures when Python not found
