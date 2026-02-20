@@ -956,6 +956,9 @@ function initAiTab(settings) {
     }
   }
 
+  // Check Python status automatically when settings first opens (not just when AI tab clicked)
+  checkAndDisplayPythonStatus();
+
   // Check Python status when AI tab is opened, not during init
   const aiTabButton = document.querySelector('button[data-panel="ai"]');
   if (aiTabButton && !aiTabButton._pythonCheckSetup) {

@@ -578,14 +578,23 @@ function ensureAiSpeechWorkerWindow() {
   }
 }
 
-// Check if both windows are ready and close splash if so
+// Keep track of when splash was first shown
+let splashShownTime = 0;
+
+// Check if both windows are ready and close splash if so (with minimum display time)
 function tryCloseSplashScreen() {
   if (mainWindowReady && (aiWorkerWindowReady || !aiEnabled || launchSpeechUi || aiWorkerSuppressed)) {
     if (splashWindow && !splashWindow.isDestroyed()) {
-      splashClosed = true;
-      try { splashWindow.destroy(); splashWindow = null; } catch(e){}
-      try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
-      try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
+      // Ensure splash is visible for at least 1.2 seconds (covers transition animations)
+      const timeShown = Date.now() - splashShownTime;
+      const delayNeeded = Math.max(0, 1200 - timeShown);
+      
+      setTimeout(() => {
+        splashClosed = true;
+        try { splashWindow.destroy(); splashWindow = null; } catch(e){}
+        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
+        try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
+      }, delayNeeded);
     }
   }
 }
@@ -1431,6 +1440,7 @@ async function createWindow() {
     // Load splash and wait for it to be ready before loading main window
     await splashWindow.loadFile('splash.html');
     splashWindow.show();
+    splashShownTime = Date.now();  // Record when splash becomes visible
   } catch (e) { console.warn('Failed to create/show splash window', e); }
 
   // NOW load the main window HTML (will stay hidden behind visible splash)
