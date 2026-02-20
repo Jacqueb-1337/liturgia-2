@@ -32,6 +32,606 @@ const {
   VERSION, CDN_BASE, ITEM_HEIGHT, WINDOW_SIZE, BUFFER, BOOKS, CHAPTER_COUNTS, VERSE_COUNTS, BIBLE_STORAGE_DIR
 } = require('./constants');
 
+const desktopRuntime = (typeof window !== 'undefined') ? window.desktopRuntime : null;
+const AI_HINT_MESSAGE = 'Live suggestions will appear once Liturgia hears you.';
+const AI_SUGGESTION_EMPTY_MESSAGE = 'Waiting for the next verse suggestion…';
+const aiSuggestionState = { 
+  enabled: true, 
+  disposers: [], 
+  renderPending: false, 
+  lastPayload: null,
+  lastProcessedPayload: null,
+  suggestionGroups: [],
+  lastRenderedKey: null,
+  lastHintHidden: null,
+  isHovering: false,
+  autoScrollId: null,
+  newGroupCount: 0,
+  pendingGroups: []
+};
+if (desktopRuntime && typeof desktopRuntime.getCachedAiEnabled === 'function') {
+  try { aiSuggestionState.enabled = !!desktopRuntime.getCachedAiEnabled(); } catch (_) {}
+}
+
+function extractSuggestionGroups(payload) {
+  if (!payload) return [];
+  
+  // If already has groups structure, use it
+  if (Array.isArray(payload.groups)) {
+    return payload.groups.filter(g => g && Array.isArray(g.items) && g.items.length > 0);
+  }
+  
+  // Get all items from various payload formats
+  let items = [];
+  if (Array.isArray(payload.items)) items = payload.items;
+  else if (Array.isArray(payload.suggestions)) items = payload.suggestions;
+  else if (Array.isArray(payload)) items = payload;
+  
+  if (items.length === 0) return [];
+  
+  // Group items by their primary reference (book+chapter)
+  const groupMap = {};
+  const groupOrder = [];
+  
+  items.forEach((item) => {
+    const ref = item.ref || item.reference || '';
+    // Extract primary reference (book + chapter, e.g., "Genesis 12" from "Genesis 12:4")
+    const primaryRef = ref.split(':')[0].trim().toLowerCase();
+    
+    if (!groupMap[primaryRef]) {
+      groupMap[primaryRef] = { id: primaryRef, items: [] };
+      groupOrder.push(primaryRef);
+    }
+    
+    // Add item to group (max 2 per group)
+    if (groupMap[primaryRef].items.length < 2) {
+      groupMap[primaryRef].items.push(item);
+    }
+  });
+  
+  // Return groups in order they were first seen
+  return groupOrder.map(key => groupMap[key]);
+}
+
+function normalizeSuggestionItems(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.items)) return payload.items;
+  if (Array.isArray(payload.suggestions)) return payload.suggestions;
+  if (Array.isArray(payload.groups)) {
+    return payload.groups.flatMap((group) => group && Array.isArray(group.items) ? group.items : []);
+  }
+  if (payload.best && Array.isArray(payload.best)) return payload.best;
+  return [];
+}
+
+function createSuggestionEmptyRow(message) {
+  const placeholder = document.createElement('div');
+  placeholder.className = 'ai-suggestion-card ai-suggestion-card-empty';
+  placeholder.textContent = message;
+  return placeholder;
+}
+
+function parseSuggestionReference(text) {
+  if (!text) return null;
+  if (typeof window !== 'undefined' && typeof window.parseReference === 'function') {
+    const parsed = window.parseReference(text, BOOKS);
+    if (parsed) {
+      return {
+        book: parsed.book,
+        chapter: parsed.chapter || 1,
+        verse: parsed.verse || 1,
+        verseEnd: parsed.verseEnd || null
+      };
+    }
+  }
+  const match = text.trim().match(/^([1-3]?\s*[A-Za-z ]+)\s*(\d+)(?::(\d+))?(?:\s*-\s*(\d+))?/);
+  if (!match) return null;
+  const bookName = match[1].trim().toLowerCase();
+  const resolvedBook = BOOKS.find((b) => b.toLowerCase().startsWith(bookName)) || match[1].trim();
+  return {
+    book: resolvedBook,
+    chapter: parseInt(match[2], 10) || 1,
+    verse: parseInt(match[3] || '1', 10),
+    verseEnd: match[4] ? parseInt(match[4], 10) : null
+  };
+}
+
+async function handleSuggestionCardDoubleClick(item) {
+  if (!item) return;
+  const refText = item.ref || item.reference;
+  const parsed = parseSuggestionReference(refText);
+  if (!parsed) {
+    safeStatus('Unable to parse suggestion reference.');
+    return;
+  }
+  const success = await selectReferenceRange(parsed);
+  if (success) {
+    safeStatus(`Loaded ${refText} - Going Live`);
+    // Go live with the selected verse(s)
+    await handleVerseDoubleClick(selectedIndices);
+  } else {
+    // Invalid verse - populate search with book only
+    const bookSearch = parsed.book || refText.split(/[\s:]/)[0];
+    const searchInput = document.getElementById('search-autocomplete-input');
+    if (searchInput) {
+      searchInput.value = bookSearch;
+      searchInput.focus();
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    safeStatus(`Verse not found. Searching for ${bookSearch}...`);
+  }
+}
+
+async function handleSuggestionCardClick(item) {
+  if (!item) return;
+  const refText = item.ref || item.reference;
+  const parsed = parseSuggestionReference(refText);
+  if (!parsed) {
+    safeStatus('Unable to parse suggestion reference.');
+    return;
+  }
+  const success = await selectReferenceRange(parsed);
+  if (success && refText) {
+    safeStatus(`Loaded ${refText}`);
+  } else {
+    // Invalid verse - populate search with book only
+    const bookSearch = parsed.book || refText.split(/[\s:]/)[0];
+    const searchInput = document.getElementById('search-autocomplete-input');
+    if (searchInput) {
+      searchInput.value = bookSearch;
+      searchInput.focus();
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    safeStatus(`Verse not found. Searching for ${bookSearch}...`);
+  }
+}
+
+function isReferenceValid(ref) {
+  if (!ref || !ref.book) return false;
+  const book = ref.book.toLowerCase();
+  const normalizedBook = BOOKS.find((b) => b.toLowerCase() === book);
+  if (!normalizedBook) return false;
+  const maxChapter = CHAPTER_COUNTS[normalizedBook] || 0;
+  if (!maxChapter || ref.chapter < 1 || ref.chapter > maxChapter) return false;
+  
+  // Only validate verse counts if VERSE_COUNTS is available
+  if (typeof VERSE_COUNTS === 'object' && VERSE_COUNTS) {
+    const verseCountsKey = `${normalizedBook} ${ref.chapter}`;
+    const maxVerse = VERSE_COUNTS[verseCountsKey] || 0;
+    if (maxVerse && (ref.verse < 1 || ref.verse > maxVerse)) return false;
+    if (ref.verseEnd && maxVerse && ref.verseEnd > maxVerse) return false;
+  }
+  
+  return true;
+}
+
+function renderAiSuggestionPayload(payload, ui, state) {
+  if (!ui || !ui.list) return;
+  
+  state.lastPayload = payload;
+  if (state.renderPending) return;
+  state.renderPending = true;
+  
+  requestAnimationFrame(() => {
+    state.renderPending = false;
+    
+    // Update hint visibility
+    if (ui.context) {
+      const hasSuggestions = state.enabled && state.suggestionGroups.length > 0;
+      const hintText = state.enabled ? AI_HINT_MESSAGE : 'Enable AI in Settings to resume suggestions.';
+      if (state.lastHintHidden !== !hasSuggestions) {
+        ui.context.textContent = hintText;
+        ui.context.classList.toggle('ai-hint-hidden', hasSuggestions);
+        state.lastHintHidden = !hasSuggestions;
+      }
+    }
+    
+    const wasEmpty = ui.list.children.length === 0;
+    const scrollLeftBefore = ui.list.scrollLeft;
+    let newGroupWidth = 0;
+    
+    // Skip if this payload has already been processed (avoid duplicates)
+    if (payload && JSON.stringify(payload) === state.lastProcessedPayload) {
+      return;
+    }
+    
+    // Extract new items from payload and add to groups (preserve group structure)
+    if (state.enabled && state.lastPayload) {
+      // Mark this payload as processed
+      if (state.lastPayload) {
+        state.lastProcessedPayload = JSON.stringify(state.lastPayload);
+      }
+      const newGroups = extractSuggestionGroups(state.lastPayload);
+      
+      if (newGroups.length > 0) {
+        const newGroup = newGroups[0];
+        const newItems = newGroup.items || [];
+        
+        // Check if this is a refinement of the current (first) group
+        const currentGroup = state.suggestionGroups.length > 0 ? state.suggestionGroups[0] : null;
+        const currentItems = currentGroup && currentGroup.items ? currentGroup.items : [];
+        
+        const newPrimaryRef = newItems.length > 0 ? (newItems[0].ref || newItems[0].reference || '').toLowerCase() : '';
+        const currentPrimaryRef = currentItems.length > 0 ? (currentItems[0].ref || currentItems[0].reference || '').toLowerCase() : '';
+        
+        // Check if new reference starts with current reference (e.g., "genesis" -> "genesis 12" -> "genesis 12:1")
+        const isSameSuggestion = currentPrimaryRef && newPrimaryRef.startsWith(currentPrimaryRef.split(/[\s:]/)[0]);
+        
+        if (isSameSuggestion && currentGroup) {
+          // Update the first group with refined items
+          currentGroup.items = newItems;
+        } else if (newPrimaryRef) {
+          // New suggestion: queue it if hovering, otherwise prepend immediately
+          if (state.isHovering) {
+            // Check if this reference is already queued to avoid duplicates
+            const alreadyQueued = state.pendingGroups.some(g => {
+              const ref = (g.items && g.items[0] && (g.items[0].ref || g.items[0].reference)) || '';
+              return ref.toLowerCase().split(/[\s:]/)[0] === newPrimaryRef.split(/[\s:]/)[0];
+            });
+            
+            if (!alreadyQueued) {
+              // Queue it to be added when unhover (prevents items shifting under cursor)
+              state.pendingGroups.unshift(newGroup);
+              // Show arrow when groups are queued
+              if (state.arrowElement) {
+                state.arrowElement.classList.add('visible');
+              }
+            }
+          } else {
+            // Not hovering, prepend immediately
+            state.suggestionGroups.unshift(newGroup);
+            state.newGroupCount++;
+          }
+        }
+        
+        // Keep total items under 20 by trimming groups from the end
+        let totalItems = 0;
+        let keepUpTo = 0;
+        for (let i = 0; i < state.suggestionGroups.length; i++) {
+          const itemsInGroup = (state.suggestionGroups[i].items || []).length;
+          if (totalItems + itemsInGroup <= 20) {
+            totalItems += itemsInGroup;
+            keepUpTo = i + 1;
+          } else {
+            break;
+          }
+        }
+        state.suggestionGroups = state.suggestionGroups.slice(0, keepUpTo);
+      }
+    }
+    
+    // Create a key to detect if we need to re-render
+    const groupsKey = state.suggestionGroups.map(g => 
+      (g.items || []).map(item => item.ref || item.reference || '').join(',')
+    ).join('|');
+    
+    if (state.lastRenderedKey === groupsKey && ui.list.children.length > 0) return;
+    state.lastRenderedKey = groupsKey;
+    
+    // Clear and rebuild list
+    ui.list.innerHTML = '';
+    if (!state.enabled) {
+      ui.list.appendChild(createSuggestionEmptyRow('Enable AI in Settings to see live suggestions.'));
+      return;
+    }
+    if (state.suggestionGroups.length === 0) {
+      ui.list.appendChild(createSuggestionEmptyRow(AI_SUGGESTION_EMPTY_MESSAGE));
+      state.newGroupCount = 0;
+      return;
+    }
+    
+    // Render each group as a column (preserving group integrity)
+    state.suggestionGroups.forEach((group, groupIdx) => {
+      const groupColumn = document.createElement('div');
+      groupColumn.className = 'ai-suggestion-group';
+      
+
+      
+      // Only add animation to the first group if it's new
+      if (groupIdx === 0 && !wasEmpty && state.newGroupCount > 0) {
+        groupColumn.classList.add('ai-suggestion-group-new');
+        // Remove the animation class after animation completes to prevent replay
+        groupColumn.addEventListener('animationend', () => {
+          groupColumn.classList.remove('ai-suggestion-group-new');
+        }, { once: true });
+      }
+      
+      // Render all items in this group (1 or 2, never mixing groups)
+      const items = group.items || [];
+      items.forEach((item) => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'ai-suggestion-card';
+        
+        const isInvalid = !isReferenceValid(parseSuggestionReference(item.ref || item.reference));
+        if (isInvalid) {
+          card.classList.add('ai-suggestion-card-invalid');
+          card.title = `Invalid verse: ${item.ref || item.reference}`;
+        } else {
+          card.title = item.ref || item.reference || 'Reference';
+        }
+        
+        const ref = document.createElement('div');
+        ref.className = 'ai-suggestion-ref';
+        ref.textContent = item.ref || item.reference || 'Reference';
+        card.appendChild(ref);
+        
+        card.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleSuggestionCardClick(item);
+        });
+        card.addEventListener('dblclick', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleSuggestionCardDoubleClick(item);
+        });
+        
+        groupColumn.appendChild(card);
+      });
+      
+      ui.list.appendChild(groupColumn);
+    });
+    
+    // Clear the new group counter after rendering
+    if (state.newGroupCount > 0) {
+      state.newGroupCount = 0;
+    }
+    
+    // After adding new item, scroll to show it if not hovering
+    if (!state.isHovering && !wasEmpty) {
+      requestAnimationFrame(() => {
+        // Scroll to the leftmost position to show the new item
+        ui.list.scrollLeft = 0;
+        startAutoScroll(ui, state);
+      });
+    }
+    
+    // Setup hover handlers on panel (only once)
+    const panel = ui.list.closest('#ai-suggestion-panel');
+    if (panel && !panel.hasHoverHandlers) {
+      panel.hasHoverHandlers = true;
+      
+      panel.addEventListener('mouseenter', () => {
+        state.isHovering = true;
+        // Stop auto-scroll (but suggestions keep adding to beginning)
+        if (state.autoScrollId) {
+          cancelAnimationFrame(state.autoScrollId);
+          state.autoScrollId = null;
+        }
+        // Show arrow ONLY if there are pending suggestions queued waiting to display
+        const arrow = state.arrowElement || ui.list.previousElementSibling;
+        if (arrow && arrow.classList.contains('ai-suggestion-arrow')) {
+          if (state.pendingGroups.length > 0) {
+            arrow.classList.add('visible');
+          } else {
+            arrow.classList.remove('visible');
+          }
+        }
+      });
+      
+      panel.addEventListener('mouseleave', () => {
+        state.isHovering = false;
+        // Always hide arrow when leaving hover (never show outside of hover)
+        const arrow = state.arrowElement || ui.list.previousElementSibling;
+        if (arrow && arrow.classList.contains('ai-suggestion-arrow')) {
+          arrow.classList.remove('visible');
+        }
+        
+        // Add any queued groups that arrived while hovering
+        if (state.pendingGroups.length > 0) {
+          state.suggestionGroups.unshift(...state.pendingGroups);
+          state.newGroupCount += state.pendingGroups.length;
+          state.pendingGroups = [];
+          // Force DOM re-render without re-processing the payload
+          renderAiSuggestionPayload(null, ui, state);
+        }
+        
+        // Smoothly scroll back to start and resume auto-scroll
+        requestAnimationFrame(() => {
+          smoothScrollToStart(ui, state);
+        });
+      });
+    }
+  });
+}
+
+function startAutoScroll(ui, state) {
+  if (state.isHovering) return;
+  if (state.autoScrollId) {
+    cancelAnimationFrame(state.autoScrollId);
+  }
+  
+  const scrollStep = () => {
+    if (state.isHovering) {
+      state.autoScrollId = null;
+      return;
+    }
+    
+    // Auto-scroll left (items move from right to left)
+    ui.list.scrollLeft += 2;
+    
+    // Stop if we've reached near the end
+    if (ui.list.scrollLeft >= ui.list.scrollWidth - ui.list.clientWidth - 10) {
+      state.autoScrollId = null;
+      return;
+    }
+    
+    state.autoScrollId = requestAnimationFrame(scrollStep);
+  };
+  
+  state.autoScrollId = requestAnimationFrame(scrollStep);
+}
+
+function smoothScrollToStart(ui, state) {
+  if (!ui.list) return;
+  
+  const currentScroll = ui.list.scrollLeft;
+  if (currentScroll === 0) {
+    // Already at start, just resume auto-scroll
+    startAutoScroll(ui, state);
+    return;
+  }
+  
+  const startTime = performance.now();
+  const duration = 600; // 0.6s smooth scroll
+  
+  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+  
+  const animate = (currentTime) => {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = easeOutCubic(progress);
+    
+    ui.list.scrollLeft = currentScroll * (1 - eased);
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      ui.list.scrollLeft = 0;
+      // Resume auto-scroll after reaching start
+      startAutoScroll(ui, state);
+    }
+  };
+  
+  requestAnimationFrame(animate);
+}
+
+function initAiSuggestionPanel() {
+  const panel = document.getElementById('ai-suggestion-panel');
+  if (!panel) return;
+  const ui = {
+    panel,
+    pill: document.getElementById('ai-suggestion-pill'),
+    subtitle: document.getElementById('ai-suggestion-subtitle'),
+    context: document.getElementById('ai-suggestion-context'),
+    list: document.getElementById('ai-suggestion-list')
+  };
+  
+  // Create the arrow element
+  if (!ui.list.previousElementSibling || !ui.list.previousElementSibling.classList.contains('ai-suggestion-arrow')) {
+    const arrow = document.createElement('div');
+    arrow.className = 'ai-suggestion-arrow';
+    arrow.textContent = '→';
+    arrow.classList.remove('visible'); // Ensure it starts hidden
+    ui.list.parentElement.insertBefore(arrow, ui.list);
+    aiSuggestionState.arrowElement = arrow;
+  } else {
+    // Use existing arrow and cache it
+    const existingArrow = ui.list.previousElementSibling;
+    existingArrow.classList.remove('visible'); // Ensure it's hidden on init
+    aiSuggestionState.arrowElement = existingArrow;
+  }
+  
+  if (ui.context) {
+    ui.context.textContent = AI_HINT_MESSAGE;
+    ui.context.classList.remove('ai-hint-hidden');
+  }
+
+  if (!desktopRuntime || typeof desktopRuntime.onSuggestions !== 'function') {
+    panel.classList.add('ai-suggestion-panel-disabled');
+    if (ui.subtitle) ui.subtitle.textContent = 'Speech runtime unavailable in this window.';
+    if (ui.pill) {
+      ui.pill.textContent = 'Unavailable';
+      ui.pill.classList.add('tone-err');
+    }
+    if (ui.list) {
+      ui.list.appendChild(createSuggestionEmptyRow('AI runtime unavailable in this window.'));
+    }
+    return;
+  }
+
+  const addDisposer = (fn) => {
+    if (typeof fn === 'function') {
+      aiSuggestionState.disposers.push(fn);
+    }
+  };
+
+  const applyStatus = (status = {}) => {
+    const aiDisabled = typeof status.aiDisabled === 'boolean' ? status.aiDisabled : !aiSuggestionState.enabled;
+    if (typeof status.aiDisabled === 'boolean') {
+      aiSuggestionState.enabled = !status.aiDisabled;
+    }
+    const unavailable = status.statusMessage === 'sidecar-disabled';
+    panel.classList.toggle('ai-suggestion-panel-disabled', aiDisabled || unavailable);
+    if (ui.pill) {
+      ui.pill.classList.remove('tone-ok', 'tone-warn', 'tone-err');
+      let tone = 'tone-warn';
+      let text = 'Starting';
+      if (unavailable) {
+        tone = 'tone-err';
+        text = 'Unavailable';
+      } else if (aiDisabled) {
+        tone = 'tone-warn';
+        text = 'Disabled';
+      } else if (!status.portOpen) {
+        tone = 'tone-err';
+        text = 'Offline';
+      } else if (status.modelReady) {
+        tone = 'tone-ok';
+        text = 'Ready';
+      }
+      ui.pill.textContent = text;
+      ui.pill.classList.add(tone);
+    }
+    if (ui.subtitle) {
+      if (aiDisabled) {
+        ui.subtitle.textContent = 'Enable AI in Settings to resume suggestions.';
+      } else if (status.lastError) {
+        ui.subtitle.textContent = status.lastError;
+      } else if (status.statusMessage) {
+        ui.subtitle.textContent = status.statusMessage.replace(/-/g, ' ');
+      } else {
+        ui.subtitle.textContent = 'Speech assistant warming up…';
+      }
+    }
+  };
+
+  desktopRuntime.getSidecarStatus().then(applyStatus).catch(() => {});
+  if (typeof desktopRuntime.onSidecarStatus === 'function') {
+    addDisposer(desktopRuntime.onSidecarStatus(applyStatus));
+  }
+
+  const renderPayload = (payload) => renderAiSuggestionPayload(payload, ui, aiSuggestionState);
+  desktopRuntime.getLatestSuggestions().then(renderPayload).catch(() => {});
+  addDisposer(desktopRuntime.onSuggestions(renderPayload));
+
+  if (typeof desktopRuntime.getAiEnabled === 'function') {
+    desktopRuntime.getAiEnabled().then((res) => {
+      const enabled = (res && typeof res.enabled === 'boolean') ? res.enabled : !!res;
+      aiSuggestionState.enabled = enabled;
+      panel.classList.toggle('ai-suggestion-panel-disabled', !enabled);
+      if (res && res.status) applyStatus(res.status);
+      if (!enabled) {
+        renderPayload({ clearContext: true });
+      }
+    }).catch(() => {});
+  } else {
+    panel.classList.toggle('ai-suggestion-panel-disabled', !aiSuggestionState.enabled);
+  }
+
+  if (typeof desktopRuntime.onAiEnabledChanged === 'function') {
+    addDisposer(desktopRuntime.onAiEnabledChanged((enabled) => {
+      aiSuggestionState.enabled = !!enabled;
+      if (!enabled) {
+        aiSuggestionState.groupQueue = [];
+        aiSuggestionState.currentGroup = null;
+      }
+      panel.classList.toggle('ai-suggestion-panel-disabled', !enabled);
+      if (!enabled) {
+        renderPayload({ clearContext: true });
+        if (ui.subtitle) ui.subtitle.textContent = 'Enable AI in Settings to resume suggestions.';
+      }
+    }));
+  }
+
+  window.addEventListener('beforeunload', () => {
+    aiSuggestionState.disposers.forEach((dispose) => { try { dispose && dispose(); } catch (_) {} });
+    aiSuggestionState.disposers = [];
+  }, { once: true });
+}
+
 let allVerses = [];
 let allSongs = [];
 let filteredSongs = []; // For search results
@@ -690,6 +1290,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   initSchedule();
   initResizers();
   restoreDividerPositions();
+  initAiSuggestionPanel();
 
   // Re-validate divider positions after a window resize to avoid off-screen panels
   let _dividerResizeTimeout = null;
@@ -848,6 +1449,44 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
+async function selectReferenceRange(ref) {
+  if (!ref || !ref.book || !ref.chapter || !allVerses.length) return false;
+  const startVerse = Math.max(1, ref.verse || 1);
+  const endVerse = Math.max(startVerse, ref.verseEnd || startVerse);
+  const startKey = `${ref.book} ${ref.chapter}:${startVerse}`.toLowerCase();
+  let startIdx = allVerses.findIndex((v) => v.key && v.key.toLowerCase() === startKey);
+  if (startIdx === -1) {
+    safeStatus('Verse not found.');
+    return false;
+  }
+  let endIdx = startIdx;
+  if (endVerse !== startVerse) {
+    const endKey = `${ref.book} ${ref.chapter}:${endVerse}`.toLowerCase();
+    const maybeEnd = allVerses.findIndex((v) => v.key && v.key.toLowerCase() === endKey);
+    if (maybeEnd !== -1) {
+      endIdx = maybeEnd;
+    }
+  }
+  selectedIndices = [];
+  for (let k = Math.min(startIdx, endIdx); k <= Math.max(startIdx, endIdx); k++) {
+    selectedIndices.push(k);
+  }
+  anchorIndex = selectedIndices[0];
+  updateVerseDisplay();
+  if (selectedIndices.length === 1) {
+    await updatePreview(selectedIndices[0]);
+  } else {
+    await updatePreview(selectedIndices);
+  }
+  jumpToVerse(selectedIndices[0]);
+  const listContainer = document.getElementById('verse-list');
+  if (listContainer) {
+    renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
+  }
+  await saveLastSelectionToSettings();
+  return true;
+}
+
 async function initScripture() {
   safeStatus('Initializing…');
   allVerses = [];
@@ -958,46 +1597,7 @@ async function initScripture() {
   setupSearchBox({
     containerId: 'search-box-container',
     onReferenceSelected: async (ref) => {
-      // Support ranges (e.g., John 3:16-18)
-      const startKey = `${ref.book} ${ref.chapter}:${ref.verse}`;
-      const startIdx = allVerses.findIndex(v => v.key && v.key.toLowerCase() === startKey.toLowerCase());
-      if (ref.verseEnd) {
-        const endKey = `${ref.book} ${ref.chapter}:${ref.verseEnd}`;
-        const endIdx = allVerses.findIndex(v => v.key && v.key.toLowerCase() === endKey.toLowerCase());
-        if (startIdx !== -1 && endIdx !== -1) {
-          const a = Math.min(startIdx, endIdx);
-          const b = Math.max(startIdx, endIdx);
-          selectedIndices = [];
-          for (let k = a; k <= b; k++) selectedIndices.push(k);
-          anchorIndex = a;
-          updateVerseDisplay(); // Show the verse content
-          updatePreview(selectedIndices); // Also update preview with range
-          jumpToVerse(selectedIndices[0]);     // Scroll to the verse
-          // Also immediately highlight in the list
-          const listContainer = document.getElementById('verse-list');
-          if (listContainer) {
-            renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
-          }
-          await saveLastSelectionToSettings();
-          return;
-        }
-      }
-
-      if (startIdx !== -1) {
-        selectedIndices = [startIdx];
-        anchorIndex = startIdx;
-        updateVerseDisplay(); // Show the verse content
-        updatePreview(startIdx); // Also update preview
-        jumpToVerse(startIdx);     // Scroll to the verse
-        // Also immediately highlight in the list
-        const listContainer = document.getElementById('verse-list');
-        if (listContainer) {
-          renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
-        }
-        await saveLastSelectionToSettings();
-      } else {
-        safeStatus('Verse not found.');
-      }
+      await selectReferenceRange(ref);
     },
     onNavigate: (direction) => {
       if (direction === 'prev') selectPrevVerse();

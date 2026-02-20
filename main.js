@@ -35,6 +35,7 @@ const path = require('path');
 const fs = require('fs');
 const RemoteServer = require('./remote-server');
 const RelayClient = require('./relay-client');
+const createSpeechSidecarManager = require('./speech/speechSidecarManager');
 
 // Helper to determine the best icon path for windows/taskbar (works in dev and packaged)
 function getIconPath() {
@@ -136,6 +137,15 @@ let splashWindow = null;
 let splashClosed = false;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
+let speechWindow = null;
+let aiSpeechWorkerWindow = null;
+let aiWorkerSuppressed = false;
+const launchSpeechUi = process.argv.includes('--speech-ui');
+let speechSidecarManager = null;
+let speechSidecarWatchdog = null;
+let latestSidecarStatus = null;
+let latestAiSuggestions = null;
+let cachedAiSettings = { modelSize: 'small' };
 
 
 // --- EasyWorship Import Helpers ---
@@ -433,6 +443,198 @@ async function importEasyWorshipHandler() {
 
 const { getUserDataDir } = require('./lib/paths');
 const settingsPath = path.join(getUserDataDir(app), 'settings.json');
+const SPEECH_WATCHDOG_INTERVAL_MS = 6000;
+
+function loadAiSettingsFromDisk() {
+  try {
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const ai = (parsed && typeof parsed === 'object') ? (parsed.ai || {}) : {};
+    return {
+      modelSize: ai.modelSize || 'small',
+      enabled: typeof ai.enabled === 'boolean' ? ai.enabled : true,
+      micDeviceId: ai.micDeviceId || 'default'
+    };
+  } catch (e) {
+    return { modelSize: 'small', enabled: true, micDeviceId: 'default' };
+  }
+}
+
+cachedAiSettings = loadAiSettingsFromDisk();
+let aiEnabled = cachedAiSettings.enabled !== false;
+speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize });
+
+function decorateSidecarStatus(status) {
+  return { ...(status || {}), aiDisabled: !aiEnabled };
+}
+
+function getCurrentSidecarStatus() {
+  return latestSidecarStatus || decorateSidecarStatus(speechSidecarManager ? speechSidecarManager.getStatus() : { statusMessage: 'sidecar-disabled' });
+}
+
+function bindSidecarStatusEmitter(manager) {
+  if (!manager || manager.__liturgiaStatusBound) return;
+  manager.__liturgiaStatusBound = true;
+  manager.on('status', (status) => {
+    const decorated = decorateSidecarStatus(status);
+    latestSidecarStatus = decorated;
+    if (status && status.modelSize) {
+      cachedAiSettings = { ...cachedAiSettings, modelSize: status.modelSize };
+    }
+    broadcastToAllWindows('sidecar:status', decorated);
+  });
+}
+
+function startSidecarWatchdog() {
+  if (speechSidecarWatchdog || !speechSidecarManager || !aiEnabled) return;
+  speechSidecarWatchdog = setInterval(() => {
+    if (!aiEnabled || !speechSidecarManager) return;
+    speechSidecarManager.ensureRunning().catch((err) => {
+      console.warn('[speech-sidecar] watchdog ensure failed:', err && err.message ? err.message : err);
+    });
+  }, SPEECH_WATCHDOG_INTERVAL_MS);
+}
+
+function stopSidecarWatchdog() {
+  if (!speechSidecarWatchdog) return;
+  clearInterval(speechSidecarWatchdog);
+  speechSidecarWatchdog = null;
+}
+
+function destroyAiSpeechWorkerWindow(options = {}) {
+  if (options.suppressRestart) {
+    aiWorkerSuppressed = true;
+  }
+  if (!aiSpeechWorkerWindow) return;
+  const target = aiSpeechWorkerWindow;
+  aiSpeechWorkerWindow = null;
+  try { target.destroy(); } catch (err) { console.warn('[ai-worker] failed to destroy window', err && err.message ? err.message : err); }
+}
+
+function ensureAiSpeechWorkerWindow() {
+  if (launchSpeechUi) return;
+  if (!aiEnabled) return;
+  if (aiWorkerSuppressed) return;
+  if (aiSpeechWorkerWindow) return;
+  if (!app.isReady()) {
+    app.once('ready', ensureAiSpeechWorkerWindow);
+    return;
+  }
+
+  try {
+    aiSpeechWorkerWindow = new BrowserWindow({
+      width: 480,
+      height: 320,
+      show: false,
+      resizable: false,
+      focusable: false,
+      minimizable: false,
+      maximizable: false,
+      skipTaskbar: true,
+      autoHideMenuBar: true,
+      backgroundColor: '#000000',
+      webPreferences: {
+        contextIsolation: true,
+        preload: path.join(__dirname, 'preload.js'),
+        nodeIntegration: false,
+        sandbox: false,
+        spellcheck: false,
+        backgroundThrottling: false,
+        devTools: false
+      }
+    });
+
+    aiWorkerSuppressed = false;
+    aiSpeechWorkerWindow.setMenuBarVisibility(false);
+    const workerEntry = path.join(__dirname, 'speech', 'index.html');
+    aiSpeechWorkerWindow.loadFile(workerEntry, { query: { headless: '1', autostart: '1' } }).catch((err) => {
+      console.warn('[ai-worker] failed to load speech worker', err && err.message ? err.message : err);
+    });
+
+    aiSpeechWorkerWindow.on('closed', () => {
+      aiSpeechWorkerWindow = null;
+      if (aiEnabled && !launchSpeechUi && !aiWorkerSuppressed) {
+        setTimeout(() => ensureAiSpeechWorkerWindow(), 1200);
+      }
+    });
+  } catch (err) {
+    console.warn('[ai-worker] creation failed', err && err.message ? err.message : err);
+    aiSpeechWorkerWindow = null;
+  }
+}
+
+async function setAiEnabled(nextEnabled) {
+  const desired = !!nextEnabled;
+  if (desired === aiEnabled) {
+    return { ok: true, enabled: aiEnabled, status: latestSidecarStatus };
+  }
+
+  aiEnabled = desired;
+  await persistAiSettings({ enabled: aiEnabled });
+
+  if (!aiEnabled) {
+    stopSidecarWatchdog();
+    destroyAiSpeechWorkerWindow();
+    if (speechSidecarManager) {
+      try { await speechSidecarManager.stopProcess(); } catch (err) { console.warn('[speech-sidecar] stop failed', err && err.message ? err.message : err); }
+    }
+    latestSidecarStatus = decorateSidecarStatus(speechSidecarManager ? speechSidecarManager.getStatus() : { statusMessage: 'sidecar-disabled' });
+    broadcastToAllWindows('sidecar:status', latestSidecarStatus);
+    latestAiSuggestions = { clearContext: true, suggestions: [] };
+    broadcastToAllWindows('ai:suggestions', latestAiSuggestions);
+  } else {
+    if (!speechSidecarManager) {
+      speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize });
+      bindSidecarStatusEmitter(speechSidecarManager);
+    }
+    try {
+      await speechSidecarManager.ensureRunning();
+    } catch (err) {
+      console.warn('[speech-sidecar] failed to start after enabling AI:', err && err.message ? err.message : err);
+    }
+    latestSidecarStatus = decorateSidecarStatus(speechSidecarManager ? speechSidecarManager.getStatus() : { statusMessage: 'sidecar-disabled' });
+    broadcastToAllWindows('sidecar:status', latestSidecarStatus);
+    startSidecarWatchdog();
+    ensureAiSpeechWorkerWindow();
+  }
+
+  broadcastToAllWindows('ai:enabled-changed', aiEnabled);
+
+  return { ok: true, enabled: aiEnabled, status: latestSidecarStatus };
+}
+
+bindSidecarStatusEmitter(speechSidecarManager);
+latestSidecarStatus = decorateSidecarStatus(speechSidecarManager.getStatus());
+
+function broadcastToAllWindows(channel, payload, { skipWebContentsId } = {}) {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (!win || win.isDestroyed()) return;
+    if (skipWebContentsId && win.webContents && win.webContents.id === skipWebContentsId) return;
+    try { win.webContents.send(channel, payload); } catch (err) { console.warn(`[broadcast ${channel}] failed`, err && err.message ? err.message : err); }
+  });
+}
+
+function sendLatestSidecarStatusToWindow(win) {
+  if (!latestSidecarStatus || !win || win.isDestroyed()) return;
+  try { win.webContents.send('sidecar:status', latestSidecarStatus); } catch (err) {}
+}
+
+function sendLatestAiSuggestionsToWindow(win) {
+  if (!latestAiSuggestions || !win || win.isDestroyed()) return;
+  try { win.webContents.send('ai:suggestions', latestAiSuggestions); } catch (err) {}
+}
+
+function hydrateWindowWithAiRuntime(win) {
+  sendLatestSidecarStatusToWindow(win);
+  sendLatestAiSuggestionsToWindow(win);
+}
+
+
+
+app.on('browser-window-created', (_event, win) => {
+  if (!win || !win.webContents) return;
+  win.webContents.once('did-finish-load', () => hydrateWindowWithAiRuntime(win));
+});
 
 // Atomic settings write with backup. Writes to a tmp file then renames to avoid truncation and
 // copies the previous non-empty file to settings.json.bak so we can recover if something goes wrong.
@@ -534,6 +736,79 @@ function applySettingsPatch(patch) {
 
 ipcMain.handle('update-settings', async (event, patch) => {
   return applySettingsPatch(patch);
+});
+
+async function persistAiSettings(patch = {}) {
+  cachedAiSettings = { ...cachedAiSettings, ...patch };
+  await applySettingsPatch({ ai: { ...cachedAiSettings } });
+  return cachedAiSettings;
+}
+
+ipcMain.handle('sidecar:get-status', async () => {
+  return getCurrentSidecarStatus();
+});
+
+ipcMain.handle('sidecar:ensure-running', async () => {
+  if (!speechSidecarManager) {
+    return decorateSidecarStatus({ statusMessage: 'sidecar-disabled' });
+  }
+  if (!aiEnabled) {
+    return getCurrentSidecarStatus();
+  }
+  await speechSidecarManager.ensureRunning();
+  return getCurrentSidecarStatus();
+});
+
+ipcMain.handle('sidecar:restart', async () => {
+  if (!speechSidecarManager) return { ok: false, error: 'sidecar-disabled' };
+  if (!aiEnabled) return { ok: false, error: 'ai-disabled', status: getCurrentSidecarStatus() };
+  const ok = await speechSidecarManager.restart();
+  return { ok, status: getCurrentSidecarStatus() };
+});
+
+ipcMain.handle('sidecar:set-model-size', async (_event, requestedSize) => {
+  if (!speechSidecarManager) return { ok: false, error: 'sidecar-disabled' };
+  const result = await speechSidecarManager.setModelSize(requestedSize, { restart: aiEnabled });
+  if (result && result.ok && result.modelSize) {
+    await persistAiSettings({ modelSize: result.modelSize });
+  }
+  return { ...result, status: getCurrentSidecarStatus() };
+});
+
+ipcMain.handle('sidecar:open-model-folder', async () => {
+  if (!speechSidecarManager) return { ok: false, error: 'sidecar-disabled' };
+  const targetDir = speechSidecarManager.getModelFolder();
+  try {
+    await fs.promises.mkdir(targetDir, { recursive: true });
+    const openResult = await shell.openPath(targetDir);
+    if (openResult) {
+      return { ok: false, error: openResult, path: targetDir };
+    }
+    return { ok: true, path: targetDir };
+  } catch (err) {
+    return { ok: false, error: String(err && err.message ? err.message : err), path: targetDir };
+  }
+});
+
+ipcMain.on('ai:suggestions-from-renderer', (event, payload) => {
+  latestAiSuggestions = payload;
+  broadcastToAllWindows('ai:suggestions', payload, { skipWebContentsId: event && event.sender ? event.sender.id : undefined });
+});
+
+ipcMain.handle('ai:get-latest-suggestions', async () => {
+  return latestAiSuggestions || null;
+});
+
+ipcMain.handle('ai:get-enabled', async () => {
+  return { enabled: aiEnabled, status: getCurrentSidecarStatus() };
+});
+
+ipcMain.handle('ai:set-enabled', async (_event, desiredState) => {
+  if (typeof desiredState !== 'boolean') {
+    return { ok: false, error: 'invalid-input', enabled: aiEnabled, status: getCurrentSidecarStatus() };
+  }
+  const result = await setAiEnabled(desiredState);
+  return { ...result, status: getCurrentSidecarStatus() };
 });
 
 // Remote control pairing callback
@@ -1094,6 +1369,7 @@ async function createWindow() {
               modal: true,
               icon: getIconPath(),
               webPreferences: {
+                preload: path.join(__dirname, 'preload.js'),
                 nodeIntegration: true,
                 contextIsolation: false
               }
@@ -1125,7 +1401,11 @@ async function createWindow() {
           }
         },
         { type: 'separator' },
-        { role: 'toggledevtools' }
+        { role: 'toggledevtools' },
+        {
+          label: 'Open AI Speech Debugger',
+          click: () => { openSpeechDebuggerWindow(); }
+        }
       ]
     },
     {
@@ -1164,6 +1444,50 @@ async function createWindow() {
   Menu.setApplicationMenu(menu);
 }
 
+async function openSpeechDebuggerWindow() {
+  if (speechWindow && !speechWindow.isDestroyed()) {
+    speechWindow.show();
+    speechWindow.focus();
+    return speechWindow;
+  }
+
+  destroyAiSpeechWorkerWindow({ suppressRestart: true });
+
+  speechWindow = new BrowserWindow({
+    width: 1320,
+    height: 880,
+    title: 'Liturgia Speech Debugger',
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'speech', 'desktop', 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false
+    }
+  });
+
+  speechWindow.setMenuBarVisibility(false);
+  speechWindow.on('closed', () => {
+    speechWindow = null;
+    aiWorkerSuppressed = false;
+    if (aiEnabled && !launchSpeechUi) {
+      setTimeout(() => ensureAiSpeechWorkerWindow(), 800);
+    }
+  });
+  const entryPoint = path.join(__dirname, 'speech', 'index.html');
+  try {
+    await speechWindow.loadFile(entryPoint);
+  } catch (err) {
+    console.error('[speech-window] failed to load UI:', err);
+  }
+
+  if (speechWindow && speechWindow.webContents) {
+    speechWindow.webContents.once('did-finish-load', () => hydrateWindowWithAiRuntime(speechWindow));
+  }
+
+  return speechWindow;
+}
+
 // Listen for dark theme changes from settings window
 ipcMain.on('set-dark-theme', (event, enabled) => {
   if (mainWindow) {
@@ -1178,6 +1502,27 @@ if (process.platform === 'win32') {
 
 app.whenReady().then(async () => {
   await createWindow();
+
+  if (speechSidecarManager) {
+    if (aiEnabled) {
+      try {
+        await speechSidecarManager.ensureRunning();
+      } catch (err) {
+        console.warn('[speech-sidecar] ensure running failed:', err && err.message ? err.message : err);
+      }
+      startSidecarWatchdog();
+    } else {
+      latestSidecarStatus = decorateSidecarStatus(speechSidecarManager.getStatus());
+    }
+  }
+
+  if (aiEnabled && !launchSpeechUi) {
+    ensureAiSpeechWorkerWindow();
+  }
+
+  if (launchSpeechUi) {
+    setTimeout(() => { openSpeechDebuggerWindow(); }, 500);
+  }
   
   // Start remote control server if enabled (UAC prompt only on first time)
   try {
@@ -1291,6 +1636,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  destroyAiSpeechWorkerWindow();
   // Clean up remote server
   if (remoteServer) {
     console.log('[main] Stopping remote server on app quit');
@@ -1304,6 +1650,13 @@ app.on('before-quit', async () => {
     relayClient = null;
     // Small delay to allow deregister to complete
     await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  if (speechSidecarWatchdog) {
+    clearInterval(speechSidecarWatchdog);
+    speechSidecarWatchdog = null;
+  }
+  if (speechSidecarManager) {
+    try { speechSidecarManager.dispose(); } catch (err) { console.warn('[speech-sidecar] dispose failed', err && err.message ? err.message : err); }
   }
 });
 

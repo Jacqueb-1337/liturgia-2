@@ -50,7 +50,9 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   if (!container) return;
 
   container.innerHTML = '';
-  container.style.paddingTop = '1em'; // Add padding above the search box
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '0.25em';
 
   // Input box
   const input = document.createElement('input');

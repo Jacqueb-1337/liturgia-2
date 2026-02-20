@@ -2,6 +2,7 @@ const { ipcRenderer } = require('electron');
 const { CDN_BASE, BIBLE_STORAGE_DIR } = require('./constants');
 const fs = require('fs');
 const path = require('path');
+let cachedSettings = null;
 
 // Secure storage API using IPC to main (same as in renderer.js)
 const secure = {
@@ -83,6 +84,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   
   const settings = await ipcRenderer.invoke('load-settings');
+  cachedSettings = settings || {};
   if (settings) {
     // Back-compat: only set username field if it exists
     const usernameEl = document.getElementById('username');
@@ -99,6 +101,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Populate account/subscription info
   try {
+    initAiTab(settings || {});
     let license = await ipcRenderer.invoke('get-current-license-status');
     // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
     try {
@@ -231,148 +234,691 @@ document.querySelectorAll('.save-settings').forEach(btn => {
   });
 });
 
-// Remote Control initialization
-(async () => {
-  const settings = await ipcRenderer.invoke('load-settings');
-  const remoteEnabledEl = document.getElementById('remote-enabled');
-  const remotePortEl = document.getElementById('remote-port');
-  const pairedDevicesList = document.getElementById('paired-devices-list');
-  const remoteServerInfo = document.getElementById('remote-server-info');
-  const remoteStatus = document.getElementById('remote-status');
-  const remoteAddressesContainer = document.getElementById('remote-addresses-container');
-  
-  if (settings && settings.remote) {
-    if (remoteEnabledEl) remoteEnabledEl.checked = !!settings.remote.enabled;
-    if (remotePortEl) remotePortEl.value = settings.remote.port || 39847;
+// Remote Control UI removed in favor of AI tab.
+
+async function mergeAiSettings(patch) {
+  try {
+    if (!cachedSettings) cachedSettings = await ipcRenderer.invoke('load-settings');
+    const next = { ...(cachedSettings.ai || {}), ...patch };
+    cachedSettings.ai = next;
+    await ipcRenderer.invoke('update-settings', { ai: next });
+    return next;
+  } catch (err) {
+    console.error('[AI] Failed to persist settings', err);
+    return null;
   }
-  
-  async function refreshServerInfo() {
-    const info = await ipcRenderer.invoke('remote-get-info');
-    
-    if (!info.running) {
-      if (remoteServerInfo) remoteServerInfo.style.display = 'none';
+}
+
+function initAiTab(settings) {
+  const panel = document.getElementById('panel-ai');
+  if (!panel) return;
+  const runtime = window.desktopRuntime;
+  const runtimeMissingEl = document.getElementById('ai-runtime-missing');
+  const defaultRunningContext = 'Say a verse aloud to see the rolling transcript.';
+  const ui = {
+    statusPill: document.getElementById('ai-sidecar-pill'),
+    statusText: document.getElementById('ai-model-status-text'),
+    endpoint: document.getElementById('ai-sidecar-endpoint'),
+    ensureButton: document.getElementById('ai-ensure-running'),
+    restartButton: document.getElementById('ai-restart-sidecar'),
+    actionStatus: document.getElementById('ai-action-status'),
+    modelSelect: document.getElementById('ai-model-select'),
+    modelApply: document.getElementById('ai-model-apply'),
+    openFolder: document.getElementById('ai-open-model-folder'),
+    downloadRow: document.getElementById('ai-model-download-row'),
+    downloadBar: document.getElementById('ai-model-download-bar'),
+    downloadLabel: document.getElementById('ai-model-download-label'),
+    deviceSelect: document.getElementById('ai-device-select'),
+    refreshDevices: document.getElementById('ai-refresh-devices'),
+    meterCanvas: document.getElementById('ai-meter'),
+    waveformCanvas: document.getElementById('ai-waveform'),
+    meterLabel: document.getElementById('ai-meter-label'),
+    meterToggle: document.getElementById('ai-meter-toggle'),
+    levelHint: document.getElementById('ai-level-hint'),
+    suggestionsList: document.getElementById('ai-suggestions-list'),
+    suggestionsEmpty: document.getElementById('ai-suggestions-empty'),
+    log: document.getElementById('ai-status-log'),
+    runningContext: document.getElementById('ai-running-context'),
+    enableToggle: document.getElementById('ai-enable-toggle'),
+    enableStatus: document.getElementById('ai-enable-status')
+  };
+
+  if (ui.runningContext && !ui.runningContext.textContent.trim()) {
+    ui.runningContext.textContent = defaultRunningContext;
+  }
+
+  if (!runtime || typeof runtime.getSidecarStatus !== 'function') {
+    if (runtimeMissingEl) runtimeMissingEl.style.display = 'block';
+    if (ui.statusPill) ui.statusPill.textContent = 'Unavailable';
+    if (ui.statusPill) ui.statusPill.classList.add('tone-err');
+    if (ui.meterToggle) ui.meterToggle.disabled = true;
+    if (ui.refreshDevices) ui.refreshDevices.disabled = true;
+    if (ui.enableToggle) ui.enableToggle.disabled = true;
+    if (ui.enableStatus) ui.enableStatus.textContent = 'Unavailable';
+    return;
+  }
+  if (runtimeMissingEl) runtimeMissingEl.style.display = 'none';
+  const state = {
+    status: null,
+    modelTouched: false,
+    preferredDeviceId: (settings.ai && settings.ai.micDeviceId) || 'default',
+    meter: {
+      stream: null,
+      audioCtx: null,
+      analyser: null,
+      source: null,
+      rafId: 0,
+      buffer: new Float32Array(1024)
+    },
+    disposers: [],
+    runningContext: '',
+    aiEnabled: settings.ai && typeof settings.ai.enabled === 'boolean' ? settings.ai.enabled : true,
+    pendingToggle: false
+  };
+
+  handleAiEnabledChanged(state.aiEnabled, { silent: true });
+
+  if (ui.modelSelect && settings.ai && settings.ai.modelSize) {
+    ui.modelSelect.value = settings.ai.modelSize;
+  }
+
+  function logAi(message) {
+    if (!ui.log) return;
+    const entry = document.createElement('div');
+    const stamp = new Date().toLocaleTimeString();
+    entry.textContent = `[${stamp}] ${message}`;
+    ui.log.prepend(entry);
+    while (ui.log.childElementCount > 80) {
+      ui.log.removeChild(ui.log.lastChild);
+    }
+  }
+
+  function setActionStatus(message, tone = 'info') {
+    if (!ui.actionStatus) return;
+    ui.actionStatus.textContent = message || '';
+    ui.actionStatus.classList.remove('tone-ok', 'tone-warn', 'tone-err');
+    if (tone === 'ok') ui.actionStatus.classList.add('tone-ok');
+    else if (tone === 'warn') ui.actionStatus.classList.add('tone-warn');
+    else if (tone === 'err') ui.actionStatus.classList.add('tone-err');
+  }
+
+  function applyAiEnabledState(enabled, { silent } = {}) {
+    const next = !!enabled;
+    state.aiEnabled = next;
+    if (ui.enableToggle && ui.enableToggle.checked !== next) {
+      ui.enableToggle.checked = next;
+    }
+    if (ui.enableStatus) {
+      ui.enableStatus.textContent = next ? 'Enabled' : 'Disabled';
+      ui.enableStatus.classList.remove('tone-ok', 'tone-warn');
+      ui.enableStatus.classList.add(next ? 'tone-ok' : 'tone-warn');
+    }
+    const disableControls = !next;
+    [ui.ensureButton, ui.restartButton, ui.modelSelect, ui.modelApply, ui.openFolder, ui.deviceSelect, ui.refreshDevices, ui.meterToggle].forEach((el) => {
+      if (el) el.disabled = disableControls;
+    });
+    if (!next) {
+      stopMeter();
+      if (!silent) setActionStatus('AI disabled — enable to resume the speech backend.', 'warn');
+      renderRunningContext({ clearContext: true });
+      if (ui.suggestionsList) ui.suggestionsList.innerHTML = '';
+      if (ui.suggestionsEmpty) {
+        ui.suggestionsEmpty.style.display = 'block';
+        ui.suggestionsEmpty.textContent = 'Enable AI to see live suggestions.';
+      }
+      if (ui.levelHint) ui.levelHint.textContent = 'Enable AI to monitor microphone levels.';
+    } else {
+      if (ui.suggestionsEmpty) {
+        ui.suggestionsEmpty.textContent = 'No live suggestions yet.';
+      }
+      if (!silent) {
+        refreshDevices({ preserveSelection: true }).catch(() => {});
+      }
+      if (!state.meter.stream) {
+        startMeter();
+      }
+      if (!silent && ui.actionStatus && !ui.actionStatus.textContent) {
+        setActionStatus('AI enabled', 'ok');
+      }
+    }
+  }
+
+  function handleAiEnabledChanged(nextEnabled, opts = {}) {
+    applyAiEnabledState(nextEnabled, opts);
+  }
+
+  function formatBytesShort(bytes) {
+    if (!Number.isFinite(bytes)) return '0 B';
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(2)} GB`;
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(1)} KB`;
+    return `${bytes} B`;
+  }
+
+  function extractRunningContext(payload) {
+    if (!payload) return '';
+    if (typeof payload === 'string') return payload.trim();
+    const candidates = ['context', 'runningContext', 'transcript', 'text', 'rollingText'];
+    for (const key of candidates) {
+      const value = payload[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    if (Array.isArray(payload.contextChunks) && payload.contextChunks.length) {
+      return payload.contextChunks.join(' ').trim();
+    }
+    return '';
+  }
+
+  function formatRunningContextSnippet(text) {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= 420) return normalized;
+    return `…${normalized.slice(-420)}`;
+  }
+
+  function renderRunningContext(payload) {
+    if (!ui.runningContext) return;
+    if (!state.aiEnabled) {
+      ui.runningContext.textContent = defaultRunningContext;
+      ui.runningContext.classList.add('muted-text');
+      state.runningContext = '';
       return;
     }
-    
-    if (remoteServerInfo) remoteServerInfo.style.display = 'block';
-    if (remoteStatus) remoteStatus.textContent = 'Running';
-    
-    if (remoteAddressesContainer && info.addresses && info.addresses.length > 0) {
-      remoteAddressesContainer.innerHTML = `
-        <div style="font-weight:500;margin-bottom:4px;">Connection Addresses:</div>
-        ${info.addresses.map(addr => `
-          <div class="remote-address-item" style="font-family:monospace;padding:4px 8px;margin:2px 0;border-radius:3px;display:flex;justify-content:space-between;align-items:center;">
-            <span>${addr}:${info.port}</span>
-            <button class="copy-address" data-address="${addr}:${info.port}" style="padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:2px;cursor:pointer;">Copy</button>
-          </div>
-        `).join('')}
-      `;
-      
-      // Add copy handlers
-      remoteAddressesContainer.querySelectorAll('.copy-address').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          const address = e.target.getAttribute('data-address');
-          navigator.clipboard.writeText(address);
-          const originalText = e.target.textContent;
-          e.target.textContent = 'Copied!';
-          setTimeout(() => { e.target.textContent = originalText; }, 1500);
-        });
-      });
-    }
-  }
-  
-  async function refreshPairedDevices() {
-    if (!pairedDevicesList) return;
-    const devices = await ipcRenderer.invoke('remote-get-paired-devices');
-    
-    if (devices.length === 0) {
-      pairedDevicesList.innerHTML = `
-        <div style="padding:16px;text-align:center;color:#888;">
-          No devices paired yet
-        </div>
-      `;
+    if (payload && payload.clearContext) {
+      state.runningContext = '';
+      ui.runningContext.textContent = defaultRunningContext;
+      ui.runningContext.classList.add('muted-text');
       return;
     }
-    
-    pairedDevicesList.innerHTML = devices.map(device => `
-      <div style="padding:12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
-        <div>
-          <div style="font-weight:500;">${device.name}</div>
-          <div style="font-size:0.85em;color:#888;">
-            Paired ${new Date(device.paired).toLocaleDateString()} • 
-            ${device.revoked ? '<span style="color:#c00;">Revoked</span>' : '<span style="color:#060;">Active</span>'}
-          </div>
-        </div>
-        ${device.revoked ? '' : `
-          <button class="revoke-device" data-device-id="${device.id}" style="padding:6px 12px;background:#c00;color:white;border:none;border-radius:4px;cursor:pointer;">
-            Revoke
-          </button>
-        `}
-      </div>
-    `).join('');
-    
-    // Add revoke handlers
-    pairedDevicesList.querySelectorAll('.revoke-device').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const deviceId = e.target.getAttribute('data-device-id');
-        if (confirm('Revoke access for this device?')) {
-          await ipcRenderer.invoke('remote-revoke-device', deviceId);
-          refreshPairedDevices();
+    const next = extractRunningContext(payload);
+    if (!next) {
+      if (!state.runningContext) {
+        ui.runningContext.textContent = defaultRunningContext;
+        ui.runningContext.classList.add('muted-text');
+      }
+      return;
+    }
+    state.runningContext = next;
+    ui.runningContext.textContent = formatRunningContextSnippet(next);
+    ui.runningContext.classList.remove('muted-text');
+  }
+
+  function renderSidecarStatus(payload = {}) {
+    const status = payload && payload.status ? payload.status : (payload || {});
+    state.status = status;
+    if (typeof status.aiDisabled === 'boolean') {
+      handleAiEnabledChanged(!status.aiDisabled, { silent: true });
+    }
+    if (ui.statusPill) {
+      ui.statusPill.classList.remove('tone-ok', 'tone-warn', 'tone-err');
+      const online = !!status.portOpen;
+      const ready = !!status.modelReady;
+      let tone = 'tone-warn';
+      let label = 'Starting';
+      if (status.aiDisabled) {
+        tone = 'tone-warn';
+        label = 'Disabled';
+      } else if (!online) {
+        tone = 'tone-err';
+        label = 'Offline';
+      } else if (ready) {
+        tone = 'tone-ok';
+        label = 'Ready';
+      }
+      ui.statusPill.textContent = label;
+      ui.statusPill.classList.add(tone);
+    }
+
+    if (ui.statusText) {
+      if (status.aiDisabled) {
+        ui.statusText.textContent = 'AI disabled';
+      } else {
+        const base = status.statusMessage ? status.statusMessage.replace(/-/g, ' ') : 'Idle';
+        ui.statusText.textContent = status.lastError ? `${base} — ${status.lastError}` : base;
+      }
+    }
+
+    if (ui.endpoint) {
+      ui.endpoint.textContent = status.sidecarWsUrl || 'ws://127.0.0.1:8765/transcribe';
+    }
+
+    if (!state.modelTouched && status.modelSize && ui.modelSelect) {
+      ui.modelSelect.value = status.modelSize;
+    }
+
+    if (ui.downloadRow) {
+      const downloading = status.statusMessage === 'downloading-vosk-model' || status.downloadProgress != null || (status.downloadBytes || 0) > 0;
+      if (downloading) {
+        ui.downloadRow.classList.add('active');
+        const percent = typeof status.downloadProgress === 'number'
+          ? Math.max(0, Math.min(100, Math.round(status.downloadProgress)))
+          : (status.downloadTotalBytes ? Math.round((status.downloadBytes || 0) / status.downloadTotalBytes * 100) : 0);
+        if (ui.downloadBar) ui.downloadBar.value = percent;
+        if (ui.downloadLabel) {
+          const bytesText = status.downloadTotalBytes
+            ? `${formatBytesShort(status.downloadBytes || 0)} / ${formatBytesShort(status.downloadTotalBytes)}`
+            : formatBytesShort(status.downloadBytes || 0);
+          ui.downloadLabel.textContent = `${percent}% (${bytesText})`;
         }
-      });
+      } else {
+        ui.downloadRow.classList.remove('active');
+        if (ui.downloadLabel) ui.downloadLabel.textContent = '';
+        if (ui.downloadBar) ui.downloadBar.value = 0;
+      }
+    }
+  }
+
+  function normalizeSuggestions(payload) {
+    if (!payload) return [];
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload.items)) return payload.items;
+    if (Array.isArray(payload.suggestions)) return payload.suggestions;
+    return [];
+  }
+
+  function renderSuggestions(payload) {
+    if (!ui.suggestionsList || !ui.suggestionsEmpty) return;
+    if (!state.aiEnabled) {
+      ui.suggestionsList.innerHTML = '';
+      ui.suggestionsEmpty.style.display = 'block';
+      ui.suggestionsEmpty.textContent = 'Enable AI to see live suggestions.';
+      renderRunningContext({ clearContext: true });
+      return;
+    }
+    renderRunningContext(payload);
+    const items = normalizeSuggestions(payload).slice(0, 6);
+    ui.suggestionsList.innerHTML = '';
+    if (!items.length) {
+      ui.suggestionsEmpty.style.display = 'block';
+      return;
+    }
+    ui.suggestionsEmpty.style.display = 'none';
+    items.forEach((item) => {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ai-suggestion';
+      const ref = document.createElement('div');
+      ref.className = 'ai-suggestion-ref';
+      ref.textContent = item.ref || item.reference || 'Reference';
+      const why = document.createElement('div');
+      why.className = 'ai-suggestion-why';
+      const reasons = Array.isArray(item.reasons) ? item.reasons.join(' • ') : (item.reason || 'Confidence signal');
+      why.textContent = reasons;
+      wrapper.appendChild(ref);
+      wrapper.appendChild(why);
+      if (typeof item.score === 'number') {
+        const score = document.createElement('div');
+        score.className = 'ai-suggestion-why';
+        score.textContent = `Score ${Math.round(item.score)} / 100`;
+        wrapper.appendChild(score);
+      }
+      ui.suggestionsList.appendChild(wrapper);
     });
   }
-  
-  refreshPairedDevices();
-  refreshServerInfo();
-  
-  // Listen for device list changes
-  ipcRenderer.on('remote-devices-changed', () => {
-    refreshPairedDevices();
-  });
-  
-  // Handle remote enable/disable
-  if (remoteEnabledEl) {
-    remoteEnabledEl.addEventListener('change', async (e) => {
-      const enabled = e.target.checked;
-      const port = remotePortEl ? parseInt(remotePortEl.value) : 39847;
-      
-      if (enabled) {
-        const result = await ipcRenderer.invoke('remote-start', port);
-        if (!result.success) {
-          alert('Failed to start remote server: ' + result.error);
-          e.target.checked = false;
+
+  async function refreshDevices({ preserveSelection = true } = {}) {
+    if (!ui.deviceSelect) return;
+    if (!state.aiEnabled) {
+      ui.deviceSelect.disabled = true;
+      return;
+    }
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      ui.deviceSelect.innerHTML = '<option value="default">Audio APIs unavailable</option>';
+      ui.deviceSelect.disabled = true;
+      if (ui.refreshDevices) ui.refreshDevices.disabled = true;
+      if (ui.meterToggle) ui.meterToggle.disabled = true;
+      if (ui.levelHint) ui.levelHint.textContent = 'Audio APIs unavailable in this environment.';
+      return;
+    }
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((d) => d.kind === 'audioinput');
+      ui.deviceSelect.innerHTML = '';
+      const defaultOpt = document.createElement('option');
+      defaultOpt.value = 'default';
+      defaultOpt.textContent = 'System default microphone';
+      ui.deviceSelect.appendChild(defaultOpt);
+      if (!inputs.length) {
+        defaultOpt.textContent = 'No microphones detected';
+        ui.deviceSelect.disabled = true;
+        if (ui.meterToggle) ui.meterToggle.disabled = true;
+        if (ui.levelHint) ui.levelHint.textContent = 'Connect a microphone to test levels.';
+        return;
+      }
+      ui.deviceSelect.disabled = false;
+      inputs.forEach((dev, index) => {
+        const opt = document.createElement('option');
+        opt.value = dev.deviceId || `device-${index}`;
+        opt.textContent = dev.label || `Microphone ${index + 1}`;
+        ui.deviceSelect.appendChild(opt);
+      });
+      let target = preserveSelection ? (ui.deviceSelect.dataset.currentDevice || state.preferredDeviceId) : state.preferredDeviceId;
+      const hasTarget = target === 'default' || inputs.some((d) => d.deviceId === target);
+      if (!hasTarget) {
+        target = inputs[0].deviceId || 'default';
+      }
+      ui.deviceSelect.value = target;
+      ui.deviceSelect.dataset.currentDevice = target;
+      state.preferredDeviceId = target;
+      if (ui.meterToggle) ui.meterToggle.disabled = false;
+    } catch (err) {
+      console.error('Failed to enumerate devices', err);
+      setActionStatus('Unable to enumerate microphones', 'err');
+    }
+  }
+
+  function clearCanvasSurface(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#05070d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function resetMeterVisuals() {
+    clearCanvasSurface(ui.meterCanvas);
+    clearCanvasSurface(ui.waveformCanvas);
+  }
+
+  function stopMeter() {
+    const meter = state.meter;
+    const wasRunning = !!(meter.stream || meter.audioCtx || meter.rafId);
+    if (meter.rafId) cancelAnimationFrame(meter.rafId);
+    if (meter.source) {
+      try { meter.source.disconnect(); } catch (_) {}
+    }
+    if (meter.audioCtx) {
+      try { meter.audioCtx.close(); } catch (_) {}
+    }
+    if (meter.stream) {
+      meter.stream.getTracks().forEach((track) => track.stop());
+    }
+    state.meter = { stream: null, audioCtx: null, analyser: null, source: null, rafId: 0, buffer: new Float32Array(1024) };
+    if (ui.meterToggle) ui.meterToggle.textContent = 'Resume meter';
+    if (ui.levelHint) ui.levelHint.textContent = 'Meter paused.';
+    if (ui.meterLabel) ui.meterLabel.textContent = 'Level 0%';
+    resetMeterVisuals();
+    if (wasRunning) logAi('Microphone meter stopped');
+  }
+
+  function drawMeterFrame() {
+    const meter = state.meter;
+    if (!meter.analyser || !ui.meterCanvas) return;
+    meter.analyser.getFloatTimeDomainData(meter.buffer);
+    let sum = 0;
+    for (let i = 0; i < meter.buffer.length; i++) {
+      sum += meter.buffer[i] * meter.buffer[i];
+    }
+    const rms = Math.sqrt(sum / meter.buffer.length);
+    const level = Math.min(1, rms * 8);
+    if (ui.meterLabel) ui.meterLabel.textContent = `Level ${Math.round(level * 100)}%`;
+
+    const meterCtx = ui.meterCanvas.getContext('2d');
+    if (!meterCtx) return;
+    const width = ui.meterCanvas.width;
+    const height = ui.meterCanvas.height;
+    meterCtx.fillStyle = '#05070d';
+    meterCtx.fillRect(0, 0, width, height);
+    const color = level > 0.65 ? '#57d37d' : (level > 0.35 ? '#f3c767' : '#71a8ff');
+    meterCtx.fillStyle = color;
+    meterCtx.fillRect(0, height - height * 0.85, width * level, height * 0.85);
+
+    if (ui.waveformCanvas) {
+      const waveformCtx = ui.waveformCanvas.getContext('2d');
+      if (waveformCtx) {
+        const w = ui.waveformCanvas.width;
+        const h = ui.waveformCanvas.height;
+        waveformCtx.fillStyle = '#05070d';
+        waveformCtx.fillRect(0, 0, w, h);
+        waveformCtx.lineWidth = 2;
+        waveformCtx.strokeStyle = '#5cc4ff';
+        waveformCtx.beginPath();
+        const sliceWidth = w / meter.buffer.length;
+        let x = 0;
+        for (let i = 0; i < meter.buffer.length; i++) {
+          const v = meter.buffer[i] * 0.5 + 0.5;
+          const y = Math.min(h, Math.max(0, v * h));
+          if (i === 0) waveformCtx.moveTo(x, y);
+          else waveformCtx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        waveformCtx.stroke();
+        waveformCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+        waveformCtx.beginPath();
+        waveformCtx.moveTo(0, h / 2);
+        waveformCtx.lineTo(w, h / 2);
+        waveformCtx.stroke();
+      }
+    }
+
+    meter.rafId = requestAnimationFrame(drawMeterFrame);
+  }
+
+  async function startMeter() {
+    if (!state.aiEnabled) {
+      if (ui.levelHint) ui.levelHint.textContent = 'Enable AI to monitor microphone levels.';
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || state.meter.stream || !ui.meterCanvas) return;
+    if (ui.meterToggle) ui.meterToggle.disabled = true;
+    setActionStatus('Starting meter…', 'warn');
+    try {
+      const constraints = (state.preferredDeviceId && state.preferredDeviceId !== 'default')
+        ? { audio: { deviceId: { exact: state.preferredDeviceId } } }
+        : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      state.meter = {
+        stream,
+        audioCtx,
+        analyser,
+        source,
+        rafId: 0,
+        buffer: new Float32Array(analyser.fftSize)
+      };
+      if (ui.meterToggle) ui.meterToggle.textContent = 'Pause meter';
+      if (ui.levelHint) ui.levelHint.textContent = 'Listening… speak to view live levels.';
+      setActionStatus('Meter running', 'ok');
+      logAi('Microphone meter started');
+      drawMeterFrame();
+    } catch (err) {
+      console.error('Failed to start meter', err);
+      setActionStatus(err?.message || 'Unable to access microphone', 'err');
+      if (ui.levelHint) ui.levelHint.textContent = 'Microphone permission denied or unavailable.';
+    } finally {
+      if (ui.meterToggle) ui.meterToggle.disabled = false;
+    }
+  }
+
+  if (ui.modelSelect) {
+    ui.modelSelect.addEventListener('change', () => {
+      state.modelTouched = true;
+    });
+  }
+
+  if (ui.modelApply) {
+    ui.modelApply.addEventListener('click', async () => {
+      if (!runtime.setSidecarModelSize) return;
+      ui.modelApply.disabled = true;
+      const size = ui.modelSelect ? ui.modelSelect.value : 'small';
+      setActionStatus('Applying model…', 'warn');
+      try {
+        const result = await runtime.setSidecarModelSize(size);
+        if (result && result.ok) {
+          if (result.status) renderSidecarStatus(result.status);
+          await mergeAiSettings({ modelSize: size });
+          setActionStatus(`Model switched to ${size}`, 'ok');
+          logAi(`Requested model switch to ${size}`);
         } else {
-          refreshServerInfo();
+          setActionStatus((result && result.error) || 'Failed to apply model', 'err');
         }
-      } else {
-        await ipcRenderer.invoke('remote-stop');
-        refreshServerInfo();
+      } catch (err) {
+        setActionStatus(err?.message || 'Failed to apply model', 'err');
+      } finally {
+        ui.modelApply.disabled = false;
       }
     });
   }
-  
-  // Fix Connection button
-  const fixConnectionBtn = document.getElementById('fix-connection-btn');
-  if (fixConnectionBtn) {
-    fixConnectionBtn.addEventListener('click', async () => {
-      const originalText = fixConnectionBtn.textContent;
-      fixConnectionBtn.textContent = 'Fixing...';
-      fixConnectionBtn.disabled = true;
-      
-      const result = await ipcRenderer.invoke('remote-fix-connection');
-      
-      if (result.success) {
-        alert('✓ Firewall rules added successfully!\n\nTry connecting from your mobile device now.');
-      } else {
-        alert('⚠ Failed to add firewall rules:\n\n' + result.error + '\n\nYou may need to run Liturgia as Administrator to add firewall rules automatically.');
+
+  if (ui.openFolder) {
+    ui.openFolder.addEventListener('click', async () => {
+      if (!runtime.openSidecarModelFolder) return;
+      setActionStatus('Opening model folder…', 'info');
+      try {
+        const res = await runtime.openSidecarModelFolder();
+        if (res && res.ok) {
+          setActionStatus('Model folder opened', 'ok');
+          logAi('Opened model folder');
+        } else {
+          setActionStatus((res && res.error) || 'Failed to open folder', 'err');
+        }
+      } catch (err) {
+        setActionStatus(err?.message || 'Failed to open folder', 'err');
       }
-      
-      fixConnectionBtn.textContent = originalText;
-      fixConnectionBtn.disabled = false;
     });
   }
-})();
+
+  if (ui.ensureButton) {
+    ui.ensureButton.addEventListener('click', async () => {
+      if (!runtime.ensureSidecarRunning) return;
+      setActionStatus('Ensuring backend is running…', 'warn');
+      try {
+        const res = await runtime.ensureSidecarRunning();
+        if (res) renderSidecarStatus(res);
+        setActionStatus('Backend check complete', 'ok');
+        logAi('Ensured sidecar is running');
+      } catch (err) {
+        setActionStatus(err?.message || 'Failed to contact backend', 'err');
+      }
+    });
+  }
+
+  if (ui.restartButton) {
+    ui.restartButton.addEventListener('click', async () => {
+      if (!runtime.restartSidecar) return;
+      setActionStatus('Restarting backend…', 'warn');
+      ui.restartButton.disabled = true;
+      try {
+        const res = await runtime.restartSidecar();
+        if (res && res.ok && res.status) renderSidecarStatus(res.status);
+        setActionStatus('Backend restarted', 'ok');
+        logAi('Sidecar restart requested');
+      } catch (err) {
+        setActionStatus(err?.message || 'Failed to restart backend', 'err');
+      } finally {
+        ui.restartButton.disabled = false;
+      }
+    });
+  }
+
+  if (ui.deviceSelect) {
+    ui.deviceSelect.addEventListener('change', async (event) => {
+      const value = event.target.value;
+      ui.deviceSelect.dataset.currentDevice = value;
+      state.preferredDeviceId = value;
+      await mergeAiSettings({ micDeviceId: value });
+      if (state.meter.stream) {
+        stopMeter();
+        startMeter();
+      }
+    });
+  }
+
+  if (ui.refreshDevices) {
+    ui.refreshDevices.addEventListener('click', () => refreshDevices({ preserveSelection: false }));
+  }
+
+  if (ui.meterToggle) {
+    ui.meterToggle.addEventListener('click', () => {
+      if (state.meter.stream) {
+        stopMeter();
+      } else {
+        startMeter();
+      }
+    });
+  }
+
+  if (ui.enableToggle) {
+    if (!runtime.setAiEnabled) {
+      ui.enableToggle.disabled = true;
+      if (ui.enableStatus) ui.enableStatus.textContent = 'Unavailable';
+    } else {
+      ui.enableToggle.addEventListener('change', async () => {
+        if (state.pendingToggle) return;
+        const desired = !!ui.enableToggle.checked;
+        state.pendingToggle = true;
+        ui.enableToggle.disabled = true;
+        setActionStatus(desired ? 'Enabling AI…' : 'Disabling AI…', 'warn');
+        try {
+          const result = await runtime.setAiEnabled(desired);
+          if (result && typeof result.enabled === 'boolean') {
+            handleAiEnabledChanged(result.enabled, { silent: false });
+          } else {
+            handleAiEnabledChanged(desired, { silent: false });
+          }
+          if (result && result.status) renderSidecarStatus(result.status);
+          setActionStatus(desired ? 'AI enabled' : 'AI disabled', 'ok');
+        } catch (err) {
+          ui.enableToggle.checked = !desired;
+          handleAiEnabledChanged(!desired, { silent: true });
+          setActionStatus(err?.message || 'Failed to update AI toggle', 'err');
+        } finally {
+          state.pendingToggle = false;
+          ui.enableToggle.disabled = false;
+        }
+      });
+    }
+  }
+
+  resetMeterVisuals();
+  refreshDevices()
+    .catch(() => {})
+    .finally(() => {
+      if (state.aiEnabled && !state.meter.stream) {
+        startMeter();
+      }
+    });
+
+  if (typeof runtime.getAiEnabled === 'function') {
+    runtime.getAiEnabled().then((res) => {
+      const enabled = (res && typeof res.enabled === 'boolean') ? res.enabled : !!res;
+      handleAiEnabledChanged(enabled, { silent: true });
+      if (res && res.status) {
+        renderSidecarStatus(res.status);
+      }
+    }).catch(() => {});
+  }
+
+  runtime.getSidecarStatus().then(renderSidecarStatus).catch(() => {});
+  if (typeof runtime.onSidecarStatus === 'function') {
+    const dispose = runtime.onSidecarStatus(renderSidecarStatus);
+    if (typeof dispose === 'function') state.disposers.push(dispose);
+  }
+  if (runtime.getLatestSuggestions) {
+    runtime.getLatestSuggestions().then(renderSuggestions).catch(() => {});
+  }
+  if (typeof runtime.onSuggestions === 'function') {
+    const disposeSuggestions = runtime.onSuggestions(renderSuggestions);
+    if (typeof disposeSuggestions === 'function') state.disposers.push(disposeSuggestions);
+  }
+
+  if (typeof runtime.onAiEnabledChanged === 'function') {
+    const disposeToggle = runtime.onAiEnabledChanged((enabled) => {
+      handleAiEnabledChanged(enabled);
+    });
+    if (typeof disposeToggle === 'function') state.disposers.push(disposeToggle);
+  }
+
+  window.addEventListener('beforeunload', () => {
+    stopMeter();
+    state.disposers.forEach((dispose) => {
+      try { dispose && dispose(); } catch (_) {}
+    });
+    state.disposers = [];
+  }, { once: true });
+}
 
 // Cloud Relay initialization
 (async () => {

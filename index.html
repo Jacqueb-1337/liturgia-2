@@ -273,8 +273,17 @@
       
       <!-- Verses Tab Content -->
       <div id="verses-tab-content" class="tab-content" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
-        <div id="scripture-search" style="flex-shrink: 0;">
-          <div id="search-box-container" style="width:100%"></div>
+        <div id="scripture-search" class="scripture-search-row" style="flex-shrink: 0;">
+          <div id="search-box-container" class="search-box-container"></div>
+          <div class="ai-suggestion-column">
+            <div class="ai-suggestion-hint-wrap">
+              <span id="ai-suggestion-pill" class="ai-suggestion-pill tone-warn">Checking…</span>
+              <div id="ai-suggestion-context" class="ai-suggestion-context">Live suggestions will appear once Liturgia hears you.</div>
+            </div>
+            <div id="ai-suggestion-panel" class="ai-suggestion-panel">
+              <div id="ai-suggestion-list" class="ai-suggestion-list ai-suggestion-list-inline"></div>
+            </div>
+          </div>
         </div>
         <div id="verse-content-row" style="display: flex; flex: 1; min-height: 0;">
           <div id="verse-list">

@@ -1,0 +1,2566 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Mic Transcription + Scripture Suggestion Demo</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#0b0c10; color:#e9eef7; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .grid { display:grid; grid-template-columns: 1.1fr .9fr; gap:12px; margin-top:12px; }
+    @media (max-width: 980px){ .grid { grid-template-columns: 1fr; } }
+
+    .card { border:1px solid #223049; background:#0f1320; border-radius:12px; padding:12px; }
+    .label { font-size:12px; color:#9fb1d7; margin-bottom:6px; }
+    .big { font-size:14px; line-height:1.45; white-space:pre-wrap; word-break:break-word; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #2c3d5d; background:#111a29; color:#cfe0ff; font-size:12px; }
+    .ok { color:#b8f7c5; }
+    .warn { color:#ffe7a6; }
+    .err { color:#ffb4b4; }
+
+    button, select { background:#192335; color:#e9eef7; border:1px solid #2a3a59; padding:9px 10px; border-radius:10px; }
+    button { cursor:pointer; }
+    button:disabled { opacity:0.55; cursor:not-allowed; }
+    select { min-width: 290px; }
+
+    #meterWrap { display:flex; align-items:center; gap:8px; }
+    #meter { width:220px; height:18px; border-radius:999px; border:1px solid #2c3d5d; background:#0a1020; }
+    #waveform { width:min(760px, 100%); height:74px; border-radius:10px; border:1px solid #2c3d5d; background:#0a1020; display:block; margin-top:8px; }
+
+    .sugs { display:flex; flex-direction:column; gap:8px; }
+    .sug { border:1px solid #23314c; border-radius:10px; background:#0c1223; padding:10px; display:flex; gap:10px; align-items:flex-start; }
+    .sugMain { flex:1; }
+    .sugRef { font-size:14px; }
+    .sugWhy { font-size:12px; color:#9fb1d7; margin-top:4px; }
+    .sugScore { font-size:12px; color:#8fc0ff; margin-top:4px; }
+    .ctxHit { background: rgba(113, 168, 255, 0.22); border-bottom: 1px solid rgba(143, 192, 255, 0.9); border-radius: 4px; padding: 0 1px; }
+
+    #logs { max-height: 180px; overflow:auto; border:1px solid #223049; border-radius:10px; padding:8px; background:#0b1120; font-size:12px; }
+    .logLine { margin:0 0 3px 0; }
+
+    .footer { margin-top:8px; color:#9fb1d7; font-size:12px; line-height:1.35; }
+    #modelDownloadWrap { display:none; margin-top:8px; align-items:center; gap:8px; }
+    #modelDownloadWrap.show { display:flex; }
+    #modelDownloadBar { width:220px; height:12px; }
+    #btnOpenModelFolder {
+      padding: 6px 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 34px;
+      height: 30px;
+    }
+    #btnOpenModelFolder svg { width:16px; height:16px; fill: currentColor; }
+    html.headless-mode body { opacity:0; pointer-events:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <button id="btnStart">Start</button>
+        <button id="btnStop" disabled>Stop</button>
+        <button id="btnRestartServer">Restart Model Server</button>
+        <select id="modelSizeSelect" title="Vosk model size">
+          <option value="small">Model: small</option>
+          <option value="medium">Model: medium</option>
+          <option value="large">Model: large</option>
+        </select>
+        <button id="btnApplyModel">Apply Model</button>
+
+        <select id="deviceSelect" title="Microphone input device"></select>
+        <button id="btnRefreshDevices">Refresh devices</button>
+
+        <div id="meterWrap">
+          <canvas id="meter" width="220" height="18"></canvas>
+          <span id="meterLabel" class="pill">Level 0%</span>
+        </div>
+      </div>
+
+      <canvas id="waveform" width="760" height="74" aria-label="Live input waveform"></canvas>
+
+      <div class="row" style="margin-top:8px">
+        <span id="statusServer" class="pill">Server: checking</span>
+        <span id="statusMic" class="pill">Mic: idle</span>
+        <span id="statusModel" class="pill">Model: not loaded</span>
+        <span id="statusRec" class="pill">Recognition: stopped</span>
+        <span id="statusLatency" class="pill">Latency: -</span>
+      </div>
+
+      <div id="modelDownloadWrap" class="row">
+        <span class="label" style="margin:0">Model download</span>
+        <progress id="modelDownloadBar" max="100" value="0"></progress>
+        <span id="modelDownloadLabel" class="pill">0%</span>
+        <button id="btnOpenModelFolder" title="Open model download folder" aria-label="Open model download folder">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 4l2 2h8a2 2 0 0 1 2 2v2H2V6a2 2 0 0 1 2-2h6zm12 8v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6h20z"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="footer">
+        Transcription backend: Vosk sidecar (fully local, no API key) with selectable model sizes (small/medium/large). Missing models are auto-downloaded.
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">Live transcript (final + partial)</div>
+        <div id="liveText" class="big mono"></div>
+
+        <div style="height:10px"></div>
+        <div class="label">Rolling context window</div>
+        <div id="rollingText" class="big mono"></div>
+
+        <div style="height:10px"></div>
+        <div class="label">Status logs</div>
+        <div id="logs" class="mono"></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Scripture suggestions</div>
+        <div id="suggestions" class="sugs"></div>
+
+        <div style="height:10px"></div>
+        <div class="label">Pinned</div>
+        <div id="pinned" class="big">None</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6";
+
+    const $ = (id) => document.getElementById(id);
+
+    const btnStart = $("btnStart");
+    const btnStop = $("btnStop");
+    const btnRestartServer = $("btnRestartServer");
+    const modelSizeSelect = $("modelSizeSelect");
+    const btnApplyModel = $("btnApplyModel");
+    const modelDownloadWrap = $("modelDownloadWrap");
+    const modelDownloadBar = $("modelDownloadBar");
+    const modelDownloadLabel = $("modelDownloadLabel");
+    const btnOpenModelFolder = $("btnOpenModelFolder");
+    const btnRefreshDevices = $("btnRefreshDevices");
+    const deviceSelect = $("deviceSelect");
+    const meterCanvas = $("meter");
+    const waveformCanvas = $("waveform");
+    const meterLabel = $("meterLabel");
+    const statusServer = $("statusServer");
+    const statusMic = $("statusMic");
+    const statusModel = $("statusModel");
+    const statusRec = $("statusRec");
+    const statusLatency = $("statusLatency");
+    const liveText = $("liveText");
+    const rollingTextEl = $("rollingText");
+    const suggestionsEl = $("suggestions");
+    const pinnedEl = $("pinned");
+    const logsEl = $("logs");
+    const urlParams = new URLSearchParams(window.location.search || "");
+    const headlessMode = urlParams.get("headless") === "1";
+    const autoStartMode = headlessMode || urlParams.get("autostart") === "1";
+
+    if (headlessMode) {
+      document.documentElement.classList.add("headless-mode");
+    }
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const browserSpeechSupported = !!SpeechRecognition;
+    const SIDECAR_WS_URL = window.desktopRuntime?.sidecarWsUrl || "ws://127.0.0.1:8765/transcribe";
+
+    const CFG = {
+      modelIdFast: "Xenova/whisper-tiny.en",
+      modelIdAccurate: "Xenova/whisper-base.en",
+      preferBrowserSpeech: false,
+      enableBackendAutoSwitch: false,
+      preferWebGPU: true,
+      inputTargetRate: 16000,
+      maxBufferSec: 70,
+      inferEveryMs: 560,
+      inferWindowSec: 2.2,
+      tailInferWindowSec: 3.4,
+      forceDecodeEveryMs: 2200,
+      minAudioForInferSec: 0.5,
+      silenceFinalizeMs: 760,
+      speechThreshold: 0.008,
+      speechFloorForDecode: 0.004,
+      speechHoldMs: 1400,
+      audioStallMs: 2200,
+      maxTranscriptWordsPerPass: 220,
+      maxDominantWordRatio: 0.34,
+      maxRepeatedRun: 7,
+      minWordOverlapForMerge: 2,
+      detectionMemoryTokenLimit: 1200,
+      detectionInterimBlendTokens: 260,
+      interimTokenLimit: 420,
+      rollingTokenLimit: 320,
+      maxSuggestions: 4
+    };
+
+    const state = {
+      asr: null,
+      listening: false,
+      stream: null,
+      micTrack: null,
+      audioCtx: null,
+      sourceNode: null,
+      analyserNode: null,
+      processorNode: null,
+      sinkGainNode: null,
+      webRec: null,
+      sidecarSocket: null,
+      sidecarConnected: false,
+      serverMonitorTimer: 0,
+      statusPollInFlight: false,
+      reconnectInFlight: false,
+      lastPassiveReconnectAt: 0,
+      sidecarExpectedClose: false,
+      disposeRuntimeStatusListener: null,
+      meterAnim: 0,
+      inferTimer: 0,
+      audioWatchdogTimer: 0,
+      webRecRestartTimer: 0,
+      transcriptionWatchdogTimer: 0,
+
+      sourceRate: 48000,
+      audioChunks: [],
+      totalSamples: 0,
+      liveRms: 0,
+      lastSpeechAt: 0,
+
+      finalText: "",
+      interimText: "",
+      detectionMemoryText: "",
+      rollingText: "",
+      lastFinalizedInterim: "",
+      lastBookKey: null,
+      pinnedRef: "",
+
+      busyInfer: false,
+      useBrowserSpeech: false,
+      modelIdInUse: "",
+      lastInferenceErrorText: "",
+      lastInferenceErrorAt: 0,
+      lastNoSpeechLogAt: 0,
+      browserNoSpeechWhileMeterCount: 0,
+      lastBrowserToLocalFailoverAt: 0,
+      lastTranscriptAt: 0,
+      browserWordsCommitted: 0,
+      browserCharLengthOfPushes: 0,
+      browserLastResultCache: "",
+      lastInferAt: 0,
+      lastAudioProcessAt: 0,
+      lastAudioStallWarnAt: 0,
+      wasSpeechActive: false,
+      pendingTailInfer: false,
+      lastTailInferAt: 0,
+      lastSidecarPartial: "",
+      selectedModelSize: "small",
+      selectedModelSizePending: "small",
+      modelSizeDirty: false,
+      modelDownloadProgress: 0,
+      modelDownloadBytes: 0,
+      modelDownloadTotalBytes: 0,
+      modelDownloadDir: "",
+      lastSuggestionPushHash: "",
+      lastSuggestionPushAt: 0
+    };
+
+    let meterAnalyserBuffer = new Float32Array(1024);
+
+    function log(message, level = "info") {
+      const t = new Date();
+      const hh = String(t.getHours()).padStart(2, "0");
+      const mm = String(t.getMinutes()).padStart(2, "0");
+      const ss = String(t.getSeconds()).padStart(2, "0");
+      const cls = level === "error" ? "err" : (level === "warn" ? "warn" : "ok");
+      const div = document.createElement("div");
+      div.className = `logLine ${cls}`;
+      div.textContent = `[${hh}:${mm}:${ss}] ${message}`;
+      logsEl.prepend(div);
+      while (logsEl.childElementCount > 140) logsEl.lastElementChild.remove();
+    }
+
+    function errorText(err, fallback = "Unknown error") {
+      if (!err) return fallback;
+      if (typeof err === "string") return err;
+      if (err instanceof Error) return err.message || fallback;
+      if (typeof err === "object") {
+        if (typeof err.message === "string" && err.message) return err.message;
+        if (typeof err.type === "string" && err.type) return `${err.type} event`;
+        try {
+          const asJson = JSON.stringify(err);
+          if (asJson && asJson !== "{}") return asJson;
+        } catch (_) {
+        }
+      }
+      return String(err);
+    }
+
+    function setPill(el, text, tone = "") {
+      el.textContent = text;
+      el.classList.remove("ok", "warn", "err");
+      if (tone) el.classList.add(tone);
+    }
+
+    function normalize(s) {
+      return (s || "")
+        .toLowerCase()
+        .replace(/[\u2019']/g, " '")
+        .replace(/[^\w\s:]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function tokenize(s) {
+      return normalize(s).split(" ").filter(Boolean);
+    }
+
+    function rollingWindowText(s, tokenLimit) {
+      const t = tokenize(s);
+      return t.slice(Math.max(0, t.length - tokenLimit)).join(" ");
+    }
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function escapeHtml(text) {
+      return String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function drawMeter(level) {
+      const ctx = meterCanvas.getContext("2d");
+      const w = meterCanvas.width;
+      const h = meterCanvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#0a1020";
+      ctx.fillRect(0, 0, w, h);
+
+      const pct = clamp(Math.round(level * 100), 0, 100);
+      const width = Math.round((pct / 100) * w);
+      const color = pct >= 65 ? "#57d37d" : (pct >= 35 ? "#f3c767" : "#71a8ff");
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, width, h);
+      meterLabel.textContent = `Level ${pct}%`;
+    }
+
+    function drawWaveform(samples) {
+      if (!waveformCanvas) return;
+      const ctx = waveformCanvas.getContext("2d");
+      const w = waveformCanvas.width;
+      const h = waveformCanvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#0a1020";
+      ctx.fillRect(0, 0, w, h);
+
+      const centerY = Math.round(h / 2);
+      ctx.strokeStyle = "#233a5c";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(w, centerY);
+      ctx.stroke();
+
+      if (!samples || !samples.length) return;
+
+      ctx.strokeStyle = "#7eb5ff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+
+      const step = Math.max(1, Math.floor(samples.length / w));
+      let x = 0;
+      for (let i = 0; i < samples.length && x < w; i += step, x++) {
+        const y = centerY + samples[i] * (h * 0.42);
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    function animateMeter() {
+      let analyserRms = 0;
+      if (state.analyserNode) {
+        const size = state.analyserNode.fftSize || meterAnalyserBuffer.length;
+        if (meterAnalyserBuffer.length !== size) {
+          meterAnalyserBuffer = new Float32Array(size);
+        }
+        state.analyserNode.getFloatTimeDomainData(meterAnalyserBuffer);
+        let sum = 0;
+        for (let i = 0; i < meterAnalyserBuffer.length; i++) {
+          const v = meterAnalyserBuffer[i];
+          sum += v * v;
+        }
+        analyserRms = Math.sqrt(sum / meterAnalyserBuffer.length);
+        drawWaveform(meterAnalyserBuffer);
+      } else {
+        drawWaveform(null);
+      }
+
+      const meterRms = Math.max(state.liveRms, analyserRms);
+      drawMeter(meterRms * 3.1);
+      state.meterAnim = requestAnimationFrame(animateMeter);
+    }
+
+    function concatFloat32(a, b) {
+      const out = new Float32Array(a.length + b.length);
+      out.set(a, 0);
+      out.set(b, a.length);
+      return out;
+    }
+
+    function pushAudioChunk(chunk) {
+      state.audioChunks.push(chunk);
+      state.totalSamples += chunk.length;
+
+      const maxSamples = Math.floor(CFG.maxBufferSec * state.sourceRate);
+      while (state.totalSamples > maxSamples && state.audioChunks.length > 0) {
+        const first = state.audioChunks.shift();
+        state.totalSamples -= first.length;
+      }
+    }
+
+    function getRecentSamples(sec) {
+      const needed = Math.floor(sec * state.sourceRate);
+      if (needed <= 0 || state.totalSamples === 0) return new Float32Array(0);
+
+      let remain = Math.min(needed, state.totalSamples);
+      const picked = [];
+      for (let i = state.audioChunks.length - 1; i >= 0 && remain > 0; i--) {
+        const c = state.audioChunks[i];
+        picked.push(c);
+        remain -= c.length;
+      }
+      picked.reverse();
+      let merged = new Float32Array(0);
+      for (const p of picked) merged = concatFloat32(merged, p);
+      if (merged.length > needed) merged = merged.slice(merged.length - needed);
+      return merged;
+    }
+
+    function resampleLinear(input, inRate, outRate) {
+      if (inRate === outRate) return input;
+      if (!input || !input.length) return new Float32Array(0);
+      const ratio = inRate / outRate;
+      const outLen = Math.max(1, Math.floor(input.length / ratio));
+      const out = new Float32Array(outLen);
+      for (let i = 0; i < outLen; i++) {
+        const src = i * ratio;
+        const i0 = Math.floor(src);
+        const i1 = Math.min(i0 + 1, input.length - 1);
+        const frac = src - i0;
+        out[i] = input[i0] * (1 - frac) + input[i1] * frac;
+      }
+      return out;
+    }
+
+    async function listInputDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      return devices.filter(d => d.kind === "audioinput");
+    }
+
+    async function refreshDevices() {
+      try {
+        const current = deviceSelect.value;
+        const devices = await listInputDevices();
+        deviceSelect.innerHTML = "";
+
+        if (!devices.length) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "No audio input devices found";
+          deviceSelect.appendChild(opt);
+          log("No audio input devices found.", "warn");
+          return;
+        }
+
+        devices.forEach((d, i) => {
+          const opt = document.createElement("option");
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Microphone ${i + 1}`;
+          deviceSelect.appendChild(opt);
+        });
+
+        const options = [...deviceSelect.options];
+        const hasCurrent = !!current && options.some(o => o.value === current);
+
+        if (hasCurrent) {
+          deviceSelect.value = current;
+        } else {
+          const defaultOption = options.find(o => o.value === "default")
+            || options.find(o => /\bdefault\b/i.test(o.textContent || ""));
+
+          if (defaultOption) deviceSelect.value = defaultOption.value;
+          else deviceSelect.selectedIndex = 0;
+        }
+
+        log(`Found ${devices.length} audio input device(s).`);
+      } catch (e) {
+        log(`Unable to enumerate devices: ${e.message}`, "error");
+      }
+    }
+
+    async function warmMicPermissionForLabels() {
+      let temp = null;
+      try {
+        temp = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } finally {
+        if (temp) temp.getTracks().forEach(t => t.stop());
+      }
+    }
+
+    async function ensureAsrLoaded() {
+      if (state.asr) return;
+
+      setPill(statusModel, "Model: loading", "warn");
+      log("Loading on-device ASR model... first run downloads model files.", "warn");
+
+      env.allowRemoteModels = true;
+      env.allowLocalModels = false;
+      if (env.backends?.onnx?.wasm) {
+        env.backends.onnx.wasm.proxy = true;
+        env.backends.onnx.wasm.simd = true;
+        env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 2) : 1;
+        log(`ONNX WASM settings: proxy=${env.backends.onnx.wasm.proxy}, simd=${env.backends.onnx.wasm.simd}, threads=${env.backends.onnx.wasm.numThreads}`);
+        if (!self.crossOriginIsolated) {
+          log("WASM threading limited to 1 thread (crossOriginIsolated=false). Enable COOP/COEP headers for true multithreading.", "warn");
+        }
+      }
+
+      const baseOptions = { dtype: "q8" };
+
+      if (CFG.preferWebGPU && navigator.gpu) {
+        state.modelIdInUse = CFG.modelIdAccurate;
+        state.asr = await pipeline("automatic-speech-recognition", state.modelIdInUse, {
+          ...baseOptions,
+          device: "webgpu"
+        }).catch(async (e) => {
+          log(`WebGPU init failed (${e.message}). Falling back to WASM.`, "warn");
+          state.modelIdInUse = CFG.modelIdFast;
+          return pipeline("automatic-speech-recognition", state.modelIdInUse, baseOptions);
+        });
+      } else {
+        state.modelIdInUse = CFG.modelIdFast;
+        state.asr = await pipeline("automatic-speech-recognition", state.modelIdInUse, baseOptions);
+        log("ASR backend: WASM (WebGPU disabled for stability on this setup).", "warn");
+      }
+
+      setPill(statusModel, "Model: ready", "ok");
+      log("ASR model is ready (in-browser inference).", "info");
+      log(`ASR model loaded: ${state.modelIdInUse}`, "warn");
+      log("Active profile: adaptive backend (WebGPU=accuracy model, WASM=fast model).", "warn");
+      log("Note: ONNX 'Some nodes were not assigned to preferred EP' warnings are usually non-fatal and expected in mixed execution paths.", "warn");
+    }
+
+    function logInferenceError(message) {
+      const now = Date.now();
+      const same = message === state.lastInferenceErrorText;
+      if (same && now - state.lastInferenceErrorAt < 2500) return;
+      state.lastInferenceErrorText = message;
+      state.lastInferenceErrorAt = now;
+      log(`Inference error: ${message}`, "error");
+    }
+
+    function shouldUseBrowserSpeech() {
+      return false;
+    }
+
+    function floatToPcm16(floatData) {
+      const out = new Int16Array(floatData.length);
+      for (let i = 0; i < floatData.length; i++) {
+        const s = Math.max(-1, Math.min(1, floatData[i]));
+        out[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+      }
+      return out;
+    }
+
+    function sendSidecarControl(type) {
+      if (!state.sidecarSocket || state.sidecarSocket.readyState !== WebSocket.OPEN) return;
+      try {
+        state.sidecarSocket.send(JSON.stringify({ type }));
+      } catch (_) {
+      }
+    }
+
+    function sendSidecarAudio(floatChunk) {
+      if (!state.sidecarSocket || state.sidecarSocket.readyState !== WebSocket.OPEN) return;
+      try {
+        const mono16k = resampleLinear(floatChunk, state.sourceRate || CFG.inputTargetRate, CFG.inputTargetRate);
+        const pcm16 = floatToPcm16(mono16k);
+        state.sidecarSocket.send(pcm16.buffer);
+      } catch (_) {
+      }
+    }
+
+    function handleSidecarMessage(raw) {
+      try {
+        const msg = JSON.parse(raw);
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "partial" && msg.text) {
+          const cleaned = normalizeChapterVerseConnectors(sanitizeTranscript(msg.text || ""));
+          if (!cleaned) return;
+          if (cleaned === state.lastSidecarPartial) return;
+          state.lastSidecarPartial = cleaned;
+          state.interimText = rollingWindowText(cleaned, CFG.interimTokenLimit);
+          state.lastSpeechAt = Date.now();
+          state.lastTranscriptAt = Date.now();
+          renderTextAndSuggestions();
+          return;
+        }
+        if (msg.type === "final" && msg.text) {
+          applyRecognizedText(msg.text, true);
+          return;
+        }
+        if (msg.type === "status" && msg.message) {
+          log(`Sidecar: ${msg.message}`);
+          const lower = String(msg.message).toLowerCase();
+          if (lower.includes("sidecar-connected")) {
+            setPill(statusServer, "Server: connected", "ok");
+          } else if (lower.includes("loading")) {
+            setPill(statusModel, "Transcriber: loading Vosk", "warn");
+          } else if (lower.includes("model-ready")) {
+            setPill(statusModel, "Transcriber: Vosk sidecar", "ok");
+          } else if (lower.startsWith("warn:")) {
+            setPill(statusModel, "Transcriber: running (warnings)", "warn");
+          } else if (lower.includes("infer-empty")) {
+            setPill(statusModel, "Transcriber: listening (no text yet)", "warn");
+          } else if (lower.startsWith("error:")) {
+            if (lower.includes("model-load-failed") || lower.includes("model-error")) {
+              setPill(statusModel, "Transcriber: error", "err");
+            } else {
+              setPill(statusModel, "Transcriber: running (warnings)", "warn");
+            }
+          }
+        }
+      } catch (_) {
+      }
+    }
+
+    async function connectSidecar(options = {}) {
+      if (state.sidecarSocket && state.sidecarSocket.readyState === WebSocket.OPEN) return;
+
+      const maxAttempts = Number(options.maxAttempts || 8);
+      const attemptDelayMs = Number(options.attemptDelayMs || 1500);
+      const timeoutMs = Number(options.timeoutMs || 12000);
+      const quiet = !!options.quiet;
+      let lastError = null;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          await new Promise((resolve, reject) => {
+            const ws = new WebSocket(SIDECAR_WS_URL);
+            let settled = false;
+            const timeout = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              try { ws.close(); } catch (_) {}
+              reject(new Error("Timed out connecting to sidecar"));
+            }, timeoutMs);
+
+            ws.onopen = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              state.sidecarSocket = ws;
+              state.sidecarConnected = true;
+              state.sidecarExpectedClose = false;
+              setPill(statusServer, "Server: connected", "ok");
+              setPill(statusModel, "Transcriber: Vosk sidecar", "ok");
+              setPill(statusLatency, "Latency: sidecar", "ok");
+              if (!quiet) log(`Connected to sidecar: ${SIDECAR_WS_URL}`);
+              resolve();
+            };
+
+            ws.onerror = (event) => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timeout);
+              const detail = event?.type ? ` (${event.type})` : "";
+              reject(new Error(`Sidecar websocket error${detail}`));
+            };
+
+            ws.onmessage = (event) => {
+              handleSidecarMessage(event.data);
+            };
+
+            ws.onclose = () => {
+              if (state.sidecarSocket === ws) state.sidecarSocket = null;
+              state.sidecarConnected = false;
+              if (state.sidecarExpectedClose) {
+                state.sidecarExpectedClose = false;
+                setPill(statusServer, "Server: reconnecting", "warn");
+                return;
+              }
+              setPill(statusServer, "Server: disconnected", "err");
+              if (state.listening) {
+                setPill(statusRec, "Recognition: sidecar disconnected", "err");
+                log("Sidecar disconnected during active session.", "error");
+              }
+            };
+          });
+
+          return;
+        } catch (err) {
+          lastError = err;
+          if (!quiet) log(`Sidecar connect attempt ${attempt}/${maxAttempts} failed: ${errorText(err)}`, "warn");
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, attemptDelayMs));
+          }
+        }
+      }
+
+      throw lastError || new Error("Unable to connect to sidecar");
+    }
+
+    function disconnectSidecar() {
+      if (!state.sidecarSocket) return;
+      state.sidecarExpectedClose = true;
+      try {
+        state.sidecarSocket.close();
+      } catch (_) {
+      }
+      state.sidecarConnected = false;
+      setPill(statusServer, "Server: disconnected", "warn");
+    }
+
+    function formatDataSize(bytes) {
+      const safe = Math.max(0, Number(bytes) || 0);
+      const kb = 1024;
+      const mb = kb * 1024;
+      const gb = mb * 1024;
+
+      if (safe >= gb) return `${(safe / gb).toFixed(2)} GB`;
+      if (safe >= mb) return `${(safe / mb).toFixed(1)} MB`;
+      if (safe >= kb) return `${(safe / kb).toFixed(1)} KB`;
+      return `${safe} B`;
+    }
+
+    function updateRuntimeStatusPills(status) {
+      if (!status || typeof status !== "object") return;
+      const statusText = String(status.statusMessage || "").toLowerCase();
+      const hasPortSignal = typeof status.portOpen === "boolean";
+      const modelSize = String(status.modelSize || state.selectedModelSize || "small").toLowerCase();
+      const modelDownloadDir = String(status.modelDownloadDir || "").trim();
+      state.selectedModelSize = modelSize;
+      if (modelDownloadDir) {
+        state.modelDownloadDir = modelDownloadDir;
+        if (btnOpenModelFolder) btnOpenModelFolder.title = `Open model folder: ${modelDownloadDir}`;
+      }
+      if (!state.modelSizeDirty && modelSizeSelect) {
+        modelSizeSelect.value = modelSize;
+        state.selectedModelSizePending = modelSize;
+      }
+
+      const rawProgress = Number(status.downloadProgress);
+      const hasProgress = Number.isFinite(rawProgress);
+      const rawBytes = Number(status.downloadBytes);
+      const hasBytes = Number.isFinite(rawBytes) && rawBytes > 0;
+      const downloadBytes = hasBytes ? Math.max(0, Math.round(rawBytes)) : 0;
+      const rawTotalBytes = Number(status.downloadTotalBytes);
+      const hasTotalBytes = Number.isFinite(rawTotalBytes) && rawTotalBytes > 0;
+      const totalBytes = hasTotalBytes ? Math.max(0, Math.round(rawTotalBytes)) : 0;
+      const progress = Math.max(0, Math.min(100, hasProgress ? Math.round(rawProgress) : state.modelDownloadProgress || 0));
+      const isDownloading = statusText.includes("downloading");
+      const estimatedBytesFromProgress = hasTotalBytes ? Math.round((progress / 100) * totalBytes) : 0;
+      const currentDownloadBytes = Math.max(downloadBytes, estimatedBytesFromProgress, state.modelDownloadBytes || 0);
+      const byteDerivedProgress = hasTotalBytes
+        ? Math.max(0, Math.min(100, Math.round((currentDownloadBytes / totalBytes) * 100)))
+        : progress;
+
+      if (isDownloading) {
+        state.modelDownloadProgress = byteDerivedProgress;
+        state.modelDownloadBytes = currentDownloadBytes;
+        state.modelDownloadTotalBytes = totalBytes;
+        if (modelDownloadWrap) modelDownloadWrap.classList.add("show");
+        if (modelDownloadBar) {
+          if (hasTotalBytes || hasProgress) {
+            modelDownloadBar.max = 100;
+            modelDownloadBar.value = byteDerivedProgress;
+          } else {
+            modelDownloadBar.removeAttribute("value");
+          }
+        }
+        if (modelDownloadLabel) {
+          if (hasTotalBytes) {
+            modelDownloadLabel.textContent = `${byteDerivedProgress}% • ${formatDataSize(currentDownloadBytes)} / ${formatDataSize(totalBytes)}`;
+          } else if (hasBytes) {
+            modelDownloadLabel.textContent = `${byteDerivedProgress}% • ${formatDataSize(currentDownloadBytes)}`;
+          } else if (hasProgress) {
+            modelDownloadLabel.textContent = `${byteDerivedProgress}%`;
+          } else {
+            modelDownloadLabel.textContent = "Downloading...";
+          }
+        }
+      } else {
+        state.modelDownloadProgress = 0;
+        state.modelDownloadBytes = 0;
+        state.modelDownloadTotalBytes = 0;
+        if (modelDownloadWrap) modelDownloadWrap.classList.remove("show");
+        if (modelDownloadBar) {
+          modelDownloadBar.max = 100;
+          modelDownloadBar.value = 0;
+        }
+        if (modelDownloadLabel) modelDownloadLabel.textContent = "0%";
+      }
+
+      if (status.portOpen === true) {
+        setPill(statusServer, "Server: online", "ok");
+      } else if (status.restarting) {
+        setPill(statusServer, "Server: restarting", "warn");
+      } else if (!hasPortSignal && state.sidecarConnected) {
+        setPill(statusServer, "Server: connected", "ok");
+      } else if (status.processRunning || statusText.includes("loading") || statusText.includes("starting")) {
+        setPill(statusServer, "Server: starting", "warn");
+      } else {
+        setPill(statusServer, "Server: offline", "err");
+      }
+
+      const modelReady = !!status.modelReady;
+      if (modelReady || statusText.includes("model-ready")) {
+        setPill(statusModel, `Transcriber: Vosk ${modelSize}`, "ok");
+      } else if (status.restarting || statusText.includes("restarting")) {
+        setPill(statusModel, "Transcriber: restarting", "warn");
+      } else if (statusText.includes("downloading")) {
+        if (hasTotalBytes || hasProgress) {
+          setPill(statusModel, `Transcriber: downloading ${modelSize} ${byteDerivedProgress}%`, "warn");
+        } else if (currentDownloadBytes > 0) {
+          setPill(statusModel, `Transcriber: downloading ${modelSize} ${formatDataSize(currentDownloadBytes)}`, "warn");
+        } else {
+          setPill(statusModel, `Transcriber: downloading ${modelSize}`, "warn");
+        }
+      } else if (statusText.includes("loading")) {
+        setPill(statusModel, `Transcriber: loading Vosk ${modelSize}`, "warn");
+      } else if (statusText.includes("model-error") || statusText.includes("model-load-failed")) {
+        setPill(statusModel, "Transcriber: error", "err");
+      } else if (status.portOpen === true || state.sidecarConnected) {
+        setPill(statusModel, "Transcriber: starting", "warn");
+      } else {
+        setPill(statusModel, "Transcriber: offline", "err");
+      }
+    }
+
+    async function pollSidecarStatus() {
+      if (state.statusPollInFlight) return null;
+      if (!window.desktopRuntime?.getSidecarStatus) return null;
+
+      state.statusPollInFlight = true;
+      try {
+        const status = await window.desktopRuntime.getSidecarStatus();
+        updateRuntimeStatusPills(status);
+        return status;
+      } catch (err) {
+        setPill(statusServer, "Server: status error", "err");
+        return null;
+      } finally {
+        state.statusPollInFlight = false;
+      }
+    }
+
+    async function maybeReconnectSidecar() {
+      if (state.sidecarConnected) return;
+      if (state.reconnectInFlight) return;
+      const now = Date.now();
+      if ((now - state.lastPassiveReconnectAt) < 3000) return;
+
+      const status = await pollSidecarStatus();
+      if (!status || !status.portOpen) return;
+
+      state.reconnectInFlight = true;
+      state.lastPassiveReconnectAt = now;
+      try {
+        await connectSidecar({ maxAttempts: 1, timeoutMs: 3000, attemptDelayMs: 500, quiet: true });
+      } catch (_) {
+      } finally {
+        state.reconnectInFlight = false;
+      }
+    }
+
+    function startServerMonitor() {
+      if (state.serverMonitorTimer) clearInterval(state.serverMonitorTimer);
+      state.serverMonitorTimer = setInterval(() => {
+        maybeReconnectSidecar();
+      }, 2500);
+    }
+
+    async function restartModelServer() {
+      if (!window.desktopRuntime?.restartSidecar) {
+        log("Runtime sidecar control not available in this environment.", "error");
+        return;
+      }
+
+      btnRestartServer.disabled = true;
+      setPill(statusServer, "Server: restarting", "warn");
+      setPill(statusModel, "Transcriber: restarting", "warn");
+
+      try {
+        disconnectSidecar();
+        const result = await window.desktopRuntime.restartSidecar();
+        let status = result?.status || null;
+        updateRuntimeStatusPills(status);
+
+        if (!result?.ok) {
+          const deadline = Date.now() + 15000;
+          while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 600));
+            status = await pollSidecarStatus();
+            if (status?.portOpen) break;
+          }
+
+          if (!status?.portOpen) {
+            log("Server restart failed.", "error");
+            return;
+          }
+        }
+
+        log("Model server restarted.");
+        await connectSidecar({ maxAttempts: 4, timeoutMs: 5000, attemptDelayMs: 1000, quiet: true });
+      } catch (err) {
+        log(`Restart failed: ${errorText(err)}`, "error");
+        setPill(statusServer, "Server: restart failed", "err");
+      } finally {
+        btnRestartServer.disabled = false;
+      }
+    }
+
+    async function applySelectedModelSize() {
+      if (!window.desktopRuntime?.setSidecarModelSize) {
+        log("Runtime model-size control not available in this environment.", "error");
+        return;
+      }
+      if (state.listening) {
+        log("Stop listening before changing model size.", "warn");
+        return;
+      }
+
+      const selected = String(modelSizeSelect?.value || "small").toLowerCase();
+      btnApplyModel.disabled = true;
+      try {
+        const res = await window.desktopRuntime.setSidecarModelSize(selected);
+        if (!res?.ok) {
+          log("Failed to set model size.", "error");
+          return;
+        }
+        state.selectedModelSize = String(res.modelSize || selected);
+        state.selectedModelSizePending = state.selectedModelSize;
+        state.modelSizeDirty = false;
+        if (modelSizeSelect) modelSizeSelect.value = state.selectedModelSize;
+        log(`Model size set to '${state.selectedModelSize}'. Restarting sidecar...`);
+        await restartModelServer();
+      } catch (err) {
+        log(`Apply model failed: ${errorText(err)}`, "error");
+      } finally {
+        btnApplyModel.disabled = false;
+      }
+    }
+
+    async function openModelDownloadFolder() {
+      if (!window.desktopRuntime?.openSidecarModelFolder) {
+        log("Runtime folder-open control not available in this environment.", "error");
+        return;
+      }
+      try {
+        const result = await window.desktopRuntime.openSidecarModelFolder();
+        if (!result?.ok) {
+          log(`Unable to open model folder: ${result?.error || "unknown error"}`, "error");
+          return;
+        }
+        if (result?.path) {
+          log(`Opened model folder: ${result.path}`);
+        } else {
+          log("Opened model folder.");
+        }
+      } catch (err) {
+        log(`Open model folder failed: ${errorText(err)}`, "error");
+      }
+    }
+
+    function hasRecentSpeech() {
+      return (Date.now() - state.lastSpeechAt) <= CFG.speechHoldMs;
+    }
+
+    function sanitizeTranscript(raw) {
+      const text = String(raw || "")
+        .replace(/\b(blank_audio|\[noise\]|\[music\]|\(music\)|<\|nospeech\|>)\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!text) return "";
+      const words = text.split(/\s+/);
+      if (words.length <= CFG.maxTranscriptWordsPerPass) return text;
+      return words.slice(words.length - CFG.maxTranscriptWordsPerPass).join(" ");
+    }
+
+    function normalizeChapterVerseConnectors(text) {
+      return String(text || "")
+        .replace(/\b(\d{1,3})\s*[-–—]\s*(\d{1,3})\b/g, "$1:$2")
+        .replace(/\b(\d{1,3})\s+(?:and|in)\s+(\d{1,3})\b/gi, "$1:$2");
+    }
+
+    function isDegenerateTranscript(text) {
+      const words = tokenize(text);
+      if (words.length < 8) return false;
+
+      let longestRun = 1;
+      let run = 1;
+      for (let i = 1; i < words.length; i++) {
+        if (words[i] === words[i - 1]) {
+          run++;
+          if (run > longestRun) longestRun = run;
+        } else {
+          run = 1;
+        }
+      }
+
+      const freq = new Map();
+      for (const w of words) freq.set(w, (freq.get(w) || 0) + 1);
+      let topCount = 0;
+      for (const count of freq.values()) if (count > topCount) topCount = count;
+      const dominantRatio = topCount / words.length;
+
+      let repeatedBlockLoop = false;
+      for (let blockSize = 6; blockSize <= 20; blockSize++) {
+        if (words.length < blockSize * 3) continue;
+        const a = words.slice(words.length - blockSize).join(" ");
+        const b = words.slice(words.length - (blockSize * 2), words.length - blockSize).join(" ");
+        const c = words.slice(words.length - (blockSize * 3), words.length - (blockSize * 2)).join(" ");
+        if (a === b && b === c) {
+          repeatedBlockLoop = true;
+          break;
+        }
+      }
+
+      return longestRun >= CFG.maxRepeatedRun || dominantRatio >= CFG.maxDominantWordRatio || repeatedBlockLoop;
+    }
+
+    function mergeTextNoDup(base, addition) {
+      const a = base.trim();
+      const b = addition.trim();
+      if (!b) return a;
+      if (!a) return b;
+
+      const aWords = a.split(/\s+/);
+      const bWords = b.split(/\s+/);
+      const maxOverlap = Math.min(12, aWords.length, bWords.length);
+      let overlap = 0;
+
+      for (let n = maxOverlap; n >= 1; n--) {
+        const tail = aWords.slice(aWords.length - n).join(" ").toLowerCase();
+        const head = bWords.slice(0, n).join(" ").toLowerCase();
+        if (tail === head) {
+          overlap = n;
+          break;
+        }
+      }
+
+      if (overlap > 0 && overlap < CFG.minWordOverlapForMerge) {
+        overlap = 0;
+      }
+
+      const merged = aWords.concat(bWords.slice(overlap)).join(" ");
+      return merged.replace(/\s+/g, " ").trim();
+    }
+
+    function appendDetectionMemory(segment) {
+      const next = mergeTextNoDup(state.detectionMemoryText || "", segment || "");
+      state.detectionMemoryText = rollingWindowText(next, CFG.detectionMemoryTokenLimit);
+    }
+
+    function appendInterimText(segment) {
+      const next = mergeTextNoDup(state.interimText || "", segment || "");
+      const tokens = tokenize(next);
+      let looped = false;
+      for (let blockSize = 6; blockSize <= 20; blockSize++) {
+        if (tokens.length < blockSize * 3) continue;
+        const a = tokens.slice(tokens.length - blockSize).join(" ");
+        const b = tokens.slice(tokens.length - (blockSize * 2), tokens.length - blockSize).join(" ");
+        const c = tokens.slice(tokens.length - (blockSize * 3), tokens.length - (blockSize * 2)).join(" ");
+        if (a === b && b === c) {
+          looped = true;
+          break;
+        }
+      }
+
+      if (looped) {
+        state.interimText = rollingWindowText(segment || "", CFG.interimTokenLimit);
+        log("Detected repeated phrase loop in interim text. Resetting interim window.", "warn");
+      } else {
+        state.interimText = rollingWindowText(next, CFG.interimTokenLimit);
+      }
+    }
+
+    function getDetectionContextText() {
+      const base = (state.detectionMemoryText || state.finalText || "").trim();
+      const interimTail = rollingWindowText(state.interimText || "", CFG.detectionInterimBlendTokens);
+      const merged = mergeTextNoDup(base, interimTail);
+      return rollingWindowText(merged, CFG.rollingTokenLimit);
+    }
+
+    function maybeFinalizeInterim() {
+      const now = Date.now();
+      if (!state.interimText.trim()) return;
+      if (now - state.lastSpeechAt < CFG.silenceFinalizeMs) return;
+
+      const segment = state.interimText.trim();
+      if (!segment || segment === state.lastFinalizedInterim) return;
+
+      state.finalText = mergeTextNoDup(state.finalText, segment);
+      appendDetectionMemory(segment);
+      state.lastFinalizedInterim = segment;
+      state.interimText = "";
+      log("Finalized interim segment after silence.");
+    }
+
+    async function inferenceTick() {
+      if (!state.listening || state.busyInfer || !state.asr) return;
+
+      const now = Date.now();
+      const speechActive = hasRecentSpeech() || state.liveRms >= CFG.speechThreshold * 0.55;
+      if (state.wasSpeechActive && !speechActive) {
+        const sinceTail = now - state.lastTailInferAt;
+        if (sinceTail > 1200) {
+          state.pendingTailInfer = true;
+          state.lastTailInferAt = now;
+          log("Running one tail inference after speech end.");
+        }
+      }
+      state.wasSpeechActive = speechActive;
+
+      const forcedDecodeDue = (now - state.lastInferAt) >= CFG.forceDecodeEveryMs && state.liveRms >= CFG.speechFloorForDecode;
+      const shouldDecode = speechActive || state.pendingTailInfer || forcedDecodeDue;
+
+      if (!shouldDecode) {
+        maybeFinalizeInterim();
+        return;
+      }
+
+      const minSamples = Math.floor(CFG.minAudioForInferSec * state.sourceRate);
+      if (state.totalSamples < minSamples) return;
+
+      const inferWindowSec = state.pendingTailInfer ? Math.max(CFG.inferWindowSec, CFG.tailInferWindowSec) : CFG.inferWindowSec;
+      const recent = getRecentSamples(inferWindowSec);
+      if (!recent.length) return;
+
+      const input16k = resampleLinear(recent, state.sourceRate, CFG.inputTargetRate);
+      if (!input16k.length) return;
+
+      state.busyInfer = true;
+      setPill(statusRec, "Recognition: running", "ok");
+
+      const t0 = performance.now();
+      try {
+        const out = await state.asr(input16k, {
+          return_timestamps: false
+        });
+
+        const text = normalizeChapterVerseConnectors(sanitizeTranscript(out?.text || ""));
+        if (text) {
+          if (isDegenerateTranscript(text)) {
+            log("Discarded low-confidence repetitive transcript segment.", "warn");
+          } else {
+            appendInterimText(text);
+            renderTextAndSuggestions();
+          }
+        }
+
+        if (state.pendingTailInfer) state.pendingTailInfer = false;
+        state.lastInferAt = Date.now();
+
+        maybeFinalizeInterim();
+        renderTextAndSuggestions();
+
+        const dt = Math.round(performance.now() - t0);
+        setPill(statusLatency, `Latency: ${dt}ms`, dt <= 1200 ? "ok" : "warn");
+      } catch (e) {
+        if (state.pendingTailInfer) state.pendingTailInfer = false;
+        logInferenceError(e?.message || String(e));
+        setPill(statusRec, "Recognition: error", "err");
+      } finally {
+        state.busyInfer = false;
+      }
+    }
+
+    function stopBrowserRecognition() {
+      if (state.webRecRestartTimer) {
+        clearTimeout(state.webRecRestartTimer);
+        state.webRecRestartTimer = 0;
+      }
+
+      if (!state.webRec) return;
+      try {
+        state.webRec.onresult = null;
+        state.webRec.onerror = null;
+        state.webRec.onend = null;
+        state.webRec.stop();
+      } catch (_) {
+      }
+      state.webRec = null;
+    }
+
+    function resetBrowserStreamState() {
+      state.browserWordsCommitted = 0;
+      state.browserCharLengthOfPushes = 0;
+      state.browserLastResultCache = "";
+    }
+
+    function ingestBrowserResultText(resultText) {
+      const cleaned = normalizeChapterVerseConnectors(sanitizeTranscript(resultText || ""));
+      if (!cleaned) return;
+
+      const words = cleaned.split(/\s+/).filter(Boolean);
+      const minLengthNeeded = 10 + state.browserWordsCommitted;
+
+      if (words.length > minLengthNeeded) {
+        const wordsToCommit = words.slice(state.browserWordsCommitted, state.browserWordsCommitted + 5);
+        if (wordsToCommit.length) {
+          const committed = wordsToCommit.join(" ");
+          state.finalText = mergeTextNoDup(state.finalText, committed);
+          appendDetectionMemory(committed);
+          state.lastFinalizedInterim = committed;
+          state.browserWordsCommitted += wordsToCommit.length;
+          state.browserCharLengthOfPushes += committed.length;
+        }
+      }
+
+      if (state.browserCharLengthOfPushes) {
+        const offset = Math.min(cleaned.length, state.browserCharLengthOfPushes + Math.floor(state.browserWordsCommitted / 5));
+        state.browserLastResultCache = cleaned.substring(offset).trim();
+      } else {
+        state.browserLastResultCache = cleaned;
+      }
+
+      state.interimText = rollingWindowText(state.browserLastResultCache, CFG.interimTokenLimit);
+      state.lastSpeechAt = Date.now();
+      state.lastTranscriptAt = Date.now();
+      renderTextAndSuggestions();
+    }
+
+    function flushBrowserRemainderToFinal() {
+      const remainder = (state.browserLastResultCache || "").trim();
+      if (!remainder) {
+        resetBrowserStreamState();
+        return;
+      }
+
+      state.finalText = mergeTextNoDup(state.finalText, remainder);
+      appendDetectionMemory(remainder);
+      state.lastFinalizedInterim = remainder;
+      state.interimText = "";
+      state.lastTranscriptAt = Date.now();
+      resetBrowserStreamState();
+      renderTextAndSuggestions();
+    }
+
+    async function switchBrowserSpeechToLocal(reason) {
+      if (!state.listening || !state.useBrowserSpeech) return;
+
+      state.useBrowserSpeech = false;
+      stopBrowserRecognition();
+      if (state.inferTimer) clearInterval(state.inferTimer);
+      state.inferTimer = 0;
+
+      setPill(statusRec, "Recognition: switching", "warn");
+      log(reason, "warn");
+
+      await ensureAsrLoaded();
+      if (!state.listening) return;
+
+      state.inferTimer = setInterval(inferenceTick, CFG.inferEveryMs);
+      setPill(statusModel, `Transcriber: Local (${state.modelIdInUse || CFG.modelIdFast})`, "ok");
+      setPill(statusRec, "Recognition: streaming", "ok");
+      setPill(statusLatency, "Latency: local", "warn");
+      log("Switched to local ASR on captured mic stream.", "warn");
+    }
+
+    function switchLocalToBrowser(reason) {
+      if (!state.listening || state.useBrowserSpeech || !browserSpeechSupported) return;
+
+      if (state.inferTimer) clearInterval(state.inferTimer);
+      state.inferTimer = 0;
+      state.useBrowserSpeech = true;
+
+      setPill(statusRec, "Recognition: switching", "warn");
+      setPill(statusModel, "Transcriber: Browser Speech", "ok");
+      setPill(statusLatency, "Latency: browser", "ok");
+      log(reason, "warn");
+      startBrowserRecognition();
+      setPill(statusRec, "Recognition: streaming", "ok");
+      log("Switched to Browser Speech backend.", "warn");
+    }
+
+    function startTranscriptionWatchdog() {
+      if (!CFG.enableBackendAutoSwitch) return;
+      if (state.transcriptionWatchdogTimer) clearInterval(state.transcriptionWatchdogTimer);
+      state.transcriptionWatchdogTimer = setInterval(() => {
+        if (!state.listening) return;
+        const now = Date.now();
+        const audioActive = state.liveRms >= (CFG.speechThreshold * 0.65);
+        const silentTranscriber = (now - state.lastTranscriptAt) > 8500;
+        if (!audioActive || !silentTranscriber) return;
+
+        if (state.useBrowserSpeech) {
+          void switchBrowserSpeechToLocal("No transcript produced while meter is active. Switching Browser Speech to local ASR.");
+        } else if (browserSpeechSupported) {
+          switchLocalToBrowser("No transcript produced while meter is active. Switching local ASR to Browser Speech.");
+        }
+      }, 1800);
+    }
+
+    function applyRecognizedText(text, isFinal) {
+      const cleaned = normalizeChapterVerseConnectors(sanitizeTranscript(text || ""));
+      if (!cleaned) return;
+
+      if (isFinal) {
+        state.finalText = mergeTextNoDup(state.finalText, cleaned);
+        appendDetectionMemory(cleaned);
+        state.lastFinalizedInterim = cleaned;
+        state.interimText = "";
+        state.lastSidecarPartial = "";
+      } else {
+        appendInterimText(cleaned);
+      }
+
+      state.lastSpeechAt = Date.now();
+      state.lastTranscriptAt = Date.now();
+      renderTextAndSuggestions();
+    }
+
+    function startBrowserRecognition() {
+      stopBrowserRecognition();
+      resetBrowserStreamState();
+
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      rec.maxAlternatives = 1;
+
+      rec.onresult = (event) => {
+        const resultText = event?.results?.[0]?.[0]?.transcript || "";
+        if (resultText.trim()) {
+          ingestBrowserResultText(resultText);
+          state.browserNoSpeechWhileMeterCount = 0;
+        }
+      };
+
+      rec.onerror = (event) => {
+        const code = event?.error || "unknown";
+
+        if (code === "no-speech" || code === "no-match" || code === "aborted") {
+          const now = Date.now();
+          const meterActive = state.liveRms >= (CFG.speechThreshold * 0.75);
+
+          if (meterActive) {
+            state.browserNoSpeechWhileMeterCount += 1;
+          } else {
+            state.browserNoSpeechWhileMeterCount = Math.max(0, state.browserNoSpeechWhileMeterCount - 1);
+          }
+
+          if (CFG.enableBackendAutoSwitch && meterActive && state.browserNoSpeechWhileMeterCount >= 3 && (now - state.lastBrowserToLocalFailoverAt > 10000)) {
+            state.lastBrowserToLocalFailoverAt = now;
+            void switchBrowserSpeechToLocal("Browser Speech reports no-speech while meter shows audio. Likely input-source mismatch.");
+            return;
+          }
+
+          if (now - state.lastNoSpeechLogAt > 6000) {
+            log(`Browser speech transient: ${code}. Waiting for audio...`, "info");
+            state.lastNoSpeechLogAt = now;
+          }
+          setPill(statusRec, "Recognition: streaming", "ok");
+          return;
+        }
+
+        if (code === "audio-capture" || code === "not-allowed") {
+          log(`Browser speech error: ${code}`, "error");
+          setPill(statusRec, "Recognition: error", "err");
+          return;
+        }
+
+        if (code === "network") {
+          log("Browser speech network error. Repo-style mode depends on Chrome online speech service; Electron runtime may fail this path.", "error");
+          setPill(statusRec, "Recognition: network error", "err");
+          return;
+        }
+
+        log(`Browser speech error: ${code}`, "warn");
+        setPill(statusRec, "Recognition: warning", "warn");
+      };
+
+      rec.onend = () => {
+        flushBrowserRemainderToFinal();
+        if (!state.listening || !state.useBrowserSpeech) return;
+        state.webRecRestartTimer = setTimeout(() => {
+          if (!state.listening || !state.useBrowserSpeech) return;
+          try {
+            rec.start();
+          } catch (_) {
+          }
+        }, 180);
+      };
+
+      state.webRec = rec;
+      rec.start();
+    }
+
+    function clearAudioState() {
+      state.audioChunks = [];
+      state.totalSamples = 0;
+      state.liveRms = 0;
+      state.lastSpeechAt = Date.now();
+      state.lastInferAt = 0;
+      state.lastAudioProcessAt = Date.now();
+      state.wasSpeechActive = false;
+      state.pendingTailInfer = false;
+      state.browserNoSpeechWhileMeterCount = 0;
+      state.lastSidecarPartial = "";
+      drawMeter(0);
+      drawWaveform(null);
+    }
+
+    function buildAudioProcessHandler() {
+      return (ev) => {
+        if (!state.listening) return;
+        state.lastAudioProcessAt = Date.now();
+        const inputBuffer = ev.inputBuffer;
+        const channelCount = Math.max(1, inputBuffer.numberOfChannels || 1);
+        const frameCount = inputBuffer.length;
+        const chunk = new Float32Array(frameCount);
+
+        for (let ch = 0; ch < channelCount; ch++) {
+          const channelData = inputBuffer.getChannelData(ch);
+          for (let i = 0; i < frameCount; i++) {
+            chunk[i] += channelData[i] / channelCount;
+          }
+        }
+
+        pushAudioChunk(chunk);
+
+        let sum = 0;
+        for (let i = 0; i < chunk.length; i++) sum += chunk[i] * chunk[i];
+        const rms = Math.sqrt(sum / chunk.length);
+        state.liveRms = state.liveRms * 0.84 + rms * 0.16;
+        if (rms >= CFG.speechThreshold) state.lastSpeechAt = Date.now();
+
+        sendSidecarAudio(chunk);
+      };
+    }
+
+    function connectProcessorNode() {
+      if (!state.audioCtx || !state.analyserNode || !state.sinkGainNode) return;
+      if (state.processorNode) {
+        state.processorNode.disconnect();
+        state.processorNode.onaudioprocess = null;
+      }
+
+      state.processorNode = state.audioCtx.createScriptProcessor(4096, 1, 1);
+      state.processorNode.onaudioprocess = buildAudioProcessHandler();
+      state.analyserNode.connect(state.processorNode);
+      state.processorNode.connect(state.sinkGainNode);
+      state.lastAudioProcessAt = Date.now();
+    }
+
+    function startAudioWatchdog() {
+      if (state.audioWatchdogTimer) clearInterval(state.audioWatchdogTimer);
+      state.audioWatchdogTimer = setInterval(() => {
+        if (!state.listening) return;
+        const now = Date.now();
+        if (now - state.lastAudioProcessAt <= CFG.audioStallMs) return;
+        if (now - state.lastAudioStallWarnAt < 1800) return;
+
+        state.lastAudioStallWarnAt = now;
+        log("Audio callback stalled. Rebuilding capture node.", "warn");
+        connectProcessorNode();
+      }, 800);
+    }
+
+    async function startListening() {
+      if (state.listening) {
+        log("Start ignored: already listening.", "warn");
+        return;
+      }
+
+      try {
+        btnStart.disabled = true;
+        setPill(statusMic, "Mic: starting", "warn");
+        setPill(statusRec, "Recognition: preparing", "warn");
+
+        const selected = deviceSelect.value;
+        const constraints = {
+          audio: {
+            ...(selected ? { deviceId: { exact: selected } } : {}),
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            channelCount: { ideal: 2 },
+            sampleRate: { ideal: 48000 }
+          },
+          video: false
+        };
+
+        state.stream = await navigator.mediaDevices.getUserMedia(constraints);
+        state.micTrack = state.stream.getAudioTracks()[0] || null;
+
+        state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        state.audioCtx.onstatechange = async () => {
+          if (!state.audioCtx) return;
+          log(`AudioContext state: ${state.audioCtx.state}`);
+          if (state.listening && state.audioCtx.state === "suspended") {
+            try {
+              await state.audioCtx.resume();
+              log("AudioContext resumed.");
+            } catch (e) {
+              log(`AudioContext resume failed: ${errorText(e)}`, "warn");
+            }
+          }
+        };
+        state.sourceRate = state.audioCtx.sampleRate;
+        state.sourceNode = state.audioCtx.createMediaStreamSource(state.stream);
+        state.analyserNode = state.audioCtx.createAnalyser();
+        state.analyserNode.fftSize = 1024;
+        state.sinkGainNode = state.audioCtx.createGain();
+        state.sinkGainNode.gain.value = 0;
+
+        if (state.micTrack) {
+          const trackSettings = state.micTrack.getSettings?.() || {};
+          log(`Track settings: channels=${trackSettings.channelCount ?? "?"}, sampleRate=${trackSettings.sampleRate ?? "?"}, deviceId=${trackSettings.deviceId ? "set" : "?"}`);
+          state.micTrack.addEventListener("ended", () => {
+            log("Mic track ended (device removed or permission changed).", "warn");
+            if (state.listening) stopListening("Stopped because mic track ended.");
+          });
+          state.micTrack.addEventListener("mute", () => {
+            log("Mic track muted.", "warn");
+          });
+          state.micTrack.addEventListener("unmute", () => {
+            log("Mic track unmuted.");
+          });
+        }
+
+        state.sourceNode.connect(state.analyserNode);
+        state.sinkGainNode.connect(state.audioCtx.destination);
+        connectProcessorNode();
+
+        clearAudioState();
+
+        state.listening = true;
+        state.lastSpeechAt = Date.now();
+        state.lastTranscriptAt = Date.now();
+        state.browserNoSpeechWhileMeterCount = 0;
+        await connectSidecar();
+        state.useBrowserSpeech = false;
+        sendSidecarControl("start");
+        setPill(statusLatency, "Latency: sidecar", "ok");
+        log("Backend mode: Vosk sidecar only.", "warn");
+        startAudioWatchdog();
+        animateMeter();
+
+        setPill(statusMic, "Mic: live", "ok");
+        setPill(statusRec, "Recognition: streaming", "ok");
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+        btnRefreshDevices.disabled = true;
+
+        log(`Listening started at ${state.sourceRate} Hz source rate.`);
+      } catch (e) {
+        log(`Start failed: ${errorText(e)}`, "error");
+        setPill(statusMic, "Mic: error", "err");
+        setPill(statusRec, "Recognition: stopped", "warn");
+      } finally {
+        btnStart.disabled = state.listening;
+      }
+    }
+
+    function teardownAudioGraph() {
+      if (state.inferTimer) clearInterval(state.inferTimer);
+      state.inferTimer = 0;
+
+      stopBrowserRecognition();
+      state.useBrowserSpeech = false;
+      disconnectSidecar();
+
+      if (state.audioWatchdogTimer) clearInterval(state.audioWatchdogTimer);
+      state.audioWatchdogTimer = 0;
+
+      if (state.transcriptionWatchdogTimer) clearInterval(state.transcriptionWatchdogTimer);
+      state.transcriptionWatchdogTimer = 0;
+
+      if (state.meterAnim) cancelAnimationFrame(state.meterAnim);
+      state.meterAnim = 0;
+
+      if (state.processorNode) {
+        state.processorNode.disconnect();
+        state.processorNode.onaudioprocess = null;
+      }
+      if (state.sinkGainNode) state.sinkGainNode.disconnect();
+      if (state.analyserNode) state.analyserNode.disconnect();
+      if (state.sourceNode) state.sourceNode.disconnect();
+      if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+      state.micTrack = null;
+
+      if (state.audioCtx && state.audioCtx.state !== "closed") {
+        state.audioCtx.onstatechange = null;
+        state.audioCtx.close().catch(() => {});
+      }
+
+      state.processorNode = null;
+      state.sinkGainNode = null;
+      state.analyserNode = null;
+      state.sourceNode = null;
+      state.audioCtx = null;
+      state.stream = null;
+    }
+
+    function stopListening(reason = "Listening stopped.") {
+      if (!state.listening && !state.stream && !state.audioCtx) {
+        setPill(statusMic, "Mic: idle", "warn");
+        setPill(statusRec, "Recognition: stopped", "warn");
+        btnStop.disabled = true;
+        btnRefreshDevices.disabled = false;
+        drawMeter(0);
+        return;
+      }
+
+      sendSidecarControl("stop");
+      state.listening = false;
+      teardownAudioGraph();
+      maybeFinalizeInterim();
+      renderTextAndSuggestions();
+
+      setPill(statusMic, "Mic: idle", "warn");
+      setPill(statusRec, "Recognition: stopped", "warn");
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      btnRefreshDevices.disabled = false;
+      drawMeter(0);
+      drawWaveform(null);
+
+      log(reason);
+      emitDesktopSuggestions([], { clear: true, force: true });
+    }
+
+    const BOOKS = [
+      { key:"genesis", aliases:["genesis", "gen"] },
+      { key:"exodus", aliases:["exodus", "exo"] },
+      { key:"leviticus", aliases:["leviticus", "lev"] },
+      { key:"numbers", aliases:["numbers", "num"] },
+      { key:"deuteronomy", aliases:["deuteronomy", "deut", "deu"] },
+      { key:"joshua", aliases:["joshua", "josh"] },
+      { key:"judges", aliases:["judges", "judg"] },
+      { key:"ruth", aliases:["ruth"] },
+      { key:"1samuel", aliases:["1 samuel", "first samuel", "one samuel"] },
+      { key:"2samuel", aliases:["2 samuel", "second samuel", "two samuel"] },
+      { key:"psalms", aliases:["psalms", "psalm", "ps"] },
+      { key:"proverbs", aliases:["proverbs", "prov"] },
+      { key:"isaiah", aliases:["isaiah", "isa"] },
+      { key:"jeremiah", aliases:["jeremiah", "jer"] },
+      { key:"matthew", aliases:["matthew", "matt", "mt"] },
+      { key:"mark", aliases:["mark", "mk"] },
+      { key:"luke", aliases:["luke", "lk"] },
+      { key:"john", aliases:["john", "jn"] },
+      { key:"acts", aliases:["acts"] },
+      { key:"romans", aliases:["romans", "rom"] },
+      { key:"1corinthians", aliases:["1 corinthians", "first corinthians", "one corinthians"] },
+      { key:"2corinthians", aliases:["2 corinthians", "second corinthians", "two corinthians"] },
+      { key:"galatians", aliases:["galatians", "gal"] },
+      { key:"ephesians", aliases:["ephesians", "eph"] },
+      { key:"philippians", aliases:["philippians", "phil"] },
+      { key:"colossians", aliases:["colossians", "col"] },
+      { key:"1thessalonians", aliases:["1 thessalonians", "first thessalonians", "one thessalonians"] },
+      { key:"2thessalonians", aliases:["2 thessalonians", "second thessalonians", "two thessalonians"] },
+      { key:"1timothy", aliases:["1 timothy", "first timothy", "one timothy"] },
+      { key:"2timothy", aliases:["2 timothy", "second timothy", "two timothy"] },
+      { key:"titus", aliases:["titus"] },
+      { key:"philemon", aliases:["philemon"] },
+      { key:"hebrews", aliases:["hebrews", "heb"] },
+      { key:"james", aliases:["james", "jas"] },
+      { key:"1peter", aliases:["1 peter", "first peter", "one peter"] },
+      { key:"2peter", aliases:["2 peter", "second peter", "two peter"] },
+      { key:"1john", aliases:["1 john", "first john", "one john"] },
+      { key:"2john", aliases:["2 john", "second john", "two john"] },
+      { key:"3john", aliases:["3 john", "third john", "three john"] },
+      { key:"jude", aliases:["jude"] },
+      { key:"revelation", aliases:["revelation", "rev", "revelations"] }
+    ];
+
+    const ALIAS_FLAT = BOOKS.flatMap(b => b.aliases.map(a => ({ key: b.key, alias: a }))).sort((a, b) => b.alias.length - a.alias.length);
+
+    const NUM_WORDS = new Map([
+      ["zero",0],["one",1],["two",2],["three",3],["four",4],["five",5],["six",6],["seven",7],["eight",8],["nine",9],
+      ["ten",10],["eleven",11],["twelve",12],["thirteen",13],["fourteen",14],["fifteen",15],["sixteen",16],["seventeen",17],["eighteen",18],["nineteen",19],
+      ["twenty",20],["thirty",30],["forty",40],["fifty",50],["sixty",60],["seventy",70],["eighty",80],["ninety",90],["hundred",100]
+    ]);
+
+    const NUM_HOMOPHONES = new Map([
+      ["won", 1], ["wun", 1],
+      ["to", 2], ["too", 2], ["tu", 2],
+      ["tree", 3],
+      ["for", 4], ["fore", 4], ["fur", 4],
+      ["hive", 5],
+      ["sex", 6],
+      ["a", 8], ["eh", 8], ["ay", 8],
+      ["ate", 8], ["ait", 8],
+      ["oh", 0],
+      ["nein", 9]
+    ]);
+
+    function extractNumberLikes(tokens) {
+      const mapped = tokens.map((token) => {
+        const w = String(token || "").toLowerCase();
+        if (!w) return null;
+        if (/^\d{1,3}$/.test(w)) return { value: parseInt(w, 10), fromHomophone: false, raw: w, isDigit: true };
+        if (NUM_WORDS.has(w)) return { value: NUM_WORDS.get(w), fromHomophone: false, raw: w, isDigit: false };
+        if (NUM_HOMOPHONES.has(w)) return { value: NUM_HOMOPHONES.get(w), fromHomophone: true, raw: w, isDigit: false };
+        return null;
+      });
+
+      const out = [];
+      const isUnit = (v) => v >= 0 && v <= 9;
+      const isTeen = (v) => v >= 10 && v <= 19;
+      const isTens = (v) => v >= 20 && v <= 90 && (v % 10 === 0);
+
+      for (let i = 0; i < mapped.length; i++) {
+        const cur = mapped[i];
+        if (!cur) continue;
+
+        if (cur.isDigit) {
+          out.push({ value: cur.value, fromHomophone: false });
+          continue;
+        }
+
+        const next = i + 1 < mapped.length ? mapped[i + 1] : null;
+        const next2 = i + 2 < mapped.length ? mapped[i + 2] : null;
+
+        if (isUnit(cur.value) && cur.value > 0 && next && next.value === 100) {
+          let total = cur.value * 100;
+          let fromHomophone = !!(cur.fromHomophone || next.fromHomophone);
+          let consumed = 1;
+
+          if (next2) {
+            if (isTeen(next2.value) || isUnit(next2.value)) {
+              total += next2.value;
+              fromHomophone = fromHomophone || !!next2.fromHomophone;
+              consumed = 2;
+            } else if (isTens(next2.value)) {
+              total += next2.value;
+              fromHomophone = fromHomophone || !!next2.fromHomophone;
+              consumed = 2;
+              const next3 = i + 3 < mapped.length ? mapped[i + 3] : null;
+              if (next3 && isUnit(next3.value)) {
+                total += next3.value;
+                fromHomophone = fromHomophone || !!next3.fromHomophone;
+                consumed = 3;
+              }
+            }
+          }
+
+          out.push({ value: total, fromHomophone });
+          i += consumed;
+          continue;
+        }
+
+        if (isTens(cur.value) && next && isUnit(next.value)) {
+          out.push({ value: cur.value + next.value, fromHomophone: !!(cur.fromHomophone || next.fromHomophone) });
+          i += 1;
+          continue;
+        }
+
+        out.push({ value: cur.value, fromHomophone: !!cur.fromHomophone });
+      }
+
+      return out;
+    }
+
+    function wordsToNumber(tokens) {
+      const isUnit = (v) => v >= 0 && v <= 9;
+      const isTeen = (v) => v >= 10 && v <= 19;
+      const isTens = (v) => v >= 20 && v <= 90 && (v % 10 === 0);
+
+      if (!tokens.length) return { value: null, used: 0 };
+      const first = tokens[0];
+      if (!NUM_WORDS.has(first)) return { value: null, used: 0 };
+
+      const firstVal = NUM_WORDS.get(first);
+
+      if (
+        tokens.length >= 2 &&
+        isUnit(firstVal) &&
+        firstVal > 0 &&
+        NUM_WORDS.has(tokens[1]) &&
+        NUM_WORDS.get(tokens[1]) === 100
+      ) {
+        let total = firstVal * 100;
+        let used = 2;
+
+        if (tokens.length >= 3 && NUM_WORDS.has(tokens[2])) {
+          const third = NUM_WORDS.get(tokens[2]);
+          if (isTeen(third)) {
+            total += third;
+            used = 3;
+          } else if (isTens(third)) {
+            total += third;
+            used = 3;
+            if (tokens.length >= 4 && NUM_WORDS.has(tokens[3])) {
+              const fourth = NUM_WORDS.get(tokens[3]);
+              if (isUnit(fourth)) {
+                total += fourth;
+                used = 4;
+              }
+            }
+          } else if (isUnit(third)) {
+            total += third;
+            used = 3;
+          }
+        }
+
+        return { value: total, used };
+      }
+
+      if (isTens(firstVal)) {
+        let total = firstVal;
+        let used = 1;
+        if (tokens.length >= 2 && NUM_WORDS.has(tokens[1])) {
+          const second = NUM_WORDS.get(tokens[1]);
+          if (isUnit(second)) {
+            total += second;
+            used = 2;
+          }
+        }
+        return { value: total, used };
+      }
+
+      return { value: firstVal, used: 1 };
+    }
+
+    function replaceSpokenNumbers(text) {
+      const words = normalizeChapterVerseConnectors(normalize(text)).split(" ");
+      const out = [];
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        if (NUM_WORDS.has(w)) {
+          const { value, used } = wordsToNumber(words.slice(i, i + 5));
+          if (used > 0) {
+            out.push(String(value));
+            i += used - 1;
+            continue;
+          }
+        }
+        out.push(w);
+      }
+      return normalizeChapterVerseConnectors(out.join(" "));
+    }
+
+    function levenshtein(a, b) {
+      const m = a.length;
+      const n = b.length;
+      if (m === 0) return n;
+      if (n === 0) return m;
+      const dp = new Array(n + 1);
+      for (let j = 0; j <= n; j++) dp[j] = j;
+      for (let i = 1; i <= m; i++) {
+        let prev = dp[0];
+        dp[0] = i;
+        for (let j = 1; j <= n; j++) {
+          const tmp = dp[j];
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + cost);
+          prev = tmp;
+        }
+      }
+      return dp[n];
+    }
+
+    function bookDisplay(key) {
+      const b = BOOKS.find(x => x.key === key);
+      if (!b) return key;
+      return b.aliases[0].replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function findBookCandidates(text) {
+      const t = normalize(text);
+      const found = [];
+
+      for (const item of ALIAS_FLAT) {
+        const idx = t.lastIndexOf(item.alias);
+        if (idx !== -1) found.push({ bookKey: item.key, match: "exact", alias: item.alias, pos: idx, sim: 1 });
+      }
+
+      if (!found.length) {
+        const tail = t.split(" ").slice(-6).join(" ");
+        for (const item of ALIAS_FLAT) {
+          const dist = levenshtein(tail, item.alias);
+          const sim = 1 - dist / Math.max(1, Math.max(tail.length, item.alias.length));
+          if (sim >= 0.72) found.push({ bookKey: item.key, match: "fuzzy", alias: item.alias, sim, pos: -1 });
+        }
+        found.sort((a, b) => b.sim - a.sim);
+      }
+
+      const out = [];
+      const seen = new Set();
+      for (const f of found) {
+        if (seen.has(f.bookKey)) continue;
+        seen.add(f.bookKey);
+        out.push(f);
+        if (out.length >= 4) break;
+      }
+
+      if (!out.length && state.lastBookKey) {
+        out.push({ bookKey: state.lastBookKey, match: "context", alias: "", sim: 0.5, pos: -1 });
+      }
+
+      return out;
+    }
+
+    function extractNumberHints(text) {
+      const t = replaceSpokenNumbers(text);
+      const hits = [];
+
+      const re = /(\d{1,3})(?:\s*[:]\s*(\d{1,3}))?/g;
+      let m;
+      while ((m = re.exec(t))) {
+        hits.push({
+          chapter: parseInt(m[1], 10),
+          verse: m[2] ? parseInt(m[2], 10) : null,
+          idx: m.index,
+          withColon: !!m[2]
+        });
+      }
+
+      const tailDigits = tokenize(t).slice(-8).filter(w => /^\d{1,3}$/.test(w)).map(v => parseInt(v, 10));
+      if (tailDigits.length >= 2) {
+        hits.push({ chapter: tailDigits[tailDigits.length - 2], verse: tailDigits[tailDigits.length - 1], idx: 999999, withColon: false, inferredPair: true });
+      }
+
+      return hits;
+    }
+
+    function extractAliasNumberHint(text, bookCandidate) {
+      if (!bookCandidate || !bookCandidate.alias) return null;
+      const t = replaceSpokenNumbers(text);
+      const normalizedOriginal = normalizeChapterVerseConnectors(normalize(text));
+      const alias = String(bookCandidate.alias || "").trim();
+      if (!alias) return null;
+
+      const idx = t.lastIndexOf(alias);
+      if (idx === -1) return null;
+
+      const tail = t.slice(idx + alias.length).trim();
+      if (!tail) return null;
+
+      const words = tail.split(/\s+/).slice(0, 10);
+      const nums = words.filter(w => /^\d{1,3}$/.test(w)).map(v => parseInt(v, 10));
+      const idxRaw = normalizedOriginal.lastIndexOf(alias);
+      const rawTailWords = idxRaw !== -1
+        ? normalizedOriginal.slice(idxRaw + alias.length).trim().split(/\s+/).slice(0, 10)
+        : [];
+      const rawNums = extractNumberLikes(rawTailWords);
+      const hasRangeWord = rawTailWords.some((w) => /^(through|thru|to|until|till)$/.test(String(w || "").toLowerCase()));
+
+      if (rawNums.length >= 2) {
+        const rangeEnd = hasRangeWord && rawNums.length >= 3 ? rawNums[2].value : null;
+        return {
+          chapter: rawNums[0].value,
+          verse: rawNums[1].value,
+          inferredRangeEnd: rangeEnd,
+          idx,
+          withColon: false,
+          inferredPair: true,
+          fromAliasWindow: true,
+          fromHomophoneVerse: !!(rawNums[0].fromHomophone || rawNums[1].fromHomophone),
+        };
+      }
+
+      if (!nums.length) return null;
+
+      if (nums.length >= 2) {
+        return {
+          chapter: nums[0],
+          verse: nums[1],
+          idx,
+          withColon: false,
+          inferredPair: true,
+          fromAliasWindow: true,
+        };
+      }
+
+      if (nums.length === 1) {
+        const composite = nums[0];
+        if (composite >= 20 && composite <= 99 && (composite % 10) !== 0) {
+          return {
+            chapter: nums[0],
+            verse: null,
+            inferredSplitChapter: Math.floor(composite / 10) * 10,
+            inferredSplitVerse: composite % 10,
+            idx,
+            withColon: false,
+            inferredPair: false,
+            fromAliasWindow: true,
+          };
+        }
+      }
+
+      return {
+        chapter: nums[0],
+        verse: null,
+        idx,
+        withColon: false,
+        inferredPair: false,
+        fromAliasWindow: true,
+      };
+    }
+
+    function scoreSuggestion(s) {
+      let score = 0;
+      if (s.matchType === "exact") score += 36;
+      else if (s.matchType === "fuzzy") score += 19;
+      else score += 11;
+
+      if (s.chapter != null) score += 18;
+      if (s.verse != null) score += 20;
+      if (s.withColon) score += 8;
+      if (s.inferredPair) score += 4;
+      if (s.isRange) score += 12;
+      if (s.fromAliasWindow) score += 12;
+      if (s.fromHomophoneVerse) score -= 8;
+      if (s.fromInferredVerse) score -= 14;
+      if (s.fromCompositeSplit) score += 4;
+      if (s.matchType === "fuzzy") score += Math.round((s.similarity || 0) * 10);
+
+      if (s.isNeighborFallback) {
+        score -= 26;
+        score -= Math.min(8, Math.abs(s.neighborDistance || 1) * 3);
+      } else {
+        score += 6;
+      }
+
+      if (s.chapter != null && (s.chapter < 1 || s.chapter > 200)) score -= 40;
+      if (s.verse != null && (s.verse < 1 || s.verse > 200)) score -= 35;
+      return score;
+    }
+
+    function formatRef(s) {
+      const b = bookDisplay(s.bookKey);
+      if (s.chapter == null) return b;
+      if (s.verse == null) return `${b} ${s.chapter}`;
+      if (s.rangeEnd != null) return `${b} ${s.chapter}:${s.verse}-${s.rangeEnd}`;
+      return `${b} ${s.chapter}:${s.verse}`;
+    }
+
+    function buildSuggestions(text) {
+      const books = findBookCandidates(text);
+      const nums = extractNumberHints(text);
+      const tailNums = nums.slice(-2);
+      const cands = [];
+
+      for (const b of books.length ? books : [{ bookKey: "genesis", match: "context", sim: 0.4 }]) {
+        if (!tailNums.length) {
+          cands.push({
+            bookKey: b.bookKey,
+            chapter: null,
+            verse: null,
+              mentionPos: typeof b.pos === "number" ? b.pos : -1,
+            matchType: b.match,
+            similarity: b.sim,
+            withColon: false,
+            inferredPair: false,
+            reasons: [b.match === "context" ? "Using recent book context" : (b.match === "fuzzy" ? "Fuzzy book match" : "Book alias detected"), "No chapter/verse detected yet"]
+          });
+          continue;
+        }
+
+        const aliasHint = extractAliasNumberHint(text, b);
+        const numsForBook = aliasHint ? [aliasHint] : tailNums;
+
+        for (const n of numsForBook) {
+          const reasons = [];
+          if (b.match === "exact") reasons.push("Exact book alias detected");
+          if (b.match === "fuzzy") reasons.push(`Fuzzy book similarity ${(b.sim || 0).toFixed(2)}`);
+          if (b.match === "context") reasons.push("Book inferred from recent context");
+          if (n.fromAliasWindow) reasons.push("Number pair found right after detected book");
+
+          if (n.verse != null) {
+            reasons.push(n.withColon ? "Chapter:verse pattern detected" : "Two-number pattern interpreted as chapter and verse");
+            cands.push({
+              bookKey: b.bookKey,
+              chapter: n.chapter,
+              verse: n.verse,
+              mentionPos: typeof b.pos === "number" ? b.pos : -1,
+              matchType: b.match,
+              similarity: b.sim,
+              withColon: !!n.withColon,
+              inferredPair: !!n.inferredPair,
+                fromAliasWindow: !!n.fromAliasWindow,
+              isNeighborFallback: false,
+              neighborDistance: 0,
+              reasons
+            });
+
+            if (n.inferredRangeEnd != null && n.inferredRangeEnd !== n.verse) {
+              cands.push({
+                bookKey: b.bookKey,
+                chapter: n.chapter,
+                verse: n.verse,
+                rangeEnd: n.inferredRangeEnd,
+                mentionPos: typeof b.pos === "number" ? b.pos : -1,
+                matchType: b.match,
+                similarity: b.sim,
+                withColon: false,
+                inferredPair: false,
+                isRange: true,
+                fromAliasWindow: !!n.fromAliasWindow,
+                fromInferredVerse: true,
+                fromHomophoneVerse: !!n.fromHomophoneVerse,
+                isNeighborFallback: false,
+                neighborDistance: 0,
+                reasons: reasons.concat("Verse range detected")
+              });
+            }
+
+            for (const delta of [1, -1]) {
+              const vv = n.verse + delta;
+              if (vv < 1 || vv > 200) continue;
+              cands.push({
+                bookKey: b.bookKey,
+                chapter: n.chapter,
+                verse: vv,
+                mentionPos: typeof b.pos === "number" ? b.pos : -1,
+                matchType: b.match,
+                similarity: b.sim,
+                withColon: !!n.withColon,
+                inferredPair: !!n.inferredPair,
+                  fromAliasWindow: !!n.fromAliasWindow,
+                isNeighborFallback: true,
+                neighborDistance: delta,
+                reasons: reasons.concat("Near verse fallback")
+              });
+            }
+          } else {
+            reasons.push("Chapter number detected");
+            cands.push({
+              bookKey: b.bookKey,
+              chapter: n.chapter,
+              verse: null,
+              mentionPos: typeof b.pos === "number" ? b.pos : -1,
+              matchType: b.match,
+              similarity: b.sim,
+              withColon: false,
+              inferredPair: false,
+              fromAliasWindow: !!n.fromAliasWindow,
+              isNeighborFallback: false,
+              neighborDistance: 0,
+              reasons
+            });
+
+            if (n.inferredVerse != null) {
+              cands.push({
+                bookKey: b.bookKey,
+                chapter: n.chapter,
+                verse: n.inferredVerse,
+                mentionPos: typeof b.pos === "number" ? b.pos : -1,
+                matchType: b.match,
+                similarity: b.sim,
+                withColon: false,
+                inferredPair: false,
+                fromAliasWindow: !!n.fromAliasWindow,
+                fromHomophoneVerse: true,
+                fromInferredVerse: true,
+                isNeighborFallback: false,
+                neighborDistance: 0,
+                reasons: reasons.concat("Possible verse inferred from spoken number token")
+              });
+            }
+
+            if (n.inferredSplitChapter != null && n.inferredSplitVerse != null) {
+              cands.push({
+                bookKey: b.bookKey,
+                chapter: n.inferredSplitChapter,
+                verse: n.inferredSplitVerse,
+                mentionPos: typeof b.pos === "number" ? b.pos : -1,
+                matchType: b.match,
+                similarity: b.sim,
+                withColon: false,
+                inferredPair: false,
+                fromAliasWindow: !!n.fromAliasWindow,
+                fromInferredVerse: true,
+                fromCompositeSplit: true,
+                isNeighborFallback: false,
+                neighborDistance: 0,
+                reasons: reasons.concat("Single spoken number split into chapter:verse")
+              });
+            }
+          }
+        }
+      }
+
+      const scoredRaw = cands.map(s => ({ ...s, ref: formatRef(s), score: scoreSuggestion(s) }));
+      const dedup = new Map();
+      for (const s of scoredRaw) {
+        const prev = dedup.get(s.ref);
+        if (!prev || s.score > prev.score) dedup.set(s.ref, s);
+      }
+
+      const scored = [...dedup.values()];
+      scored.sort((a, b) => {
+        const posA = Number.isFinite(a.mentionPos) ? a.mentionPos : -1;
+        const posB = Number.isFinite(b.mentionPos) ? b.mentionPos : -1;
+        if (posA !== posB) return posB - posA;
+        return b.score - a.score;
+      });
+
+      if (scored.length && scored[0].bookKey) state.lastBookKey = scored[0].bookKey;
+
+      const groups = new Map();
+      for (const item of scored) {
+        const pos = Number.isFinite(item.mentionPos) ? item.mentionPos : -1;
+        const anchor = `${item.bookKey}|${item.chapter == null ? "_" : item.chapter}|${pos}`;
+        if (!groups.has(anchor)) {
+          groups.set(anchor, { key: anchor, mentionPos: pos, items: [] });
+        }
+        groups.get(anchor).items.push(item);
+      }
+
+      const orderedGroups = [...groups.values()]
+        .map((g) => {
+          g.items.sort((a, b) => b.score - a.score);
+          g.topScore = g.items[0]?.score || 0;
+          return g;
+        })
+        .sort((a, b) => {
+          if (a.mentionPos !== b.mentionPos) return b.mentionPos - a.mentionPos;
+          return b.topScore - a.topScore;
+        });
+
+      const maxOut = CFG.maxSuggestions;
+      const selected = [];
+      let remaining = maxOut;
+
+      for (const g of orderedGroups) {
+        if (remaining <= 0) break;
+        const take = Math.min(g.items.length, remaining >= 2 ? 2 : 1);
+        for (let i = 0; i < take; i++) {
+          selected.push({ ...g.items[i], groupKey: g.key, groupPos: g.mentionPos });
+        }
+        remaining -= take;
+      }
+
+      if (remaining > 0) {
+        for (const g of orderedGroups) {
+          if (remaining <= 0) break;
+          for (let i = 2; i < g.items.length && remaining > 0; i++) {
+            selected.push({ ...g.items[i], groupKey: g.key, groupPos: g.mentionPos });
+            remaining -= 1;
+          }
+        }
+      }
+
+      selected.sort((a, b) => {
+        if (a.groupPos !== b.groupPos) return b.groupPos - a.groupPos;
+        if (a.groupKey !== b.groupKey) return String(a.groupKey).localeCompare(String(b.groupKey));
+        return b.score - a.score;
+      });
+
+      return selected;
+    }
+
+    function renderSuggestions(list) {
+      suggestionsEl.innerHTML = "";
+      if (!list.length) {
+        suggestionsEl.textContent = "No suggestions yet.";
+        return;
+      }
+
+      let lastGroup = "";
+
+      for (const s of list) {
+        if (s.groupKey && s.groupKey !== lastGroup) {
+          lastGroup = s.groupKey;
+          const groupHeader = document.createElement("div");
+          groupHeader.className = "sugWhy";
+          const label = s.chapter == null ? bookDisplay(s.bookKey) : `${bookDisplay(s.bookKey)} ${s.chapter}`;
+          groupHeader.textContent = `Reference group: ${label}`;
+          suggestionsEl.appendChild(groupHeader);
+        }
+
+        const div = document.createElement("div");
+        div.className = "sug";
+
+        const main = document.createElement("div");
+        main.className = "sugMain";
+
+        const ref = document.createElement("div");
+        ref.className = "sugRef";
+        ref.textContent = s.ref;
+
+        const why = document.createElement("div");
+        why.className = "sugWhy";
+        why.textContent = s.reasons.join(" • ");
+
+        const score = document.createElement("div");
+        score.className = "sugScore";
+        score.textContent = `Confidence ${clamp(s.score, 0, 100)} / 100`;
+
+        const btn = document.createElement("button");
+        btn.textContent = "Pin";
+        btn.onclick = () => {
+          state.pinnedRef = s.ref;
+          pinnedEl.textContent = `${s.ref} — ${s.reasons.join("; ")}`;
+        };
+
+        main.appendChild(ref);
+        main.appendChild(why);
+        main.appendChild(score);
+        div.appendChild(main);
+        div.appendChild(btn);
+        suggestionsEl.appendChild(div);
+      }
+    }
+
+    function getHighlightRanges(normalizedRollingText, suggestions) {
+      const text = String(normalizedRollingText || "");
+      if (!text || !Array.isArray(suggestions) || !suggestions.length) return [];
+
+      const ranges = [];
+      for (const suggestion of suggestions) {
+        const confidence = clamp(Number(suggestion.score || 0), 0, 100);
+        if (confidence < 55) continue;
+        if (!suggestion.bookKey) continue;
+
+        const book = BOOKS.find((b) => b.key === suggestion.bookKey);
+        if (!book) continue;
+        const aliases = [...book.aliases].sort((a, b) => b.length - a.length);
+
+        let start = Number.isFinite(suggestion.mentionPos) ? suggestion.mentionPos : -1;
+        let alias = "";
+
+        if (start >= 0) {
+          for (const a of aliases) {
+            if (text.slice(start, start + a.length) === a) {
+              alias = a;
+              break;
+            }
+          }
+        }
+
+        if (!alias) {
+          let best = -1;
+          let bestAlias = "";
+          for (const a of aliases) {
+            const idx = text.lastIndexOf(a);
+            if (idx > best) {
+              best = idx;
+              bestAlias = a;
+            }
+          }
+          if (best < 0) continue;
+          start = best;
+          alias = bestAlias;
+        }
+
+        let end = start + alias.length;
+        const extraWords = suggestion.verse != null ? 4 : (suggestion.chapter != null ? 2 : 0);
+        let cursor = end;
+        let consumed = 0;
+        while (consumed < extraWords && cursor < text.length) {
+          while (cursor < text.length && text[cursor] === " ") cursor++;
+          const wordStart = cursor;
+          while (cursor < text.length && text[cursor] !== " ") cursor++;
+          if (cursor > wordStart) consumed++;
+        }
+        end = Math.max(end, cursor);
+
+        ranges.push({
+          start,
+          end,
+          confidence,
+          ref: suggestion.ref || "Reference",
+        });
+      }
+
+      ranges.sort((a, b) => {
+        if (a.start !== b.start) return a.start - b.start;
+        return b.confidence - a.confidence;
+      });
+
+      const nonOverlapping = [];
+      let lastEnd = -1;
+      for (const r of ranges) {
+        if (r.start < 0 || r.end <= r.start) continue;
+        if (r.start < lastEnd) continue;
+        nonOverlapping.push(r);
+        lastEnd = r.end;
+      }
+
+      return nonOverlapping;
+    }
+
+    function renderRollingHighlights(text, suggestions) {
+      const normalizedText = normalize(text);
+      if (!normalizedText) {
+        rollingTextEl.textContent = "";
+        return;
+      }
+
+      const ranges = getHighlightRanges(normalizedText, suggestions);
+      if (!ranges.length) {
+        rollingTextEl.textContent = normalizedText;
+        return;
+      }
+
+      let html = "";
+      let cursor = 0;
+      for (const r of ranges) {
+        if (r.start > cursor) {
+          html += escapeHtml(normalizedText.slice(cursor, r.start));
+        }
+        const chunk = normalizedText.slice(r.start, r.end);
+        const title = `${r.ref} (${r.confidence}/100)`;
+        html += `<span class=\"ctxHit\" title=\"${escapeHtml(title)}\">${escapeHtml(chunk)}</span>`;
+        cursor = r.end;
+      }
+      if (cursor < normalizedText.length) {
+        html += escapeHtml(normalizedText.slice(cursor));
+      }
+
+      rollingTextEl.innerHTML = html;
+    }
+
+    function emitDesktopSuggestions(suggestions, options = {}) {
+      if (!window.desktopRuntime?.pushSuggestions) return;
+      if (options.clear) {
+        state.lastSuggestionPushHash = "";
+        state.lastSuggestionPushAt = Date.now();
+        window.desktopRuntime.pushSuggestions({ clearContext: true, suggestions: [] });
+        return;
+      }
+
+      const runningContext = state.rollingText || "";
+      if (!runningContext.trim() && (!suggestions || !suggestions.length)) {
+        if (state.lastSuggestionPushHash) {
+          state.lastSuggestionPushHash = "";
+          state.lastSuggestionPushAt = Date.now();
+          window.desktopRuntime.pushSuggestions({ clearContext: true, suggestions: [] });
+        }
+        return;
+      }
+
+      const signature = JSON.stringify({
+        ctx: runningContext.slice(-240),
+        refs: (suggestions || []).map((s) => `${s.ref || s.reference || ''}:${s.chapter ?? ''}:${s.verse ?? ''}:${Math.round(s.score || 0)}`)
+      });
+      const now = Date.now();
+      if (!options.force) {
+        if (signature === state.lastSuggestionPushHash) return;
+        if (now - state.lastSuggestionPushAt < 220) return;
+      }
+
+      state.lastSuggestionPushHash = signature;
+      state.lastSuggestionPushAt = now;
+      window.desktopRuntime.pushSuggestions({
+        runningContext,
+        suggestions: suggestions || [],
+        updatedAt: now
+      });
+    }
+
+    function renderTextAndSuggestions() {
+      liveText.textContent =
+        (state.finalText ? `FINAL: ${state.finalText}\n\n` : "") +
+        (state.interimText ? `PARTIAL: ${state.interimText}` : "PARTIAL: ");
+
+      state.rollingText = getDetectionContextText();
+      const suggestions = buildSuggestions(state.rollingText);
+      renderRollingHighlights(state.rollingText, suggestions);
+      renderSuggestions(suggestions);
+      if (!state.rollingText.trim() && (!suggestions || !suggestions.length)) {
+        emitDesktopSuggestions([], { clear: true });
+      } else {
+        emitDesktopSuggestions(suggestions);
+      }
+    }
+
+    async function init() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        log("getUserMedia is not supported in this browser.", "error");
+        setPill(statusMic, "Mic: unsupported", "err");
+        btnStart.disabled = true;
+        return;
+      }
+
+      try {
+        await warmMicPermissionForLabels();
+      } catch (e) {
+        log("Mic permission not granted yet. Device labels may be blank until permission is granted.", "warn");
+      }
+
+      await refreshDevices();
+      renderTextAndSuggestions();
+
+      if (window.desktopRuntime?.onSidecarStatus) {
+        state.disposeRuntimeStatusListener = window.desktopRuntime.onSidecarStatus((status) => {
+          updateRuntimeStatusPills(status);
+        });
+      }
+
+      await pollSidecarStatus();
+      startServerMonitor();
+      await maybeReconnectSidecar();
+      log("Ready. Vosk sidecar is monitored automatically. Press Start to transcribe.");
+    }
+
+    btnRefreshDevices.addEventListener("click", refreshDevices);
+    btnStart.addEventListener("click", startListening);
+    btnStop.addEventListener("click", stopListening);
+    btnRestartServer.addEventListener("click", restartModelServer);
+    btnApplyModel.addEventListener("click", applySelectedModelSize);
+    btnOpenModelFolder.addEventListener("click", openModelDownloadFolder);
+    modelSizeSelect.addEventListener("change", () => {
+      const selected = String(modelSizeSelect?.value || "small").toLowerCase();
+      state.selectedModelSizePending = selected;
+      state.modelSizeDirty = selected !== state.selectedModelSize;
+    });
+
+    window.addEventListener("error", (ev) => {
+      const msg = ev?.error?.message || ev?.message || errorText(ev, "Unknown runtime error");
+      log(`Runtime error: ${msg}`, "error");
+    });
+
+    window.addEventListener("unhandledrejection", (ev) => {
+      const reason = ev?.reason?.message || errorText(ev?.reason, "Unknown unhandled rejection");
+      log(`Unhandled rejection: ${reason}`, "error");
+    });
+
+    navigator.mediaDevices.addEventListener("devicechange", () => {
+      refreshDevices();
+      log("Audio devices changed. List refreshed.");
+    });
+
+    window.addEventListener("beforeunload", () => {
+      if (state.listening) stopListening();
+      if (state.serverMonitorTimer) clearInterval(state.serverMonitorTimer);
+      if (typeof state.disposeRuntimeStatusListener === "function") {
+        state.disposeRuntimeStatusListener();
+        state.disposeRuntimeStatusListener = null;
+      }
+    });
+
+    btnStop.disabled = true;
+    init().then(() => {
+      if (autoStartMode) {
+        setTimeout(() => {
+          startListening().catch((err) => {
+            log(`Auto-start failed: ${errorText(err, 'auto-start error')}`, "error");
+          });
+        }, 350);
+      }
+    }).catch((err) => {
+      log(`Init failed: ${errorText(err, 'init error')}`, "error");
+    });
+  </script>
+</body>
+</html>

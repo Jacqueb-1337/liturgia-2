@@ -1,0 +1,16 @@
+{
+  "name": "speech-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop wrapper for local transcription demo",
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "electron .",
+    "setup:backend": "npm install",
+    "start:backend": "python backend/server.py --host 127.0.0.1 --port 8765"
+  },
+  "devDependencies": {
+    "electron": "^34.3.0"
+  },
+  "dependencies": {}
+}

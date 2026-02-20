@@ -196,6 +196,63 @@
       color: #999;
     }
 
+    .muted-text { color: #666; font-size: 0.95em; }
+    body.dark-theme .muted-text { color: #aaa; }
+
+    .ai-enable-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0 6px; flex-wrap: wrap; }
+    .ai-enable-status { font-weight: 600; font-size: 0.9em; }
+    .ai-enable-note { margin-bottom: 12px; }
+    body.dark-theme .ai-enable-status { color: #ddd; }
+
+    .ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+    .ai-card { border: 1px solid #e0e0e0; border-radius: 10px; background: #fafafa; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    body.dark-theme .ai-card { border-color: #3a3d42; background: #2a2d30; }
+    .ai-card h3 { margin: 0; font-size: 16px; }
+
+    .ai-status-pill { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; background: #e0e7ff; color: #1a237e; }
+    .ai-status-pill.tone-ok { background: #d9f5df; color: #1b5e20; }
+    .ai-status-pill.tone-warn { background: #fff4d1; color: #7f5000; }
+    .ai-status-pill.tone-err { background: #ffe0e0; color: #b71c1c; }
+    body.dark-theme .ai-status-pill { color: #111; }
+
+    .ai-field-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .ai-download-row { display: none; align-items: center; gap: 10px; }
+    .ai-download-row.active { display: flex; }
+    .ai-download-row progress { width: 180px; height: 10px; }
+
+    #ai-model-select, #ai-device-select { min-width: 220px; height: 38px; }
+
+    #ai-meter, #ai-waveform { width: 100%; border-radius: 8px; border: 1px solid rgba(0,0,0,0.1); background: #05070d; display: block; }
+    #ai-meter { height: 80px; }
+    #ai-waveform { height: 70px; }
+    body.dark-theme #ai-meter, body.dark-theme #ai-waveform { border-color: rgba(255,255,255,0.08); }
+    .ai-meter-controls { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+
+    .ai-running-context { border: 1px solid #e0e0e0; border-radius: 10px; padding: 12px; background: #f9f9f9; margin-top: 10px; }
+    body.dark-theme .ai-running-context { border-color: #3a3d42; background: #1f2226; }
+    .ai-running-context-label { font-weight: 600; margin-bottom: 6px; font-size: 0.95em; }
+    .ai-running-context-output { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; min-height: 64px; white-space: pre-wrap; color: #333; line-height: 1.4; }
+    body.dark-theme .ai-running-context-output { color: #d2d7de; }
+
+    .ai-suggestions-list { display: flex; flex-direction: column; gap: 10px; }
+    .ai-suggestion { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; background: #fff; }
+    body.dark-theme .ai-suggestion { border-color: #3a3d42; background: #1f2226; }
+    .ai-suggestion-ref { font-weight: 600; margin-bottom: 4px; }
+    .ai-suggestion-why { font-size: 0.9em; color: #666; }
+    body.dark-theme .ai-suggestion-why { color: #aaa; }
+
+    .ai-log { max-height: 200px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px; background: #fafafa; }
+    body.dark-theme .ai-log { border-color: #3a3d42; background: #1c1f24; color: #cfd8dc; }
+
+    .ai-warning { padding: 12px 14px; border-radius: 8px; background: #fff3e0; color: #8d5100; border: 1px solid #ffd89a; display: none; }
+    body.dark-theme .ai-warning { background: #3a280f; color: #ffcc80; border-color: #5c3e18; }
+
+    .ai-action-status { font-size: 0.9em; min-height: 18px; color: #666; }
+    .ai-action-status.tone-ok { color: #1b5e20; }
+    .ai-action-status.tone-warn { color: #7f5000; }
+    .ai-action-status.tone-err { color: #b71c1c; }
+    body.dark-theme .ai-action-status { color: #aaa; }
+
     /* Stylized toggle for auto-update */
     .toggle-label { display:inline-flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
     .toggle-label input { display:none; }
@@ -251,8 +308,8 @@
     <div class="sidebar">
       <button class="active" data-panel="general">General</button>
       <button data-panel="display">Display</button>
+      <button data-panel="ai">AI Features</button>
       <button data-panel="about">About</button>
-      <button data-panel="remote">Remote Control</button>
       <button data-panel="relay">Cloud Relay</button>
       <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
     </div>
@@ -311,56 +368,86 @@
         <button class="save-settings btn" data-panel="about">Save</button>
         <span class="save-status" data-panel="about"></span>
       </div>
-      <div class="settings-panel" id="panel-remote">
-        <h2>Remote Control</h2>
-        <p style="color:#666;margin-bottom:16px;">Allow mobile devices to control Liturgia over your local network.</p>
-        
-        <div class="remote-admin-warning" style="margin-bottom:16px;padding:10px 12px;border-radius:4px;">
-          <strong>⚠ Administrator Access Required:</strong> For proper network connectivity, Liturgia needs to add Windows Firewall rules. You'll be prompted for admin permission when enabling Remote Control.
-        </div>
-        
-        <div class="form-row">
+      <div class="settings-panel" id="panel-ai">
+        <h2>AI Features</h2>
+        <p class="muted-text">All speech recognition and verse suggestions run locally via the bundled Vosk sidecar. Use this tab to monitor the backend, switch models, and test your microphone.</p>
+        <div class="ai-enable-row">
           <label class="toggle-label">
-            <input id="remote-enabled" type="checkbox" />
+            <input id="ai-enable-toggle" type="checkbox" />
             <span class="toggle-ui"></span>
-            Enable remote control
+            Enable AI speech assistant
           </label>
+          <span id="ai-enable-status" class="ai-enable-status muted-text">Checking…</span>
         </div>
-        
-        <div class="form-row" style="margin-top:16px;">
-          <label for="remote-port">Port</label>
-          <input type="number" id="remote-port" value="39847" min="1024" max="65535" style="width:120px;" />
-          <span style="color:#888;font-size:0.85em;margin-left:8px;">Restart required after changing</span>
-        </div>
-        
-        <div id="remote-server-info" style="margin-top:16px;padding:12px;border-radius:4px;display:none;">
-          <div style="font-weight:500;margin-bottom:8px;">Server Information</div>
-          <div style="font-size:0.9em;">
-            <div style="margin-bottom:4px;">Status: <span id="remote-status">Stopped</span></div>
-            <div id="remote-addresses-container" style="margin-top:8px;"></div>
-            <div class="remote-info-hint" style="margin-top:8px;font-size:0.85em;">
-              Enter any of these addresses in your mobile app to connect.
+        <div class="ai-enable-note muted-text">Disabling stops the speech sidecar, microphone meter, and live verse suggestions.</div>
+        <div id="ai-runtime-missing" class="ai-warning">Desktop runtime bridge unavailable. Re-open Settings from the main Liturgia window to manage AI features.</div>
+        <div class="ai-grid">
+          <section class="ai-card">
+            <h3>Sidecar Status</h3>
+            <div class="ai-field-row">
+              <span id="ai-sidecar-pill" class="ai-status-pill tone-warn">Checking…</span>
+              <span id="ai-model-status-text" class="muted-text">Preparing backend</span>
             </div>
-          </div>
+            <div class="muted-text">Endpoint: <span id="ai-sidecar-endpoint">ws://127.0.0.1:8765/transcribe</span></div>
+            <div class="ai-field-row">
+              <button id="ai-ensure-running" class="btn">Ensure Running</button>
+              <button id="ai-restart-sidecar" class="btn">Restart Backend</button>
+            </div>
+            <div class="ai-action-status" id="ai-action-status"></div>
+          </section>
+
+          <section class="ai-card">
+            <h3>Speech Model</h3>
+            <label class="muted-text" for="ai-model-select">Select offline Vosk model</label>
+            <div class="ai-field-row">
+              <select id="ai-model-select">
+                <option value="small">Small (~50&nbsp;MB, fastest)</option>
+                <option value="medium">Medium (~1.5&nbsp;GB, balanced)</option>
+                <option value="large">Large (~3.5&nbsp;GB, most accurate)</option>
+              </select>
+              <button id="ai-model-apply" class="btn primary">Apply</button>
+            </div>
+            <div class="ai-field-row">
+              <button id="ai-open-model-folder" class="btn">Open Model Folder</button>
+            </div>
+            <div class="ai-download-row" id="ai-model-download-row">
+              <progress id="ai-model-download-bar" max="100" value="0"></progress>
+              <span id="ai-model-download-label">0%</span>
+            </div>
+          </section>
+
+          <section class="ai-card">
+            <h3>Microphone & Levels</h3>
+            <label class="muted-text" for="ai-device-select">Input device</label>
+            <div class="ai-field-row">
+              <select id="ai-device-select">
+                <option value="default">Default system input</option>
+              </select>
+              <button id="ai-refresh-devices" class="btn">Refresh</button>
+            </div>
+            <canvas id="ai-meter" width="320" height="80" aria-label="Input level meter"></canvas>
+            <canvas id="ai-waveform" width="320" height="70" aria-label="Input waveform"></canvas>
+            <div class="ai-meter-controls">
+              <span id="ai-meter-label">Level 0%</span>
+              <button id="ai-meter-toggle" class="btn">Pause meter</button>
+            </div>
+            <div id="ai-level-hint" class="muted-text">Attempting to start meter…</div>
+          </section>
+
+          <section class="ai-card">
+            <h3>Verse Suggestions</h3>
+            <div id="ai-suggestions-empty" class="muted-text">No live suggestions yet.</div>
+            <div id="ai-suggestions-list" class="ai-suggestions-list"></div>
+            <div style="margin-top:12px;">
+              <div style="font-weight:600;margin-bottom:4px;">Recent backend events</div>
+              <div id="ai-status-log" class="ai-log"></div>
+            </div>
+            <div class="ai-running-context">
+              <div class="ai-running-context-label">Running Context</div>
+              <div id="ai-running-context" class="ai-running-context-output muted-text">Say a verse aloud to see the rolling transcript.</div>
+            </div>
+          </section>
         </div>
-        
-        <div style="margin-top:24px;">
-          <h3 style="margin:0 0 8px 0;font-size:16px;">Troubleshooting</h3>
-          <button id="fix-connection-btn" class="btn" style="margin-bottom:8px;">
-            🔧 Fix Connection Issues
-          </button>
-          <div class="remote-troubleshooting-hint" style="font-size:0.85em;margin-bottom:16px;">
-            Click this if your mobile device can't connect. This will add Windows Firewall rules for ports 39847 and 39848.
-          </div>
-        </div>
-        
-        <div style="margin-top:24px;">
-          <h3 style="margin:0 0 8px 0;font-size:16px;">Paired Devices</h3>
-          <div id="paired-devices-list" style="border:1px solid #ddd;border-radius:4px;min-height:100px;max-height:300px;overflow-y:auto;"></div>
-        </div>
-        
-        <button class="save-settings btn" data-panel="remote">Save</button>
-        <span class="save-status" data-panel="remote"></span>
       </div>
       <div class="settings-panel" id="panel-relay">
         <h2>Cloud Relay (Beta)</h2>
