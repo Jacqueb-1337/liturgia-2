@@ -393,8 +393,8 @@ class SpeechSidecarManager extends EventEmitter {
       managedProcess: false,
       portOpen: false,
       modelReady: false,
-      statusMessage: 'sidecar-start-failed',
-      lastError: 'Could not spawn Python sidecar',
+      statusMessage: 'sidecar-python-missing',
+      lastError: 'Python 3.7+ is required for AI features. Please install from https://python.org and try again.',
       restarting: false
     });
     return false;
