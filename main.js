@@ -140,6 +140,8 @@ let mainWindow; // Add this at the top
 let splashWindow = null;
 let splashClosed = false;
 let settingsWindow = null; // Reference to settings window for IPC communication
+let mainWindowReady = false;
+let aiWorkerWindowReady = false;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 let speechWindow = null;
@@ -552,6 +554,14 @@ function ensureAiSpeechWorkerWindow() {
     const workerEntry = path.join(__dirname, 'speech', 'index.html');
     aiSpeechWorkerWindow.loadFile(workerEntry, { query: { headless: '1', autostart: '1' } }).catch((err) => {
       console.warn('[ai-worker] failed to load speech worker', err && err.message ? err.message : err);
+      aiWorkerWindowReady = true;
+      tryCloseSplashScreen();
+    });
+
+    // Mark as ready when the worker window finishes loading
+    aiSpeechWorkerWindow.webContents.on('did-finish-load', () => {
+      aiWorkerWindowReady = true;
+      tryCloseSplashScreen();
     });
 
     aiSpeechWorkerWindow.on('closed', () => {
@@ -563,6 +573,20 @@ function ensureAiSpeechWorkerWindow() {
   } catch (err) {
     console.warn('[ai-worker] creation failed', err && err.message ? err.message : err);
     aiSpeechWorkerWindow = null;
+    aiWorkerWindowReady = true;
+    tryCloseSplashScreen();
+  }
+}
+
+// Check if both windows are ready and close splash if so
+function tryCloseSplashScreen() {
+  if (mainWindowReady && (aiWorkerWindowReady || !aiEnabled || launchSpeechUi || aiWorkerSuppressed)) {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      splashClosed = true;
+      try { splashWindow.destroy(); splashWindow = null; } catch(e){}
+      try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
+      try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
+    }
   }
 }
 
@@ -1423,24 +1447,29 @@ async function createWindow() {
     mainWindow.on('move', syncSplashBounds);
     mainWindow.on('resize', syncSplashBounds);
 
-    // Remove splash when renderer signals done
-    const splashCloser = () => {
-      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
-      try { mainWindow.focus(); } catch(e){}
-    };
+    // Mark main window as ready when it's ready to show
+    mainWindow.once('ready-to-show', () => {
+      mainWindowReady = true;
+      try { mainWindow.show(); } catch(e){}
+      tryCloseSplashScreen();
+    });
 
-    // Listen for splash finished message
+    // Listen for splash finished message or try to close splash
     const { ipcMain } = require('electron');
-    ipcMain.once('splash-finished', () => { splashClosed = true; splashCloser(); try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){} });
+    ipcMain.once('splash-finished', () => { tryCloseSplashScreen(); });
 
     // IPC to let renderer query splash state if it missed the event
     ipcMain.handle('is-splash-closed', () => splashClosed);
 
-    // Fallback close in case IPC doesn't arrive
-    setTimeout(() => { if (splashWindow) { splashClosed = true; splashCloser(); } }, 8000);
-  } catch (e) { console.warn('Failed to create splash window', e); }
-
-  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
+    // Fallback close in case dependencies aren't met
+    setTimeout(() => { 
+      if (splashWindow) { 
+        splashClosed = true;
+        try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+        try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
+      }
+    }, 15000);
+  } catch (e) { console.warn('Failed to create splash window', e); }  // Save window state on move/resize/maximize/unmaximize/fullscreen changes
   mainWindow.on('resize', saveWindowStateDebounced);
   mainWindow.on('move', saveWindowStateDebounced);
   mainWindow.on('maximize', () => { applySettingsPatch({ window: { maximized: true } }); });
