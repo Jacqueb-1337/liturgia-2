@@ -57,6 +57,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load the Bibles list when the Bibles tab is clicked
   document.getElementById('bibles-tab-button').addEventListener('click', loadBiblesList);
+  
+  // Refresh relay UI when the Cloud Relay tab is clicked (don't load on init to avoid freeze)
+  const relayTabButton = document.querySelector('button[data-panel="relay"]');
+  if (relayTabButton) {
+    relayTabButton.addEventListener('click', () => {
+      // Will be initialized after relay IIFE sets up refreshRelayUI function
+      if (typeof refreshRelayUI === 'function') {
+        refreshRelayUI();
+      }
+    });
+  }
 });
 
 // Apply dark theme
@@ -1069,8 +1080,12 @@ function initAiTab(settings) {
     }
   }
   
-  refreshRelayUI();
+  // Expose refreshRelayUI to global scope so it can be called from tab click listener
+  window.refreshRelayUI = refreshRelayUI;
   
+  // Don't call refreshRelayUI() on init - instead set up listener for tab click
+  // This prevents blocking the settings window from opening
+
   // AUTO-START RELAY FOR TESTING
   setTimeout(async () => {
     const info = await ipcRenderer.invoke('relay-get-info');
