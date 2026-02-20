@@ -1657,25 +1657,9 @@ if (process.platform === 'win32') {
 // Handle multiple instance attempts - prevent duplicate instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
-  // Another instance is already running, ask user what to do
-  console.log('[main] Another instance is already running');
-  const { button } = require('electron').dialog.showMessageBoxSync({
-    type: 'question',
-    buttons: ['Close Other Instance', 'Cancel'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Liturgia Already Running',
-    message: 'Liturgia is already open in another window.',
-    detail: 'Do you want to close the other instance and start fresh, or cancel?'
-  });
-  
-  if (button === 0) {
-    // Kill the other instance by binding to that port (will fail and cleanup will happen naturally)
-    // For now just exit - the user will need to close the other instance manually
-    console.log('[main] User chose to exit. Please close the other Liturgia window.');
-  }
-  
-  // Exit this instance
+  // Another instance is already running - just quit silently
+  // (we can't show a dialog here because app isn't ready yet)
+  console.log('[main] Another instance is already running, exiting');
   app.quit();
   process.exit(0);
 } else {
