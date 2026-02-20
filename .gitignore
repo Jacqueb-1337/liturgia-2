@@ -20,3 +20,11 @@ inspect-*
 
 # Local release helper (not for repo)
 scripts/release-bump.js
+
+# Speech sidecar - models and cache
+speech/backend/models/
+speech/backend/__pycache__/
+speech/**/__pycache__/
+speech/**/*.pyc
+speech/yttm_install.log
+.venv/
