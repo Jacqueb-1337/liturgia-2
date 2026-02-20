@@ -108,6 +108,14 @@ jobs:
           # Get the most recent commit message to use as release description
           COMMIT_MSG=$(git log -1 --pretty=%B)
           
+          # If commit message is just a version number (from npm version), use a generic message
+          # This prevents releases with unhelpful descriptions
+          if [[ "$COMMIT_MSG" =~ ^[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$ ]]; then
+            echo "WARNING: Commit message is just a version number. Use explicit commits with meaningful messages."
+            echo "See scripts/release-bump.js for the proper release workflow."
+            COMMIT_MSG="Release $TAG - see git log for changes"
+          fi
+          
           # Ensure release exists or create it
           gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 || gh release create "$TAG" --notes "$COMMIT_MSG" --repo "$REPO"
 
