@@ -1384,6 +1384,7 @@ async function createWindow() {
     height: winState.height || 700,
     x: typeof winState.x === 'number' ? winState.x : undefined,
     y: typeof winState.y === 'number' ? winState.y : undefined,
+    show: false, // Don't show until splash is ready to close
     icon: getIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1450,7 +1451,6 @@ async function createWindow() {
     // Mark main window as ready when it's ready to show
     mainWindow.once('ready-to-show', () => {
       mainWindowReady = true;
-      try { mainWindow.show(); } catch(e){}
       tryCloseSplashScreen();
     });
 
