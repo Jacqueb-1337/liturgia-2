@@ -1393,7 +1393,7 @@ async function createWindow() {
     }
   };
 
-  // Create the main window instance
+  // Create the main window instance (hidden)
   mainWindow = new BrowserWindow(opts);
 
   // Block DevTools shortcuts in production builds
@@ -1407,7 +1407,7 @@ async function createWindow() {
     });
   }
 
-  // Create splash BEFORE loading main window to prevent white flash
+  // Create and show splash FIRST before loading any HTML
   try {
     const b = mainWindow.getBounds();
     splashWindow = new BrowserWindow({
@@ -1427,11 +1427,13 @@ async function createWindow() {
       webPreferences: { nodeIntegration: true, contextIsolation: false }
     });
     splashWindow.setMenuBarVisibility(false);
-    splashWindow.loadFile('splash.html').catch(()=>{});
-    splashWindow.once('ready-to-show', () => { try { splashWindow.show(); } catch(e){} });
-  } catch (e) { console.warn('Failed to create splash window', e); }
+    
+    // Load splash and wait for it to be ready before loading main window
+    await splashWindow.loadFile('splash.html');
+    splashWindow.show();
+  } catch (e) { console.warn('Failed to create/show splash window', e); }
 
-  // NOW render the main window after splash is ready
+  // NOW load the main window HTML (will stay hidden behind visible splash)
   mainWindow.loadFile('index.html');
   
   // Ensure fresh installs default to dark theme so UI is initialized in dark mode
