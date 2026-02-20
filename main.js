@@ -1673,6 +1673,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  console.log('[main] before-quit: starting cleanup');
   destroyAiSpeechWorkerWindow();
   // Clean up remote server
   if (remoteServer) {
@@ -1693,8 +1694,21 @@ app.on('before-quit', async () => {
     speechSidecarWatchdog = null;
   }
   if (speechSidecarManager) {
-    try { speechSidecarManager.dispose(); } catch (err) { console.warn('[speech-sidecar] dispose failed', err && err.message ? err.message : err); }
+    try { 
+      console.log('[main] Disposing speech sidecar');
+      speechSidecarManager.dispose(); 
+      console.log('[main] Speech sidecar disposed');
+    } catch (err) { 
+      console.warn('[speech-sidecar] dispose failed', err && err.message ? err.message : err); 
+    }
   }
+  console.log('[main] before-quit: cleanup complete');
+  
+  // Force exit after 2 seconds if something is still holding the process
+  setTimeout(() => {
+    console.warn('[main] Force exit: cleanup taking too long');
+    process.exit(0);
+  }, 2000);
 });
 
 app.on('activate', () => {

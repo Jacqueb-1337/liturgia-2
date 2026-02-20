@@ -2053,12 +2053,17 @@
     }
 
     function buildSuggestions(text) {
+      // Don't return suggestions if no text has been spoken yet
+      if (!text || !text.trim()) {
+        return [];
+      }
+      
       const books = findBookCandidates(text);
       const nums = extractNumberHints(text);
       const tailNums = nums.slice(-2);
       const cands = [];
 
-      for (const b of books.length ? books : [{ bookKey: "genesis", match: "context", sim: 0.4 }]) {
+      for (const b of books) {
         if (!tailNums.length) {
           cands.push({
             bookKey: b.bookKey,
