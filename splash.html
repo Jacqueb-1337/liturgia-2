@@ -16,8 +16,8 @@
     .motto .mask::before{content:'';position:absolute;left:0;top:0;bottom:0;width:100%;background:linear-gradient(90deg,var(--bg1),var(--bg2));z-index:2;transform:translateX(0);transition:transform 900ms cubic-bezier(.2,.9,.2,1)}
     .motto.revealed .mask::before{transform:translateX(100%)}
 
-    /* fade out state */
-    .splash-fade{opacity:0;transition:opacity 400ms ease}
+    /* fade out state - DISABLED, let main window show instead */
+    .splash-fade{opacity:1;transition:none}
 
     /* small subtle loading bar */
     .loader{height:4px;width:160px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
@@ -47,14 +47,8 @@
       setTimeout(()=>{
         motto.classList.add('revealed');
       }, 700);
-      // After the reveal, wait and then fade out
-      setTimeout(()=>{
-        document.body.classList.add('splash-fade');
-        // Give time for fade transition
-        setTimeout(()=>{ ipcRenderer.send('splash-finished'); }, 420);
-      }, 2200);
-      // As a backup, ensure we close after 6s
-      setTimeout(()=>{ ipcRenderer.send('splash-finished'); }, 6000);
+      // Don't fade out - let tryCloseSplashScreen() handle closing when windows are ready
+      // (removed: setTimeout(...splash-fade...) )
     })();
   </script>
 </body>

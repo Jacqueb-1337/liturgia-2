@@ -934,25 +934,46 @@ function initAiTab(settings) {
   async function checkAndDisplayPythonStatus() {
     if (!pythonMissingEl) return;
     try {
-      const result = await ipcRenderer.invoke('check-python-available');
+      console.log('[Python check] Starting check...');
+      
+      // Add a timeout wrapper - if check takes > 5s, assume Python missing
+      const checkPromise = ipcRenderer.invoke('check-python-available');
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+          console.log('[Python check] Check timed out after 5s');
+          resolve({ available: false, pythonFound: false, timeout: true });
+        }, 5000);
+      });
+      
+      const result = await Promise.race([checkPromise, timeoutPromise]);
+      console.log('[Python check] Result:', result);
+      
       if (result && result.available) {
         // Python and dependencies are available
+        console.log('[Python check] Python available, hiding warning');
         pythonMissingEl.style.display = 'none';
-      } else if (result && !result.pythonFound) {
-        // Python is not installed
+      } else {
+        // Python missing, not found, has missing packages, or timed out
+        console.log('[Python check] Python NOT available, showing warning');
         pythonMissingEl.style.display = 'block';
-        if (pythonStatusEl) {
-          pythonStatusEl.textContent = 'Python not found. Click "Download Python" above to install it.';
-        }
-      } else if (result && result.missingPackages) {
-        // Python found but dependencies missing
-        pythonMissingEl.style.display = 'block';
-        if (pythonStatusEl) {
-          pythonStatusEl.textContent = `Missing packages: ${result.missingPackages.join(', ')}. Try the recheck button after installing Python.`;
+        
+        if (result && result.timeout) {
+          if (pythonStatusEl) pythonStatusEl.textContent = 'Python check timed out. Click "Download Python" to install.';
+        } else if (result && !result.pythonFound) {
+          if (pythonStatusEl) pythonStatusEl.textContent = 'Python not found. Click "Download Python" above to install it.';
+        } else if (result && result.missingPackages) {
+          if (pythonStatusEl) pythonStatusEl.textContent = `Missing packages: ${result.missingPackages.join(', ')}. Try the recheck button after installing Python.`;
+        } else {
+          if (pythonStatusEl) pythonStatusEl.textContent = 'Unable to determine Python status. Click "Download Python" to install.';
         }
       }
     } catch (err) {
-      console.error('Failed to check Python availability', err);
+      console.error('[Python check] Exception:', err);
+      // On error, show the warning so user can try downloading
+      pythonMissingEl.style.display = 'block';
+      if (pythonStatusEl) {
+        pythonStatusEl.textContent = `Could not check Python: ${err.message}. Try the download button above.`;
+      }
     }
   }
 
