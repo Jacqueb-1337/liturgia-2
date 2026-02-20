@@ -99,40 +99,37 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (au) au.checked = (typeof settings.autoCheckUpdates === 'boolean') ? settings.autoCheckUpdates : true;
   }
 
-  // Initialize AI tab early (non-blocking)
-  initAiTab(settings || {});
-  Promise.resolve().then(async () => {
-    try {
-      const ai = document.getElementById('account-info');
-      const si = document.getElementById('subscription-info');
-      const signInBtn = document.getElementById('btn-sign-in');
-      const signOutBtn = document.getElementById('btn-sign-out');
-      const viewSubBtn = document.getElementById('btn-view-subscription');
-      const purchaseBtn = document.getElementById('btn-purchase-subscription');
+  // Populate account/subscription info
+  try {
+    initAiTab(settings || {});
+    
+    const ai = document.getElementById('account-info');
+    const si = document.getElementById('subscription-info');
+    const signInBtn = document.getElementById('btn-sign-in');
+    const signOutBtn = document.getElementById('btn-sign-out');
+    const viewSubBtn = document.getElementById('btn-view-subscription');
+    const purchaseBtn = document.getElementById('btn-purchase-subscription');
 
-      // Run license and token checks in parallel, with a 3-second timeout to avoid blocking UI
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('License check timeout')), 3000)
-      );
-      
-      let license = null;
-      try {
-        license = await Promise.race([
-          ipcRenderer.invoke('get-current-license-status'),
-          timeoutPromise
-        ]);
-        
-        // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+    // Set initial state (not signed in) — will be updated in background
+    ai.textContent = 'Not signed in';
+    si.textContent = '';
+    if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
+    if (signOutBtn) signOutBtn.style.display = 'none';
+    if (viewSubBtn) viewSubBtn.style.display = 'none';
+    if (purchaseBtn) purchaseBtn.style.display = '';
+
+    // Fetch license status in background with timeout to prevent indefinite freeze
+    const licenseCheckTimeout = 3000; // 3 second timeout
+    const fetchLicenseTimeout = new Promise((resolve) => setTimeout(() => resolve(null), licenseCheckTimeout));
+    const fetchLicense = ipcRenderer.invoke('get-current-license-status').catch(() => null);
+    
+    Promise.race([fetchLicense, fetchLicenseTimeout]).then(async (license) => {
+      // Double-check secure token presence - if no token exists treat as signed out to avoid stale _lastLicenseStatus
+      if (license) {
         try {
-          const token = await Promise.race([
-            ipcRenderer.invoke('secure-get-token'),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Token check timeout')), 1000))
-          ]);
+          const token = await ipcRenderer.invoke('secure-get-token');
           if (!token) license = null;
         } catch (e) { /* ignore secure errors */ }
-      } catch (e) {
-        console.warn('License check timed out or failed:', e.message);
-        license = null;
       }
 
       if (license) {
@@ -172,25 +169,14 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (viewSubBtn) viewSubBtn.style.display = '';
           if (purchaseBtn) purchaseBtn.style.display = license.active ? 'none' : '';
         }
-      } else {
-        document.getElementById('account-info').textContent = 'Not signed in';
-        document.getElementById('subscription-info').textContent = '';
-        if (signInBtn) { signInBtn.style.display = ''; signInBtn.onclick = () => { try { ipcRenderer.send('show-setup-modal'); window.close(); } catch(e){} } }
-        if (signOutBtn) signOutBtn.style.display = 'none';
-        if (viewSubBtn) viewSubBtn.style.display = 'none';
-        if (purchaseBtn) purchaseBtn.style.display = '';
       }
-    } catch (e) {
+    }).catch((e) => {
       console.error('Failed to load license status for settings:', e);
-    }
-  }).catch(() => {});
-  
-  // Load displays in parallel
-  try {
-    await loadDisplays();
+    });
   } catch (e) {
-    console.error('Failed to load displays:', e);
+    console.error('Failed to initialize settings:', e);
   }
+  await loadDisplays();
 
   // Manual check for updates button
   const checkBtn = document.getElementById('btn-check-updates');
