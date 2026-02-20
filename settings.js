@@ -968,11 +968,39 @@ function initAiTab(settings) {
     });
   }
 
-  // Button to download Python (opens python.org)
+  // Button to download Python (auto-detects platform and downloads)
   const downloadPythonBtn = document.getElementById('ai-download-python');
   if (downloadPythonBtn) {
     downloadPythonBtn.addEventListener('click', async () => {
-      await ipcRenderer.invoke('open-external-url', { url: 'https://www.python.org/downloads/' });
+      downloadPythonBtn.disabled = true;
+      const originalText = downloadPythonBtn.textContent;
+      downloadPythonBtn.textContent = 'Downloading Python (0%)...';
+      
+      if (pythonStatusEl) pythonStatusEl.textContent = 'Downloading Python installer...';
+      
+      try {
+        // Request Python download - this will report progress
+        const result = await ipcRenderer.invoke('download-python');
+        
+        if (result.success) {
+          downloadPythonBtn.textContent = 'Python Downloaded';
+          if (pythonStatusEl) pythonStatusEl.textContent = result.message;
+        } else {
+          downloadPythonBtn.textContent = originalText;
+          if (pythonStatusEl) pythonStatusEl.textContent = result.message;
+        }
+      } catch (err) {
+        console.error('Python download failed:', err);
+        downloadPythonBtn.textContent = originalText;
+        if (pythonStatusEl) pythonStatusEl.textContent = `Download failed: ${err.message}`;
+      } finally {
+        downloadPythonBtn.disabled = false;
+      }
+    });
+    
+    // Listen for download progress updates from main process
+    ipcRenderer.on('python-download-progress', (event, { percent }) => {
+      downloadPythonBtn.textContent = `Downloading Python (${percent}%)...`;
     });
   }
 

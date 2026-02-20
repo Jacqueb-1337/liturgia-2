@@ -1046,6 +1046,93 @@ ipcMain.on('set-default-bible', (event, bible) => {
 
 ipcMain.handle('get-default-bible', () => defaultBible);
 
+ipcMain.handle('download-python', async (event) => {
+  try {
+    const { platform } = process;
+    const path = require('path');
+    const fs = require('fs');
+    const { Download } = require('electron-dl');
+    
+    let downloadUrl = '';
+    let filename = '';
+    
+    // Detect platform and get the right Python installer
+    if (platform === 'win32') {
+      downloadUrl = 'https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe';
+      filename = 'python-3.12.0-amd64.exe';
+    } else if (platform === 'darwin') {
+      // macOS - determine if Intel or Apple Silicon
+      const cpuArch = require('os').arch();
+      if (cpuArch === 'arm64') {
+        downloadUrl = 'https://www.python.org/ftp/python/3.12.0/python-3.12.0-macos11.0-arm64.pkg';
+        filename = 'python-3.12.0-macos11.0-arm64.pkg';
+      } else {
+        downloadUrl = 'https://www.python.org/ftp/python/3.12.0/python-3.12.0-macos10.9.x86_64.pkg';
+        filename = 'python-3.12.0-macos10.9.x86_64.pkg';
+      }
+    } else if (platform === 'linux') {
+      // Linux - direct user to python.org as installation varies by distro
+      await shell.openExternal('https://www.python.org/downloads/');
+      return { success: false, message: 'Please follow the instructions on python.org for your Linux distribution' };
+    }
+    
+    if (!downloadUrl) {
+      return { success: false, message: 'Unsupported platform' };
+    }
+    
+    // Get downloads directory
+    const downloadsDir = require('electron').app.getPath('downloads');
+    const savePath = path.join(downloadsDir, filename);
+    
+    console.log(`[Python] Downloading ${filename} from ${downloadUrl}`);
+    
+    // Download with progress reporting
+    let lastReportedPercent = 0;
+    const downloadPromise = new Promise((resolve, reject) => {
+      const https = downloadUrl.startsWith('https') ? require('https') : require('http');
+      const file = require('fs').createWriteStream(savePath);
+      
+      https.get(downloadUrl, (response) => {
+        const totalSize = parseInt(response.headers['content-length'], 10);
+        let downloadedSize = 0;
+        
+        response.on('data', (chunk) => {
+          downloadedSize += chunk.length;
+          const percentComplete = Math.round((downloadedSize / totalSize) * 100);
+          
+          // Report progress every 5%
+          if (percentComplete - lastReportedPercent >= 5) {
+            lastReportedPercent = percentComplete;
+            event.sender.send('python-download-progress', { percent: percentComplete, size: downloadedSize, total: totalSize });
+          }
+        });
+        
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          resolve(savePath);
+        });
+        file.on('error', (err) => {
+          file.close();
+          fs.unlink(savePath, () => {}); // Delete partial file
+          reject(err);
+        });
+      }).on('error', reject);
+    });
+    
+    const finalPath = await downloadPromise;
+    console.log(`[Python] Download complete: ${finalPath}`);
+    
+    // Open the installer
+    await shell.openPath(finalPath);
+    
+    return { success: true, path: finalPath, message: 'Python installer downloaded and opened. Please follow the installation wizard.' };
+  } catch (err) {
+    console.error('[Python] Download failed:', err);
+    return { success: false, message: `Download failed: ${err.message}` };
+  }
+});
+
 ipcMain.handle('get-displays', () => {
   return screen.getAllDisplays();
 });
@@ -1280,6 +1367,17 @@ async function createWindow() {
   // Create the main window instance
   mainWindow = new BrowserWindow(opts);
 
+  // Block DevTools shortcuts in production builds
+  if (process.env.NODE_ENV === 'production') {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      // Block F12 and Ctrl+Shift+I
+      if ((input.key.toLowerCase() === 'f12') || 
+          (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        event.preventDefault();
+      }
+    });
+  }
+
   // Ensure fresh installs default to dark theme so UI is initialized in dark mode
   try {
     let settings = {};
@@ -1409,11 +1507,13 @@ async function createWindow() {
           }
         },
         { type: 'separator' },
-        { role: 'toggledevtools' },
-        {
-          label: 'Open AI Speech Debugger',
-          click: () => { openSpeechDebuggerWindow(); }
-        }
+        ...(process.env.NODE_ENV !== 'production' ? [
+          { role: 'toggledevtools' },
+          {
+            label: 'Open AI Speech Debugger',
+            click: () => { openSpeechDebuggerWindow(); }
+          }
+        ] : [])
       ]
     },
     {
