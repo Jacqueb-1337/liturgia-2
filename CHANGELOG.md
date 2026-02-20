@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.0.3 - 2026-02-20
+
+- fix: add error handler for spawn() failures when Python not found
+- improve: add Python dependency diagnostics in settings with download link
+- improve: add "Recheck Dependencies" button for real-time validation
+- improve: check Python availability on settings panel open
+- improve: update UI in real-time after Python install without closing settings
+
 ## 3.0.2 - 2026-02-20
 
 - improve: clearer error message when Python is not found
