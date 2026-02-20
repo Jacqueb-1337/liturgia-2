@@ -2,6 +2,15 @@
 
 ## General Guidelines
 
+### NEVER use Emojis (CRITICAL)
+**Do NOT use any emoji characters in code, comments, or documentation:**
+- No emoji in UI labels, buttons, messages, or strings
+- No emoji in comments or variable names
+- No emoji in error/success messages
+- No emoji anywhere in the codebase
+
+Use plain text labels instead (e.g., "LIVE NOW" not "📺 LIVE NOW", "Previous" not "⬅️ Previous")
+
 ### Dark Mode Support (CRITICAL)
 **ALWAYS ensure dark mode compatibility when adding new UI elements:**
 

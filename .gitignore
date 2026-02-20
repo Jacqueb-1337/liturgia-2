@@ -7,6 +7,13 @@ dist/
 /release_body*
 tmp*
 /releases/
+Songs.db
+SongWords.db
+/liturgia-remote-app
+/remote-client-mobile.html
+/remote-client-test.html
+test-*
+inspect-*
 
 # Copilot instructions
 .github/copilot-instructions.md

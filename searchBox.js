@@ -106,6 +106,9 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
       blackBtn.classList.remove('active');
     }
   });
+  
+  // Store reference globally so renderer.js can update it
+  window.clearButton = clearBtn;
 
   // Black button
   const blackBtn = document.createElement('button');
@@ -118,6 +121,9 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
       clearBtn.classList.remove('active');
     }
   });
+  
+  // Store reference globally so renderer.js can update it
+  window.blackButton = blackBtn;
 
   if (buttonsContainer) {
     buttonsContainer.appendChild(goLiveBtn);

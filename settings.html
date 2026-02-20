@@ -252,6 +252,8 @@
       <button class="active" data-panel="general">General</button>
       <button data-panel="display">Display</button>
       <button data-panel="about">About</button>
+      <button data-panel="remote">Remote Control</button>
+      <button data-panel="relay">Cloud Relay</button>
       <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
     </div>
     <div class="settings-content">
@@ -308,6 +310,95 @@
         </div>
         <button class="save-settings btn" data-panel="about">Save</button>
         <span class="save-status" data-panel="about"></span>
+      </div>
+      <div class="settings-panel" id="panel-remote">
+        <h2>Remote Control</h2>
+        <p style="color:#666;margin-bottom:16px;">Allow mobile devices to control Liturgia over your local network.</p>
+        
+        <div class="remote-admin-warning" style="margin-bottom:16px;padding:10px 12px;border-radius:4px;">
+          <strong>⚠ Administrator Access Required:</strong> For proper network connectivity, Liturgia needs to add Windows Firewall rules. You'll be prompted for admin permission when enabling Remote Control.
+        </div>
+        
+        <div class="form-row">
+          <label class="toggle-label">
+            <input id="remote-enabled" type="checkbox" />
+            <span class="toggle-ui"></span>
+            Enable remote control
+          </label>
+        </div>
+        
+        <div class="form-row" style="margin-top:16px;">
+          <label for="remote-port">Port</label>
+          <input type="number" id="remote-port" value="39847" min="1024" max="65535" style="width:120px;" />
+          <span style="color:#888;font-size:0.85em;margin-left:8px;">Restart required after changing</span>
+        </div>
+        
+        <div id="remote-server-info" style="margin-top:16px;padding:12px;border-radius:4px;display:none;">
+          <div style="font-weight:500;margin-bottom:8px;">Server Information</div>
+          <div style="font-size:0.9em;">
+            <div style="margin-bottom:4px;">Status: <span id="remote-status">Stopped</span></div>
+            <div id="remote-addresses-container" style="margin-top:8px;"></div>
+            <div class="remote-info-hint" style="margin-top:8px;font-size:0.85em;">
+              Enter any of these addresses in your mobile app to connect.
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-top:24px;">
+          <h3 style="margin:0 0 8px 0;font-size:16px;">Troubleshooting</h3>
+          <button id="fix-connection-btn" class="btn" style="margin-bottom:8px;">
+            🔧 Fix Connection Issues
+          </button>
+          <div class="remote-troubleshooting-hint" style="font-size:0.85em;margin-bottom:16px;">
+            Click this if your mobile device can't connect. This will add Windows Firewall rules for ports 39847 and 39848.
+          </div>
+        </div>
+        
+        <div style="margin-top:24px;">
+          <h3 style="margin:0 0 8px 0;font-size:16px;">Paired Devices</h3>
+          <div id="paired-devices-list" style="border:1px solid #ddd;border-radius:4px;min-height:100px;max-height:300px;overflow-y:auto;"></div>
+        </div>
+        
+        <button class="save-settings btn" data-panel="remote">Save</button>
+        <span class="save-status" data-panel="remote"></span>
+      </div>
+      <div class="settings-panel" id="panel-relay">
+        <h2>Cloud Relay (Beta)</h2>
+        <p style="color:#666;margin-bottom:16px;">Connect from anywhere without port forwarding using your Liturgia account.</p>
+        
+        <div class="relay-info" style="margin-bottom:16px;padding:10px 12px;background:#e3f2fd;color:#1565c0;border-radius:4px;">
+          <strong>✨ Connect from Anywhere:</strong> Cloud Relay works over the internet without configuring your router. Perfect for remote worship services.
+        </div>
+        
+        <div id="relay-account-status" style="margin-bottom:16px;padding:12px;border:1px solid #ddd;border-radius:4px;">
+          <div id="relay-not-signed-in" style="display:none;">
+            <strong>⚠ Not Signed In</strong>
+            <p style="margin:8px 0 0 0;color:#666;">Please sign in via the <strong>Account</strong> tab to use Cloud Relay.</p>
+          </div>
+          <div id="relay-signed-in" style="display:none;">
+            <strong>✓ Signed In</strong>
+            <p style="margin:8px 0 0 0;color:#666;">Account: <span id="relay-account-email"></span></p>
+          </div>
+        </div>
+        
+        <div class="form-row">
+          <label class="toggle-label">
+            <input id="relay-enabled" type="checkbox" />
+            <span class="toggle-ui"></span>
+            Enable Cloud Relay
+          </label>
+        </div>
+        
+        <div id="relay-connected-info" style="margin-top:16px;padding:12px;border-radius:4px;background:#f1f8f4;display:none;">
+          <div style="font-weight:500;margin-bottom:8px;">🌐 Connected to Cloud Relay</div>
+          <div style="font-size:0.9em;">
+            <div style="margin-bottom:4px;">Session: <span id="relay-session-id" style="font-family:monospace;font-size:0.85em;"></span></div>
+            <div style="color:#666;font-size:0.9em;margin-top:8px;">Your mobile device can now connect from anywhere using your account.</div>
+          </div>
+        </div>
+        
+        <button class="save-settings btn" data-panel="relay">Save</button>
+        <span class="save-status" data-panel="relay"></span>
       </div>
       <div class="settings-panel" id="panel-bibles">
         <h2>Manage Bibles</h2>

@@ -81,6 +81,7 @@ ipcRenderer.on('easyworship-import-disabled', (event, info) => {
 });
 let scheduleItems = []; // Array of { indices: [], expanded: false, selectedVerses: [] }
 let selectedScheduleItems = []; // Indices of selected schedule items for multi-select
+let currentLiveScheduleIndex = null; // Track which schedule item is currently being displayed live
 let anchorScheduleIndex = null; // For shift-click range selection
 let focusedScheduleItem = null; // { type: 'header'|'verse', itemIndex: number, verseIndex?: number }
 let allMedia = []; // Media files
@@ -306,6 +307,10 @@ function toggleClear() {
     blackMode = false;
     clearMode = true;
 
+    // Update button states
+    if (window.blackButton) window.blackButton.classList.remove('active');
+    if (window.clearButton) window.clearButton.classList.add('active');
+
     // Update preview to show background without text
     if (window.currentContent) {
       const liveCanvas = document.getElementById('live-canvas');
@@ -323,6 +328,15 @@ function toggleClear() {
   }
 
   clearMode = !clearMode;
+
+  // Update button state
+  if (window.clearButton) {
+    if (clearMode) {
+      window.clearButton.classList.add('active');
+    } else {
+      window.clearButton.classList.remove('active');
+    }
+  }
 
   if (clearMode) {
     // Update preview to show background without text
@@ -1683,6 +1697,145 @@ async function updateLive(verseOrIndices) {
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
+  
+  // Push state to relay for mobile to display
+  try {
+    // Convert verse indices to relay state format
+    const verseReferences = indicesToShow.map(i => allVerses[i].key);
+    const bibleState = parseVerseReferenceWithRange(verseReferences);
+    
+    // Add verse text to the state for mobile display
+    if (bibleState.length > 0 && indicesToShow.length > 0) {
+      // Combine text from all displayed verses
+      const displayText = indicesToShow.map(i => {
+        const verseNum = allVerses[i].key.split(':')[1];
+        const cleanText = allVerses[i].text.replace(/(\.\d+[\s\S]*)$/, '');
+        return `${verseNum}  ${cleanText}`;
+      }).join('\n\n');
+      
+      // Add text to first (or only) bible state entry
+      bibleState[0].text = displayText;
+    }
+    
+    // Find and include schedule information if verses are from schedule
+    let scheduleInfo = [];
+    if (scheduleItems.length > 0) {
+      // Find which schedule item(s) contain these indices
+      const matchingScheduleIndices = [];
+      scheduleItems.forEach((item, idx) => {
+        const itemIndices = new Set(item.indices);
+        const isMatch = indicesToShow.every(i => itemIndices.has(i));
+        if (isMatch) {
+          matchingScheduleIndices.push(idx);
+        }
+      });
+      
+      // If we found matching schedule items, add them to the state
+      if (matchingScheduleIndices.length > 0) {
+        currentLiveScheduleIndex = matchingScheduleIndices[0];
+        scheduleInfo = matchingScheduleIndices.map(idx => ({
+          index: idx,
+          label: getScheduleItemLabel(scheduleItems[idx].indices),
+          type: scheduleItems[idx].type,
+          indices: scheduleItems[idx].indices
+        }));
+      }
+    }
+    
+    const state = {
+      bible: bibleState,
+      songs: [],
+      schedule: scheduleInfo,
+      scheduling: {
+        totalItems: scheduleItems.length,
+        currentItem: currentLiveScheduleIndex,
+        hasSchedule: scheduleItems.length > 0
+      },
+      allScheduleItems: scheduleItems.map((item, idx) => ({
+        index: idx,
+        label: getScheduleItemLabel(item.indices),
+        type: item.type
+      })),
+      allSongs: allSongs.map((song, idx) => ({
+        index: idx,
+        title: song.title,
+        author: song.author || ''
+      })),
+      lastUpdated: Date.now()
+    };
+    console.log('[relay] Pushing state:', JSON.stringify(state));
+    await ipcRenderer.invoke('relay-push-state', state);
+  } catch (err) {
+    console.error('[relay] Failed to push state:', err);
+  }
+}
+
+// Helper: Parse verse references and handle ranges (e.g., Genesis 1:1-5, or multiple ranges)
+function parseVerseReferenceWithRange(verseKeys) {
+  if (!verseKeys || verseKeys.length === 0) return [];
+  
+  // Group consecutive verses together
+  const groups = [];
+  let currentGroup = {
+    key: verseKeys[0],
+    verses: [verseKeys[0]]
+  };
+  
+  for (let i = 1; i < verseKeys.length; i++) {
+    const prevKey = verseKeys[i - 1];
+    const currKey = verseKeys[i];
+    
+    // Check if consecutive (same book and chapter, verse number incremented by 1)
+    const prevMatch = prevKey.match(/^(.+)\s(\d+):(\d+)$/);
+    const currMatch = currKey.match(/^(.+)\s(\d+):(\d+)$/);
+    
+    if (prevMatch && currMatch) {
+      const [, prevBook, prevChap, prevVerse] = prevMatch;
+      const [, currBook, currChap, currVerse] = currMatch;
+      
+      // Check if same book, same chapter, and verse is consecutive
+      if (prevBook === currBook && prevChap === currChap && 
+          parseInt(currVerse) === parseInt(prevVerse) + 1) {
+        currentGroup.verses.push(currKey);
+      } else {
+        // Not consecutive - start new group
+        groups.push(currentGroup);
+        currentGroup = {
+          key: currKey,
+          verses: [currKey]
+        };
+      }
+    } else {
+      groups.push(currentGroup);
+      currentGroup = {
+        key: currKey,
+        verses: [currKey]
+      };
+    }
+  }
+  groups.push(currentGroup);
+  
+  // Convert groups to state format
+  return groups.map(group => {
+    const firstKey = group.verses[0];
+    const lastKey = group.verses[group.verses.length - 1];
+    
+    const firstMatch = firstKey.match(/^(.+)\s(\d+):(\d+)$/);
+    const lastMatch = lastKey.match(/^(.+)\s(\d+):(\d+)$/);
+    
+    if (!firstMatch || !lastMatch) return null;
+    
+    const [, bookFirst, chapterFirst, verseFirst] = firstMatch;
+    const [, bookLast, , verseLast] = lastMatch;
+    
+    return {
+      book: bookFirst.trim(),
+      chapter: parseInt(chapterFirst, 10),
+      startVerse: parseInt(verseFirst, 10),
+      endVerse: parseInt(verseLast, 10),
+      length: group.verses.length  // Help mobile display ranges properly
+    };
+  }).filter(v => v !== null);
 }
 
 // Scaling is handled in scaleTextSize for both
@@ -1940,6 +2093,31 @@ function selectPrevVerse(extendSelection = false) {
     const el = document.querySelector(`.verse-item[data-index="${targetIndex}"]`);
     if (el) el.focus();
   }, 5);
+}
+
+// Schedule navigation functions
+function selectNextScheduleItem() {
+  if (scheduleItems.length === 0) return;
+  
+  // Find current schedule item index
+  let currentIndex = currentLiveScheduleIndex !== null ? currentLiveScheduleIndex : 0;
+  const nextIndex = (currentIndex + 1) % scheduleItems.length;
+  
+  // Get the verses from the next schedule item and display them
+  const nextItem = scheduleItems[nextIndex];
+  handleVerseDoubleClick(nextItem.indices);
+}
+
+function selectPrevScheduleItem() {
+  if (scheduleItems.length === 0) return;
+  
+  // Find current schedule item index
+  let currentIndex = currentLiveScheduleIndex !== null ? currentLiveScheduleIndex : 0;
+  const prevIndex = (currentIndex - 1 + scheduleItems.length) % scheduleItems.length;
+  
+  // Get the verses from the previous schedule item and display them
+  const prevItem = scheduleItems[prevIndex];
+  handleVerseDoubleClick(prevItem.indices);
 }
 
 function toggleLive(isActive) {
@@ -2428,6 +2606,10 @@ function toggleBlack() {
     clearMode = false;
     blackMode = true;
 
+    // Update button states
+    if (window.clearButton) window.clearButton.classList.remove('active');
+    if (window.blackButton) window.blackButton.classList.add('active');
+
     // Update preview to solid black
     const liveCanvas = document.getElementById('live-canvas');
     if (liveCanvas) {
@@ -2446,6 +2628,15 @@ function toggleBlack() {
   }
 
   blackMode = !blackMode;
+
+  // Update button state
+  if (window.blackButton) {
+    if (blackMode) {
+      window.blackButton.classList.add('active');
+    } else {
+      window.blackButton.classList.remove('active');
+    }
+  }
 
   if (blackMode) {
     // Update preview to solid black
@@ -3542,7 +3733,8 @@ async function loadSongs() {
     const songListContainer = document.getElementById('song-list');
     if (songListContainer) {
       songListContainer.addEventListener('scroll', () => {
-        renderSongList(allSongs);
+        // Re-render with current filtered state (preserve search results)
+        renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
       });
     }
   } catch (err) {
@@ -3716,7 +3908,9 @@ function displaySelectedSong() {
         const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
         const isSelected = selectedSongVerseIndex === globalVerseIndex;
         const firstLine = verse.split('\n')[0];
-        const label = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
+        // Remove any highlight markers that might be in the raw text (shouldn't be there, but clean it up)
+        const cleanFirstLine = firstLine.replace(/___HIGHLIGHT_(START|END)___/g, '');
+        const label = cleanFirstLine.length > 40 ? cleanFirstLine.substring(0, 40) + '...' : cleanFirstLine;
         html += `<div class="song-verse-block${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}">${section.section} (${verseIndex + 1}): ${label}</div>`;
       });
     });
@@ -3857,6 +4051,47 @@ async function updateLiveFromSongVerse(verseIndex) {
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });
+  
+  // Push song state to relay for mobile to display
+  try {
+    if (selectedSongIndices.length > 0) {
+      const songIndex = selectedSongIndices[0];
+      const song = allSongs[songIndex];
+      if (song) {
+        const state = {
+          bible: [],
+          songs: [{
+            title: song.title,
+            author: song.author || '',
+            section: verseData.section || '',
+            text: verseData.text || '',
+            lyricIndex: verseIndex
+          }],
+          schedule: [],
+          scheduling: {
+            totalItems: scheduleItems.length,
+            currentItem: currentLiveScheduleIndex,
+            hasSchedule: scheduleItems.length > 0
+          },
+          allScheduleItems: scheduleItems.map((item, idx) => ({
+            index: idx,
+            label: getScheduleItemLabel(item.indices),
+            type: item.type
+          })),
+          allSongs: allSongs.map((s, idx) => ({
+            index: idx,
+            title: s.title,
+            author: s.author || ''
+          })),
+          lastUpdated: Date.now()
+        };
+        console.log('[relay] Pushing song state:', JSON.stringify(state));
+        await ipcRenderer.invoke('relay-push-state', state);
+      }
+    }
+  } catch (err) {
+    console.error('[relay] Failed to push song state:', err);
+  }
 }
 
 function selectNextSongVerse() {
@@ -5877,6 +6112,118 @@ function openTransitionEditor(transitionType) {
 document.addEventListener('DOMContentLoaded', async () => {
   await loadTransitionSettings();
   setupTransitionButtons();
+});
+
+// Remote Control Command Handler
+ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, data }) => {
+  console.log('[remote] Command from', deviceName, ':', command, data);
+  
+  try {
+    switch (command) {
+      case 'SELECT_VERSE':
+        // Select a verse and optionally go live
+        if (data.book && data.chapter && data.verse) {
+          const verseKey = `${data.book} ${data.chapter}:${data.verse}`;
+          const verseIndex = allVerses.findIndex(v => v.key === verseKey);
+          if (verseIndex !== -1) {
+            // Switch to verses tab if not already there
+            if (currentTab !== 'verses') {
+              switchTab('verses');
+            }
+            // Select the verse
+            await handleVerseClick(verseIndex, null);
+            // Optionally go live
+            if (data.goLive) {
+              await handleVerseDoubleClick(verseIndex);
+            }
+          } else {
+            console.error('[remote] Verse not found:', verseKey);
+          }
+        }
+        break;
+        
+      case 'SELECT_SONG':
+        // Select a song by index or title
+        if (typeof data.index === 'number') {
+          // TODO: Implement song selection by index
+          // You'll need to add this based on your existing song selection code
+        }
+        break;
+        
+      case 'GO_LIVE':
+        // Make current selection go live
+        if (currentTab === 'verses' && selectedIndices.length > 0) {
+          await handleVerseDoubleClick(selectedIndices);
+        } else if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+          await handleSongVerseDoubleClick(selectedSongVerseIndex);
+        } else if (!liveMode) {
+          // No selection but live mode is off - just turn it on
+          toggleLive(true);
+        }
+        break;
+        
+      case 'CLEAR_LIVE':
+        // Toggle clear mode (show background only)
+        toggleClear();
+        break;
+      
+      case 'BLACK_SCREEN':
+        // Toggle black screen
+        toggleBlack();
+        break;
+        
+      case 'NEXT_VERSE':
+        // Navigate to next verse
+        selectNextVerse();
+        break;
+        
+      case 'PREV_VERSE':
+        // Navigate to previous verse
+        selectPrevVerse();
+        break;
+        
+      case 'NEXT_SCHEDULE_ITEM':
+        // Navigate to next schedule item
+        selectNextScheduleItem();
+        break;
+        
+      case 'PREV_SCHEDULE_ITEM':
+        // Navigate to previous schedule item
+        selectPrevScheduleItem();
+        break;
+        
+      case 'ADD_TO_SCHEDULE':
+        // Add verse to schedule from mobile
+        if (data && data.book && data.chapter && data.verse) {
+          const verseRef = `${data.book} ${data.chapter}:${data.verse}`;
+          console.log('[remote] Adding to schedule:', verseRef);
+          
+          // Add to schedule (assuming scheduleItems is accessible)
+          if (typeof scheduleItems !== 'undefined' && Array.isArray(scheduleItems)) {
+            scheduleItems.push({
+              type: 'verses',
+              book: data.book,
+              chapter: data.chapter,
+              startVerse: data.verse,
+              endVerse: data.verse
+            });
+            saveScheduleItems();
+            renderSchedule();
+            console.log('[remote] Added verse to schedule, total items:', scheduleItems.length);
+          } else {
+            console.error('[remote] scheduleItems not available');
+          }
+        } else {
+          console.warn('[remote] ADD_TO_SCHEDULE missing data:', data);
+        }
+        break;
+        
+      default:
+        console.warn('[remote] Unknown command:', command);
+    }
+  } catch (e) {
+    console.error('[remote] Error handling command:', e);
+  }
 });
 
 // Export test hooks for unit tests (if running under Node)

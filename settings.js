@@ -3,6 +3,39 @@ const { CDN_BASE, BIBLE_STORAGE_DIR } = require('./constants');
 const fs = require('fs');
 const path = require('path');
 
+// Secure storage API using IPC to main (same as in renderer.js)
+const secure = {
+  async getToken() { try { return await ipcRenderer.invoke('secure-get-token'); } catch (e) { console.error('secure get token error', e); return null; } },
+  async setToken(token) { try { return await ipcRenderer.invoke('secure-set-token', token); } catch (e) { console.error('secure set token error', e); return false; } },
+  async deleteToken() { try { return await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('secure delete token error', e); return false; } }
+};
+
+// Helper to get saved token (matches renderer.js logic)
+async function getSavedToken() {
+  try {
+    console.log('[Cloud Relay] Getting token from secure storage...');
+    const t = await secure.getToken();
+    console.log('[Cloud Relay] Token from secure storage:', t ? 'exists (length: ' + t.length + ')' : 'null');
+    if (t) return t;
+    // Fallback to settings (legacy)
+    console.log('[Cloud Relay] Trying fallback to settings...');
+    try {
+      const s = await ipcRenderer.invoke('load-settings');
+      if (s && s.auth && s.auth.token) {
+        console.log('[Cloud Relay] Fallback token exists (length: ' + s.auth.token.length + ')');
+        return s.auth.token;
+      }
+    } catch (e) {
+      console.error('[Cloud Relay] Fallback error:', e);
+    }
+    console.log('[Cloud Relay] No token found');
+    return null;
+  } catch (e) {
+    console.error('[Cloud Relay] secure get error', e);
+    return null;
+  }
+}
+
 // Sidebar navigation logic
 document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.sidebar button');
@@ -197,6 +230,270 @@ document.querySelectorAll('.save-settings').forEach(btn => {
     setTimeout(() => status.textContent = '', 1500);
   });
 });
+
+// Remote Control initialization
+(async () => {
+  const settings = await ipcRenderer.invoke('load-settings');
+  const remoteEnabledEl = document.getElementById('remote-enabled');
+  const remotePortEl = document.getElementById('remote-port');
+  const pairedDevicesList = document.getElementById('paired-devices-list');
+  const remoteServerInfo = document.getElementById('remote-server-info');
+  const remoteStatus = document.getElementById('remote-status');
+  const remoteAddressesContainer = document.getElementById('remote-addresses-container');
+  
+  if (settings && settings.remote) {
+    if (remoteEnabledEl) remoteEnabledEl.checked = !!settings.remote.enabled;
+    if (remotePortEl) remotePortEl.value = settings.remote.port || 39847;
+  }
+  
+  async function refreshServerInfo() {
+    const info = await ipcRenderer.invoke('remote-get-info');
+    
+    if (!info.running) {
+      if (remoteServerInfo) remoteServerInfo.style.display = 'none';
+      return;
+    }
+    
+    if (remoteServerInfo) remoteServerInfo.style.display = 'block';
+    if (remoteStatus) remoteStatus.textContent = 'Running';
+    
+    if (remoteAddressesContainer && info.addresses && info.addresses.length > 0) {
+      remoteAddressesContainer.innerHTML = `
+        <div style="font-weight:500;margin-bottom:4px;">Connection Addresses:</div>
+        ${info.addresses.map(addr => `
+          <div class="remote-address-item" style="font-family:monospace;padding:4px 8px;margin:2px 0;border-radius:3px;display:flex;justify-content:space-between;align-items:center;">
+            <span>${addr}:${info.port}</span>
+            <button class="copy-address" data-address="${addr}:${info.port}" style="padding:2px 8px;font-size:0.8em;color:white;border:none;border-radius:2px;cursor:pointer;">Copy</button>
+          </div>
+        `).join('')}
+      `;
+      
+      // Add copy handlers
+      remoteAddressesContainer.querySelectorAll('.copy-address').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const address = e.target.getAttribute('data-address');
+          navigator.clipboard.writeText(address);
+          const originalText = e.target.textContent;
+          e.target.textContent = 'Copied!';
+          setTimeout(() => { e.target.textContent = originalText; }, 1500);
+        });
+      });
+    }
+  }
+  
+  async function refreshPairedDevices() {
+    if (!pairedDevicesList) return;
+    const devices = await ipcRenderer.invoke('remote-get-paired-devices');
+    
+    if (devices.length === 0) {
+      pairedDevicesList.innerHTML = `
+        <div style="padding:16px;text-align:center;color:#888;">
+          No devices paired yet
+        </div>
+      `;
+      return;
+    }
+    
+    pairedDevicesList.innerHTML = devices.map(device => `
+      <div style="padding:12px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-weight:500;">${device.name}</div>
+          <div style="font-size:0.85em;color:#888;">
+            Paired ${new Date(device.paired).toLocaleDateString()} • 
+            ${device.revoked ? '<span style="color:#c00;">Revoked</span>' : '<span style="color:#060;">Active</span>'}
+          </div>
+        </div>
+        ${device.revoked ? '' : `
+          <button class="revoke-device" data-device-id="${device.id}" style="padding:6px 12px;background:#c00;color:white;border:none;border-radius:4px;cursor:pointer;">
+            Revoke
+          </button>
+        `}
+      </div>
+    `).join('');
+    
+    // Add revoke handlers
+    pairedDevicesList.querySelectorAll('.revoke-device').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const deviceId = e.target.getAttribute('data-device-id');
+        if (confirm('Revoke access for this device?')) {
+          await ipcRenderer.invoke('remote-revoke-device', deviceId);
+          refreshPairedDevices();
+        }
+      });
+    });
+  }
+  
+  refreshPairedDevices();
+  refreshServerInfo();
+  
+  // Listen for device list changes
+  ipcRenderer.on('remote-devices-changed', () => {
+    refreshPairedDevices();
+  });
+  
+  // Handle remote enable/disable
+  if (remoteEnabledEl) {
+    remoteEnabledEl.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      const port = remotePortEl ? parseInt(remotePortEl.value) : 39847;
+      
+      if (enabled) {
+        const result = await ipcRenderer.invoke('remote-start', port);
+        if (!result.success) {
+          alert('Failed to start remote server: ' + result.error);
+          e.target.checked = false;
+        } else {
+          refreshServerInfo();
+        }
+      } else {
+        await ipcRenderer.invoke('remote-stop');
+        refreshServerInfo();
+      }
+    });
+  }
+  
+  // Fix Connection button
+  const fixConnectionBtn = document.getElementById('fix-connection-btn');
+  if (fixConnectionBtn) {
+    fixConnectionBtn.addEventListener('click', async () => {
+      const originalText = fixConnectionBtn.textContent;
+      fixConnectionBtn.textContent = 'Fixing...';
+      fixConnectionBtn.disabled = true;
+      
+      const result = await ipcRenderer.invoke('remote-fix-connection');
+      
+      if (result.success) {
+        alert('✓ Firewall rules added successfully!\n\nTry connecting from your mobile device now.');
+      } else {
+        alert('⚠ Failed to add firewall rules:\n\n' + result.error + '\n\nYou may need to run Liturgia as Administrator to add firewall rules automatically.');
+      }
+      
+      fixConnectionBtn.textContent = originalText;
+      fixConnectionBtn.disabled = false;
+    });
+  }
+})();
+
+// Cloud Relay initialization
+(async () => {
+  const settings = await ipcRenderer.invoke('load-settings');
+  const relayEnabledEl = document.getElementById('relay-enabled');
+  const relayAccountStatusEl = document.getElementById('relay-account-status');
+  const relayNotSignedInEl = document.getElementById('relay-not-signed-in');
+  const relaySignedInEl = document.getElementById('relay-signed-in');
+  const relayAccountEmailEl = document.getElementById('relay-account-email');
+  const relayConnectedInfoEl = document.getElementById('relay-connected-info');
+  const relaySessionIdEl = document.getElementById('relay-session-id');
+  
+  let authToken = null;
+  
+  // Load saved relay settings
+  if (settings && settings.relay) {
+    if (relayEnabledEl) relayEnabledEl.checked = !!settings.relay.enabled;
+  }
+  
+  async function refreshRelayUI() {
+    // Get auth token from existing account login (using secure storage)
+    authToken = await getSavedToken();
+    console.log('[Cloud Relay] refreshRelayUI - authToken:', authToken ? 'exists (length: ' + authToken.length + ')' : 'null');
+    
+    // Get relay connection info
+    const info = await ipcRenderer.invoke('relay-get-info');
+    
+    // Update account status
+    if (authToken) {
+      if (relayNotSignedInEl) relayNotSignedInEl.style.display = 'none';
+      if (relaySignedInEl) relaySignedInEl.style.display = 'block';
+      
+      // Try to decode JWT to get email (only works for JWT tokens, not device tokens)
+      try {
+        const parts = authToken.split('.');
+        console.log('[Cloud Relay] Token parts count:', parts.length);
+        if (parts.length === 3) {
+          // JWT token - decode to get email
+          const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+          console.log('[Cloud Relay] JWT payload:', payload);
+          if (relayAccountEmailEl && payload.email) {
+            relayAccountEmailEl.textContent = payload.email;
+          }
+        } else {
+          // Device token (id.secret format) - can't decode email locally
+          console.log('[Cloud Relay] Device token detected (not JWT)');
+          if (relayAccountEmailEl) {
+            relayAccountEmailEl.textContent = '(authenticated)';
+          }
+        }
+      } catch (e) {
+        console.error('[Cloud Relay] Token decode error:', e);
+        if (relayAccountEmailEl) relayAccountEmailEl.textContent = '(authenticated)';
+      }
+      
+      // Enable the checkbox
+      if (relayEnabledEl) relayEnabledEl.disabled = false;
+    } else {
+      if (relayNotSignedInEl) relayNotSignedInEl.style.display = 'block';
+      if (relaySignedInEl) relaySignedInEl.style.display = 'none';
+      
+      // Disable the checkbox
+      if (relayEnabledEl) {
+        relayEnabledEl.disabled = true;
+        relayEnabledEl.checked = false;
+      }
+    }
+    
+    // Update connection info
+    if (info.running && info.sessionId) {
+      if (relayConnectedInfoEl) relayConnectedInfoEl.style.display = 'block';
+      if (relaySessionIdEl) relaySessionIdEl.textContent = info.sessionId.substring(0, 16) + '...';
+    } else {
+      if (relayConnectedInfoEl) relayConnectedInfoEl.style.display = 'none';
+    }
+  }
+  
+  refreshRelayUI();
+  
+  // AUTO-START RELAY FOR TESTING
+  setTimeout(async () => {
+    const info = await ipcRenderer.invoke('relay-get-info');
+    if (!info.running && authToken && relayEnabledEl && !relayEnabledEl.checked) {
+      console.log('[Cloud Relay] Auto-starting relay for testing...');
+      relayEnabledEl.checked = true;
+      relayEnabledEl.dispatchEvent(new Event('change'));
+    }
+  }, 1000);
+  
+  // Enable/disable relay
+  if (relayEnabledEl) {
+    relayEnabledEl.addEventListener('change', async (e) => {
+      const enabled = e.target.checked;
+      
+      if (enabled) {
+        if (!authToken) {
+          alert('Please sign in to your Liturgia account first (Account tab)');
+          e.target.checked = false;
+          return;
+        }
+        
+        console.log('[Cloud Relay] Starting relay with token length:', authToken.length);
+        const result = await ipcRenderer.invoke('relay-start', {
+          token: authToken,
+          deviceName: 'Liturgia Desktop'
+        });
+        console.log('[Cloud Relay] Relay start result:', result);
+        
+        if (!result.success) {
+          alert('Failed to start cloud relay: ' + result.error);
+          e.target.checked = false;
+        } else {
+          setTimeout(refreshRelayUI, 500);
+        }
+      } else {
+        await ipcRenderer.invoke('relay-stop');
+        setTimeout(refreshRelayUI, 500);
+      }
+    });
+  }
+})();
 
 // Live toggle dark theme
 document.getElementById('dark-theme').addEventListener('change', (e) => {

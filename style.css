@@ -1361,3 +1361,86 @@ body.dark-theme .acct-badge .founder-badge {
   border: 1px solid rgba(255, 180, 0, 0.15);
   box-shadow: 0 6px 20px rgba(255, 176, 0, 0.02);
 }
+
+/* Dark mode for remote server info */
+body.dark-theme #remote-server-info {
+  background: #2a2a2a !important;
+  color: #eee;
+}
+
+body.dark-theme #remote-server-info .remote-info-hint {
+  color: #aaa;
+}
+
+body.dark-theme .remote-address-item {
+  background: #333 !important;
+}
+
+body.dark-theme .copy-address {
+  background: #007acc !important;
+}
+
+body.dark-theme .copy-address:hover {
+  background: #005a9e !important;
+}
+
+#remote-server-info {
+  background: #f9f9f9;
+}
+
+.remote-info-hint {
+  color: #666;
+}
+
+.remote-address-item {
+  background: #fff;
+}
+
+.copy-address {
+  background: #007acc;
+}
+
+#fix-connection-btn {
+  background: #10b981;
+  color: white;
+  border: none;
+}
+
+#fix-connection-btn:hover:not(:disabled) {
+  background: #059669;
+}
+
+#fix-connection-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.remote-troubleshooting-hint {
+  color: #666;
+}
+
+body.dark-theme .remote-troubleshooting-hint {
+  color: #aaa;
+}
+
+.remote-admin-warning {
+  background: #fff9e6;
+  border: 1px solid #d4a017;
+  color: #8b6914;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+body.dark-theme .remote-admin-warning {
+  background: #2a2415;
+  border-color: #d4a017;
+  color: #f4d03f;
+}
+
+body.dark-theme #fix-connection-btn {
+  background: #10b981;
+}
+
+body.dark-theme #fix-connection-btn:hover:not(:disabled) {
+  background: #059669;
+}
