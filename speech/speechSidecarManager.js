@@ -27,6 +27,10 @@ function resolvePythonCandidates(rootDir) {
   const candidates = [];
   const isWindows = process.platform === 'win32';
   
+  // Diagnostic: log PATH for troubleshooting
+  const pathEnv = process.env.PATH || '';
+  console.log(`[python-candidate] Platform: ${process.platform}, PATH length: ${pathEnv.length} chars`);
+  
   // Try local venv only if it clearly exists (for dev/npm start scenario)
   const winVenv = path.join(rootDir, '.venv', 'Scripts', 'python.exe');
   const posixVenv = path.join(rootDir, '.venv', 'bin', 'python');
@@ -126,6 +130,9 @@ class SpeechSidecarManager extends EventEmitter {
     this.expectedExitPid = null;
     this.restartTimer = null;
     this.appQuitting = false;
+    // Backoff tracking (prevent thrashing when spawn keeps failing)
+    this.consecutiveSpawnFailures = 0;
+    this.spawnFailureBackoffUntil = 0;
 
     this.state = {
       processRunning: false,
@@ -324,7 +331,11 @@ class SpeechSidecarManager extends EventEmitter {
           }
         });
         
-        const child = spawn(candidate.cmd, [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)], {
+        const spawnCmd = candidate.cmd;
+        const spawnArgs = [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)];
+        console.log(`[speech-sidecar] Attempting to spawn: ${spawnCmd} ${spawnArgs.join(' ')} (cwd: ${this.rootDir})`);
+        
+        const child = spawn(spawnCmd, spawnArgs, {
           cwd: this.rootDir,
           stdio: ['ignore', 'pipe', 'pipe'],
           shell: false,
@@ -335,8 +346,9 @@ class SpeechSidecarManager extends EventEmitter {
         let spawnError = null;
         child.on('error', (err) => {
           spawnError = err;
-          errors.push({ cmd: candidate.cmd, code: err.code, message: err.message });
-          console.warn(`[speech-sidecar] spawn error with candidate "${candidate.cmd}": ${err.message} (${err.code})`);
+          const errorDesc = err.code === 'ENOENT' ? 'not found in PATH' : err.code === 'EACCES' ? 'permission denied' : err.code;
+          errors.push({ cmd: candidate.cmd, code: err.code, message: err.message, interpreted: errorDesc });
+          console.warn(`[speech-sidecar] spawn failed: "${spawnCmd}" (${err.code}: ${errorDesc}) - ${err.message}`);
         });
 
         // Wait very briefly to see if spawn fails immediately
@@ -344,9 +356,11 @@ class SpeechSidecarManager extends EventEmitter {
         
         // If spawn failed, continue to next candidate
         if (spawnError) {
-          errors.push({ cmd: candidate.cmd, error: spawnError.message, code: spawnError.code });
+          // Don't add duplicate error, we already logged it
           continue;
         }
+        
+        console.log(`[speech-sidecar] spawn succeeded for "${spawnCmd}", pid=${child.pid}`);
 
         child.stdout.on('data', (buf) => {
           const text = buf.toString();
@@ -417,7 +431,26 @@ class SpeechSidecarManager extends EventEmitter {
 
     // All candidates failed
     const triedCandidates = candidates.map(c => c.cmd).join(', ');
+    const errorSummary = errors.map(e => `${e.cmd} (${e.interpreted || e.code})`).join('; ');
     console.error(`[speech-sidecar] Python startup failed. Tried: ${triedCandidates}`);
+    console.error(`[speech-sidecar] Errors: ${errorSummary}`);
+    console.error(`[speech-sidecar] Full error details:`, JSON.stringify(errors, null, 2));
+    
+    // Implement exponential backoff: fail once = 15s backoff, fail twice = 30s, fail 3+ = 60s
+    this.consecutiveSpawnFailures++;
+    const backoffSeconds = Math.min(15 * Math.pow(2, this.consecutiveSpawnFailures - 1), 120);
+    this.spawnFailureBackoffUntil = Date.now() + (backoffSeconds * 1000);
+    console.warn(`[speech-sidecar] Spawn failed ${this.consecutiveSpawnFailures} time(s). Backing off for ${backoffSeconds}s`);
+    
+    let errorMsg = `Python 3.7+ is required and must be in PATH. Install from https://python.org, then restart Liturgia.`;
+    if (errors.length > 0) {
+      const firstError = errors[0];
+      if (firstError.code === 'ENOENT') {
+        errorMsg = `Python not found in PATH. Ensure Python 3.7+ is installed and accessible. Attempted: ${triedCandidates}`;
+      } else if (firstError.code === 'EACCES') {
+        errorMsg = `Permission denied running Python. Check file permissions and try running Liturgia as administrator.`;
+      }
+    }
     
     this.updateState({
       processRunning: false,
@@ -425,7 +458,7 @@ class SpeechSidecarManager extends EventEmitter {
       portOpen: false,
       modelReady: false,
       statusMessage: 'sidecar-spawn-error',
-      lastError: `Python 3.7+ is required. Install from https://python.org and add it to PATH, then restart Liturgia.`,
+      lastError: errorMsg,
       runtimeCommand: '',
       restarting: false
     });
@@ -476,16 +509,26 @@ class SpeechSidecarManager extends EventEmitter {
   async ensureRunning() {
     const portOpen = await this.checkPortOpen();
     if (portOpen) {
+      this.consecutiveSpawnFailures = 0;
       this.updateState({ portOpen: true, processRunning: true, statusMessage: this.state.modelReady ? 'model-ready' : (this.state.statusMessage || 'sidecar-running') });
       return true;
     }
     this.updateState({ portOpen: false, modelReady: false });
+    
+    // Backoff: if spawn keeps failing, don't hammer it every 6 seconds
+    if (Date.now() < this.spawnFailureBackoffUntil) {
+      console.log(`[speech-sidecar] still in backoff period, skipping spawn attempt (${Math.ceil((this.spawnFailureBackoffUntil - Date.now()) / 1000)}s remaining)`);
+      return false;
+    }
+    
     return await this.startProcess();
   }
 
   async restart() {
     this.updateState({ restarting: true, statusMessage: 'restarting-sidecar', modelReady: false, downloadProgress: null, downloadBytes: 0, downloadTotalBytes: 0, lastError: '' });
     this.stopProcess();
+    this.consecutiveSpawnFailures = 0;
+    this.spawnFailureBackoffUntil = 0;
     await new Promise((resolve) => setTimeout(resolve, 600));
     const started = await this.startProcess();
     if (!started) {
