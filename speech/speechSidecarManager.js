@@ -321,15 +321,17 @@ class SpeechSidecarManager extends EventEmitter {
     
     for (const candidate of candidates) {
       try {
-        // Fire off dependency check in background (don't block startup)
-        setImmediate(async () => {
-          const depCheck = await checkAndInstallDependencies(candidate.cmd);
-          if (depCheck.success) {
-            console.log('[speech-sidecar] dependencies ready');
-          } else {
-            console.warn('[speech-sidecar] dependency installation available but not critical for startup');
-          }
-        });
+        // First, check and install dependencies for this candidate (blocking)
+        // This must happen BEFORE spawn to prevent missing dependency errors
+        console.log(`[speech-sidecar] Checking dependencies with: ${candidate.cmd}`);
+        const depCheck = await checkAndInstallDependencies(candidate.cmd);
+        if (depCheck.success) {
+          console.log('[speech-sidecar] dependencies ready with ' + candidate.cmd);
+        } else {
+          console.warn('[speech-sidecar] Failed to install dependencies with ' + candidate.cmd + ': ' + depCheck.message);
+          errors.push({ cmd: candidate.cmd, code: 'DEP_INSTALL_FAILED', message: depCheck.message, interpreted: 'dependency installation failed' });
+          continue; // Try next candidate
+        }
         
         const spawnCmd = candidate.cmd;
         const spawnArgs = [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)];
