@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "3.0.21",
+  "version": "3.1.0",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "description": "Liturgia — presentation software",
@@ -51,15 +51,15 @@
       "include": "build/installer.nsh"
     },
     "files": [
-      "dist/**/*",
-      "build/**/*",
       "**/*",
       "!node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/test",
       "!**/*.map"
     ],
     "asarUnpack": [
-      "node_modules/sql.js/dist/sql-wasm.wasm"
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "speech/speechSidecarManager.js",
+      "speech/backend/**/*"
     ],
     "extraResources": [
       {
