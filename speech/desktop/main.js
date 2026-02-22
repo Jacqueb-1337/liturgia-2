@@ -2,7 +2,7 @@ const { app, BrowserWindow, session, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 
 const HOST = '127.0.0.1';
 const PORT = 3210;
@@ -229,43 +229,51 @@ function startTranscriptionSidecar() {
     return false;
   }
 
-  // Build list of Python candidates with system paths on Windows
-  const venvPython = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
-  let candidates = [
-    { cmd: fs.existsSync(venvPython) ? venvPython : '', args: [] },
-  ];
+  // Try to find Python asynchronously using the same method as the Python check (via exec with shell)
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+  
+  (async () => {
+    const isWindows = process.platform === 'win32';
+    const candidates = ['python', 'python3'];
+    if (isWindows) candidates.push('py -3');
+    
+    let pythonCmd = null;
+    for (const cmd of candidates) {
+      try {
+        console.log(`[sidecar] Checking for Python via: ${cmd}`);
+        const { stdout } = await execAsync(`${cmd} --version`, { timeout: 1000, encoding: 'utf8', shell: true });
+        console.log(`[sidecar] Found Python: '${cmd}' → ${stdout.trim()}`);
+        pythonCmd = cmd.split(' ')[0]; // Return just the base command (python, python3, or py)
+        break;
+      } catch (e) {
+        console.log(`[sidecar] '${cmd}' not available: ${e.message}`);
+      }
+    }
 
-  // On Windows, also check common installation directories
-  if (process.platform === 'win32') {
-    const commonPaths = [
-      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
-      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
-      path.join(process.env.ProgramFiles || '', 'Python312', 'python.exe'),
-      path.join(process.env.ProgramFiles || '', 'Python311', 'python.exe'),
-      'C:\\Python312\\python.exe',
-      'C:\\Python311\\python.exe',
-    ];
-    candidates = candidates.concat(
-      commonPaths.filter(p => fs.existsSync(p)).map(cmd => ({ cmd, args: [] }))
-    );
-  }
+    if (!pythonCmd) {
+      console.error('[sidecar] Could not find Python via any method');
+      updateSidecarStatus({
+        processRunning: false,
+        managedProcess: false,
+        portOpen: false,
+        modelReady: false,
+        statusMessage: 'sidecar-start-failed',
+        lastError: 'Python not found in PATH. Ensure Python 3.7+ is installed and accessible.',
+        restarting: false,
+      });
+      return;
+    }
 
-  // Add PATH-based resolution with shell: true for packaged apps
-  candidates = candidates.concat([
-    { cmd: 'python', args: [], shell: true },
-    { cmd: 'python3', args: [], shell: true },
-    { cmd: 'py', args: ['-3'], shell: true },
-  ]);
-
-  candidates = candidates.filter((entry) => !!entry.cmd);
-
-  for (const candidate of candidates) {
+    // Now spawn Python with shell: true to ensure PATH works in packaged app
+    console.log(`[sidecar] Spawning with: ${pythonCmd}`);
+    const spawnArgs = pythonCmd === 'py' ? ['-3', scriptPath, '--host', HOST, '--port', String(SIDECAR_PORT)] : [scriptPath, '--host', HOST, '--port', String(SIDECAR_PORT)];
+    
     try {
-      console.log(`[sidecar] Attempting to spawn: ${candidate.cmd} ${(candidate.args || []).join(' ')} (cwd: ${ROOT})`);
-      const child = spawn(candidate.cmd, [...candidate.args, scriptPath, '--host', HOST, '--port', String(SIDECAR_PORT)], {
+      const child = spawn(pythonCmd, spawnArgs, {
         cwd: ROOT,
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: candidate.shell || false,
+        shell: true,
         env: { ...process.env, VOSK_MODEL_SIZE: sidecarState.modelSize },
       });
 
@@ -279,6 +287,7 @@ function startTranscriptionSidecar() {
           parseSidecarLogLine(line);
         }
       });
+
       child.stderr.on('data', (buf) => {
         const text = buf.toString();
         const lines = text.split(/\r?\n/);
@@ -327,29 +336,26 @@ function startTranscriptionSidecar() {
         modelDownloadDir: getModelDownloadDir(sidecarState.modelSize),
         statusMessage: 'loading-vosk-model',
         lastError: '',
-        runtimeCommand: candidate.cmd,
+        runtimeCommand: pythonCmd,
         lastStartAt: Date.now(),
         restarting: false,
       });
-      console.log(`[sidecar:${child.pid}] started with ${candidate.cmd}`);
-      return true;
+      console.log(`[sidecar:${child.pid}] started successfully with ${pythonCmd}`);
     } catch (err) {
-      console.warn(`[sidecar] failed with ${candidate.cmd}:`, err.message);
+      console.error('[sidecar] Failed to spawn:', err.message);
+      updateSidecarStatus({
+        processRunning: false,
+        managedProcess: false,
+        portOpen: false,
+        modelReady: false,
+        statusMessage: 'sidecar-start-failed',
+        lastError: `Failed to spawn Python: ${err.message}`,
+        restarting: false,
+      });
     }
-  }
+  })();
 
-  console.error('[sidecar] could not start python sidecar. Ensure Python and backend dependencies are installed.');
-  console.error('[sidecar] Python not found — ensure Python 3.7+ is installed and accessible in PATH.');
-  updateSidecarStatus({
-    processRunning: false,
-    managedProcess: false,
-    portOpen: false,
-    modelReady: false,
-    statusMessage: 'sidecar-start-failed',
-    lastError: 'Python not found in PATH. Ensure Python 3.7+ is installed and accessible. Attempted: python, python3, py and common installation paths.',
-    restarting: false,
-  });
-  return false;
+  return true; // Return true since we're spawning asynchronously
 }
 
 function stopTranscriptionSidecar() {
