@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.17 - 2026-02-22
+
+- fix: enable magic link auto-signin on web and app with full token list visibility
+- fix: magic links now work via deep protocol (app) and cookies (web)
+- fix: resolve token database mismatch between auth.db and verify flow
+- fix: token list now displays when authenticating via magic link JWT
+
 ## 3.0.6 - 2026-02-20
 
 - CRITICAL FIX: token handlers were returning test token instead of real token
