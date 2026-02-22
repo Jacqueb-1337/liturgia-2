@@ -229,22 +229,22 @@ function startTranscriptionSidecar() {
     return false;
   }
 
-  // Try to find Python asynchronously using the same method as the Python check (via exec with shell)
+  // Try to find Python asynchronously using the same method as the Python check (via exec)
   const { promisify } = require('util');
   const execAsync = promisify(exec);
   
   (async () => {
     const isWindows = process.platform === 'win32';
     const candidates = ['python', 'python3'];
-    if (isWindows) candidates.push('py -3');
+    if (isWindows) candidates.push('py');
     
     let pythonCmd = null;
     for (const cmd of candidates) {
       try {
         console.log(`[sidecar] Checking for Python via: ${cmd}`);
-        const { stdout } = await execAsync(`${cmd} --version`, { timeout: 1000, encoding: 'utf8', shell: true });
+        const { stdout } = await execAsync(`"${cmd}" --version`, { timeout: 1000, encoding: 'utf8' });
         console.log(`[sidecar] Found Python: '${cmd}' → ${stdout.trim()}`);
-        pythonCmd = cmd.split(' ')[0]; // Return just the base command (python, python3, or py)
+        pythonCmd = cmd;
         break;
       } catch (e) {
         console.log(`[sidecar] '${cmd}' not available: ${e.message}`);
