@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0.19 - 2026-02-22
+
+- fix: improve python discovery in packaged app for sidecar spawning
+- fix: search common Windows python installation directories (Program Files, LocalAppData)
+- fix: use shell spawning as fallback for PATH-based python resolution
+- improve: more helpful error message when Python not found in packaged builds
+
 ## 3.0.18 - 2026-02-22
 
 - fix: add splashscreen real-time sidecar download progress (0-100%)
