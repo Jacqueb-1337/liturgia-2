@@ -583,19 +583,26 @@ let splashShownTime = 0;
 
 // Check if both windows are ready and close splash if so (with minimum display time)
 function tryCloseSplashScreen() {
+  console.log('[main] tryCloseSplashScreen: mainWindowReady=' + mainWindowReady + ' aiWorkerWindowReady=' + aiWorkerWindowReady + ' aiEnabled=' + aiEnabled);
   if (mainWindowReady && (aiWorkerWindowReady || !aiEnabled || launchSpeechUi || aiWorkerSuppressed)) {
+    console.log('[main] Conditions met, closing splash');
     if (splashWindow && !splashWindow.isDestroyed()) {
       // Ensure splash is visible for at least 1.2 seconds (covers transition animations)
       const timeShown = Date.now() - splashShownTime;
       const delayNeeded = Math.max(0, 1200 - timeShown);
+      console.log('[main] Closing splash in ' + delayNeeded + 'ms');
       
       setTimeout(() => {
         splashClosed = true;
-        try { splashWindow.destroy(); splashWindow = null; } catch(e){}
-        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){}
+        console.log('[main] Destroying splash window');
+        try { splashWindow.destroy(); splashWindow = null; } catch(e){ console.error('[main] Error destroying splash:', e); }
+        console.log('[main] Showing main window');
+        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){ console.error('[main] Error showing main window:', e); }
         try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
       }, delayNeeded);
     }
+  } else {
+    console.log('[main] Conditions not met yet');
   }
 }
 
@@ -1438,6 +1445,12 @@ async function createWindow() {
     
     // Load splash and wait for it to be ready before loading main window
     await splashWindow.loadFile('splash.html');
+    
+    // Send current sidecar status to splash window once it's loaded
+    if (latestSidecarStatus) {
+      try { splashWindow.webContents.send('sidecar:status', latestSidecarStatus); } catch (err) { console.warn('[splash] Failed to send initial status', err); }
+    }
+    
     splashWindow.show();
     splashShownTime = Date.now();  // Record when splash becomes visible
   } catch (e) { console.warn('Failed to create/show splash window', e); }
@@ -1462,8 +1475,19 @@ async function createWindow() {
 
   // Mark main window as ready when it's ready to show
   mainWindow.once('ready-to-show', () => {
+    console.log('[main] Main window ready-to-show');
     mainWindowReady = true;
     tryCloseSplashScreen();
+  });
+
+  // Catch renderer crashes
+  mainWindow.webContents.on('crashed', () => {
+    console.error('[main] Renderer process crashed');
+  });
+
+  // Log when window closes
+  mainWindow.on('close', () => {
+    console.log('[main] Main window closing');
   });
 
   // IPC to let renderer query splash state if it missed the event
@@ -1472,10 +1496,13 @@ async function createWindow() {
 
   // Fallback close in case dependencies aren't met within 10 seconds
   setTimeout(() => { 
+    console.log('[main] 10-second fallback timeout firing');
     if (splashWindow) { 
+      console.log('[main] Force closing splash due to timeout');
       splashClosed = true;
-      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){}
+      try { if (splashWindow) { splashWindow.destroy(); splashWindow = null; } } catch(e){ console.error('[main] Error destroying splash in fallback:', e); }
       try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
+      try { if (mainWindow) { console.log('[main] Showing main window from fallback'); mainWindow.show(); mainWindow.focus(); } } catch(e){ console.error('[main] Error showing main from fallback:', e); }
     }
   }, 10000);
 
@@ -1663,17 +1690,63 @@ if (!gotTheLock) {
   app.quit();
   process.exit(0);
 } else {
+  // Handle deep link URLs like liturgia://auth?token=xyz
+  function handleDeepLink(url) {
+    try {
+      const urlObj = new URL(url);
+      const token = urlObj.searchParams.get('token');
+      if (token && mainWindow && !mainWindow.isDestroyed()) {
+        console.log('[main] Handling deep link with token');
+        // Send token to renderer via IPC
+        try {
+          mainWindow.webContents.send('deep-link:auth-token', { token });
+        } catch (err) {
+          console.warn('[main] Failed to send deep link token to renderer', err);
+        }
+      }
+    } catch (err) {
+      console.warn('[main] Failed to parse deep link', url, err);
+    }
+  }
+
   // This is the primary instance
   app.on('second-instance', (event, commandLine, workingDirectory) => {
     console.log('[main] Second instance attempt, bringing main window to front');
+    // Check for deep link in commandLine (Windows)
+    const deepLink = commandLine.find(arg => arg.startsWith('liturgia://'));
+    if (deepLink) {
+      handleDeepLink(deepLink);
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
+
+  // Handle open-url event (macOS - when app is running)
+  app.on('open-url', (event, url) => {
+    event.preventDefault();
+    console.log('[main] open-url event:', url);
+    if (url.startsWith('liturgia://')) {
+      handleDeepLink(url);
+    }
+  });
 }
 
 app.whenReady().then(async () => {
+  // Register custom protocol handler for deep links (magic link from email)
+  if (process.defaultApp) {
+    // Development mode: register the protocol handler
+    if (process.platform === 'win32') {
+      app.setAsDefaultProtocolClient('liturgia', process.execPath, [path.resolve(process.argv[1])]);
+    } else if (process.platform === 'darwin' || process.platform === 'linux') {
+      app.setAsDefaultProtocolClient('liturgia');
+    }
+  } else {
+    // Production mode (packaged)
+    app.setAsDefaultProtocolClient('liturgia');
+  }
+  
   await createWindow();
 
   if (speechSidecarManager) {

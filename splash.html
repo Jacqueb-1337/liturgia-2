@@ -20,8 +20,10 @@
     .splash-fade{opacity:1;transition:none}
 
     /* small subtle loading bar */
+    .loader-container{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%}
     .loader{height:4px;width:160px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
-    .loader > .bar{width:0;height:100%;background:linear-gradient(90deg,var(--accent),#00b0ff);transition:width 1.2s cubic-bezier(.2,.9,.2,1)}
+    .loader > .bar{width:0;height:100%;background:linear-gradient(90deg,var(--accent),#00b0ff);transition:width 250ms ease-out}
+    .status-text{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;color:rgba(255,255,255,0.6);font-size:12px;height:14px;min-width:160px;text-align:center}
 
     /* keep a solid gradient background so fade reveals the app beneath without flashing */
     /* body remains with gradient defined above */
@@ -32,23 +34,72 @@
     <div class="card" id="card">
       <img class="logo" src="logo.png" alt="Liturgia">
       <div class="motto" id="motto"><span class="mask">Worship without distraction.</span></div>
-      <div class="loader"><div class="bar" id="bar"></div></div>
+      <div class="loader-container">
+        <div class="loader"><div class="bar" id="bar"></div></div>
+        <div class="status-text" id="status-text"></div>
+      </div>
     </div>
   </div>
   <script>
     const { ipcRenderer } = require('electron');
+    
+    const statusMessages = {
+      'sidecar-not-started': 'Starting...',
+      'sidecar-script-missing': 'Error',
+      'loading-vosk-model': 'Loading speech model...',
+      'downloading-vosk-model': 'Downloading speech model...',
+      'model-ready': 'Ready',
+      'model-error': 'Error loading model',
+      'running': 'Ready'
+    };
+
+    let currentProgress = 0;
+    const bar = document.getElementById('bar');
+    const statusText = document.getElementById('status-text');
+    const motto = document.getElementById('motto');
+
+    // Listen to sidecar status updates
+    ipcRenderer.on('sidecar:status', (event, status) => {
+      if (!status) return;
+
+      // Get status message
+      const message = statusMessages[status.statusMessage] || status.statusMessage || '';
+      
+      // Update status text
+      if (message) {
+        statusText.textContent = message;
+      }
+      
+      // Update progress bar based on download progress or status
+      let targetProgress = 0;
+      
+      if (status.statusMessage === 'downloading-vosk-model' && status.downloadTotalBytes > 0) {
+        // Show download progress (0-90%)
+        targetProgress = Math.round((status.downloadBytes / status.downloadTotalBytes) * 90);
+      } else if (status.statusMessage === 'loading-vosk-model') {
+        // Show loading state (90-100%)
+        targetProgress = 90;
+      } else if (status.statusMessage === 'model-ready' || status.statusMessage === 'running' || status.processRunning) {
+        // Complete
+        targetProgress = 100;
+      } else if (status.statusMessage === 'sidecar-not-started') {
+        // Just started
+        targetProgress = Math.max(5, currentProgress);
+      }
+      
+      // Smoothly transition to target progress
+      if (targetProgress > currentProgress) {
+        currentProgress = targetProgress;
+        bar.style.width = currentProgress + '%';
+      }
+    });
+
     (function(){
       // Start animation after slight delay so everything appears smooth
-      const motto = document.getElementById('motto');
-      const bar = document.getElementById('bar');
-      setTimeout(()=>{
-        bar.style.width = '100%';
-      }, 200);
       setTimeout(()=>{
         motto.classList.add('revealed');
       }, 700);
       // Don't fade out - let tryCloseSplashScreen() handle closing when windows are ready
-      // (removed: setTimeout(...splash-fade...) )
     })();
   </script>
 </body>

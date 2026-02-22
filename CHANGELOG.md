@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.18 - 2026-02-22
+
+- fix: add splashscreen real-time sidecar download progress (0-100%)
+- fix: register liturgia:// protocol handler for deep-link authentication
+- fix: add deep-link auth listener to receive tokens from protocol handler
+- fix: magic link auth now supports both app (deep link) and web (cookie) flows
+- fix: verify token database lookup and creation in auth.db tokens table
+- fix: list-tokens now returns all sessions when authenticating via magic link
+
 ## 3.0.17 - 2026-02-22
 
 - fix: enable magic link auto-signin on web and app with full token list visibility

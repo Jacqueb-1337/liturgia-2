@@ -9,6 +9,22 @@ const secure = {
   async setToken(token) { try { return await ipcRenderer.invoke('secure-set-token', token); } catch (e) { console.error('secure set token error', e); return false; } },
   async deleteToken() { try { return await ipcRenderer.invoke('secure-delete-token'); } catch (e) { console.error('secure delete token error', e); return false; } }
 };
+
+// Handle deep link authentication (when user clicks magic link from email)
+ipcRenderer.on('deep-link:auth-token', async (event, data) => {
+  try {
+    if (data && data.token) {
+      console.log('[renderer] Received deep link auth token, signing in...');
+      // Save token and trigger sign-in flow
+      await secure.setToken(data.token);
+      // Reload the page or show the UI to reflect the new auth state
+      window.location.reload();
+    }
+  } catch (err) {
+    console.error('[renderer] Failed to handle deep link auth token', err);
+  }
+});
+
 let fetch;
 if (typeof window !== 'undefined' && window.fetch) {
   fetch = window.fetch.bind(window);
@@ -2839,7 +2855,7 @@ async function createSetupModal() {
     document.getElementById('setup-status').textContent = 'Sending magic link...';
     try {
       const res = await fetch(server.replace(/\/$/, '') + '/auth/magic-link.php', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}`
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `email=${encodeURIComponent(email)}&source=app`
       });
       const text = await res.text();
       let json = null;
