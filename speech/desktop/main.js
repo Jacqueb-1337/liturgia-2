@@ -229,19 +229,43 @@ function startTranscriptionSidecar() {
     return false;
   }
 
+  // Build list of Python candidates with system paths on Windows
   const venvPython = path.join(ROOT, '.venv', 'Scripts', 'python.exe');
-  const candidates = [
+  let candidates = [
     { cmd: fs.existsSync(venvPython) ? venvPython : '', args: [] },
-    { cmd: 'python', args: [] },
-    { cmd: 'py', args: ['-3'] },
-  ].filter((entry) => !!entry.cmd);
+  ];
+
+  // On Windows, also check common installation directories
+  if (process.platform === 'win32') {
+    const commonPaths = [
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python312', 'python.exe'),
+      path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Python', 'Python311', 'python.exe'),
+      path.join(process.env.ProgramFiles || '', 'Python312', 'python.exe'),
+      path.join(process.env.ProgramFiles || '', 'Python311', 'python.exe'),
+      'C:\\Python312\\python.exe',
+      'C:\\Python311\\python.exe',
+    ];
+    candidates = candidates.concat(
+      commonPaths.filter(p => fs.existsSync(p)).map(cmd => ({ cmd, args: [] }))
+    );
+  }
+
+  // Add PATH-based resolution with shell: true for packaged apps
+  candidates = candidates.concat([
+    { cmd: 'python', args: [], shell: true },
+    { cmd: 'python3', args: [], shell: true },
+    { cmd: 'py', args: ['-3'], shell: true },
+  ]);
+
+  candidates = candidates.filter((entry) => !!entry.cmd);
 
   for (const candidate of candidates) {
     try {
+      console.log(`[sidecar] Attempting to spawn: ${candidate.cmd} ${(candidate.args || []).join(' ')} (cwd: ${ROOT})`);
       const child = spawn(candidate.cmd, [...candidate.args, scriptPath, '--host', HOST, '--port', String(SIDECAR_PORT)], {
         cwd: ROOT,
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: false,
+        shell: candidate.shell || false,
         env: { ...process.env, VOSK_MODEL_SIZE: sidecarState.modelSize },
       });
 
@@ -315,13 +339,14 @@ function startTranscriptionSidecar() {
   }
 
   console.error('[sidecar] could not start python sidecar. Ensure Python and backend dependencies are installed.');
+  console.error('[sidecar] Python not found — ensure Python 3.7+ is installed and accessible in PATH.');
   updateSidecarStatus({
     processRunning: false,
     managedProcess: false,
     portOpen: false,
     modelReady: false,
     statusMessage: 'sidecar-start-failed',
-    lastError: 'Could not spawn Python sidecar',
+    lastError: 'Python not found in PATH. Ensure Python 3.7+ is installed and accessible. Attempted: python, python3, py and common installation paths.',
     restarting: false,
   });
   return false;
