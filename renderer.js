@@ -675,6 +675,7 @@ let previewStyles = { verseNumber: '', verseText: '', verseReference: '' };
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
+let keybinds = {}; // Loaded from settings
 
 // Listen for import notifications from main process
 ipcRenderer.on('songs-imported', (event, info) => {
@@ -713,6 +714,32 @@ async function loadAndApplySettings() {
     previewStyles = settings.previewStyles;
     applyPreviewStyles();
   }
+  // Load keybinds with defaults
+  const defaultKeybinds = {
+    'next-verse': 'ArrowRight',
+    'prev-verse': 'ArrowLeft',
+    'go-live': 'Enter',
+    'select-chorus-1': 'Alt+c',
+    'select-verse-1': 'Alt+1',
+    'select-verse-2': 'Alt+2',
+    'select-verse-3': 'Alt+3',
+    'select-verse-4': 'Alt+4',
+    'select-verse-5': 'Alt+5',
+    'select-verse-6': 'Alt+6',
+    'select-verse-7': 'Alt+7',
+    'select-verse-8': 'Alt+8',
+    'select-verse-9': 'Alt+9',
+    'select-chorus-2': '',
+    'select-chorus-3': '',
+    'select-chorus-4': '',
+    'select-chorus-5': '',
+    'select-chorus-6': '',
+    'select-chorus-7': '',
+    'select-chorus-8': '',
+    'select-chorus-9': ''
+  };
+  keybinds = { ...defaultKeybinds, ...(settings.keybinds || {}) };
+  console.log('[renderer] Keybinds loaded:', keybinds);
 }
 
 function applyPreviewStyles() {
@@ -1407,18 +1434,31 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Keyboard navigation when the verse selection is focused (or body) — allow left/right arrows
+  // Keyboard navigation - use keybinds system
   window.addEventListener('keydown', (e) => {
-    // Ignore when typing in an input/textarea
-    const active = document.activeElement;
-    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
+    // Check for go-live keybind first, before text input check (should work globally)
+    if (matchesKeybind(keybinds['go-live'], e)) {
+      e.preventDefault();
+      handleVerseDoubleClick(); // Calls the same logic as "Go Live" button
+      return;
+    }
     
-    // Check if we're on a schedule song verse
+    // Check current state
+    const isInSongsTab = currentTab === 'songs';
+    const songDisplay = document.getElementById('song-display');
+    const isSongDisplayOpen = selectedSongIndices.length > 0 && songDisplay && songDisplay.style.display !== 'none';
+    const active = document.activeElement;
+    
+    // Don't intercept other keybinds when text editing (must be after go-live check)
+    const isTextInput = active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
+    if (isTextInput) return;
+    
+    // Check if we're on a schedule song verse (these have their own focus)
     const isSongScheduleVerse = active && active.classList.contains('schedule-verse-item') && 
                                   focusedScheduleItem && focusedScheduleItem.type === 'song-verse';
     
+    // Handle schedule song verse navigation
     if (isSongScheduleVerse && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      // Schedule song verse navigation
       e.preventDefault();
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
         navigateScheduleSongVerse(-1);
@@ -1428,35 +1468,62 @@ window.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     
-    // Ignore if focus is on schedule items (they have their own handlers)
-    if (active && (active.closest('.schedule-item-header') || active.closest('.schedule-verse-item'))) return;
+    // Ignore if focus is on other schedule items (they have their own handlers)
+    if (active && (active.closest('.schedule-item-header') || (active.closest('.schedule-verse-item') && !isSongScheduleVerse))) return;
     
-    // Check if we should handle song navigation
-    const isInSongsTab = currentTab === 'songs';
-    const songDisplay = document.getElementById('song-display');
-    const isSongDisplayOpen = selectedSongIndices.length > 0 && songDisplay && songDisplay.style.display !== 'none';
-    
-    if (isInSongsTab && isSongDisplayOpen && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      // Song verse navigation
-      e.preventDefault();
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    // Check keybinds in songs tab
+    if (isInSongsTab && isSongDisplayOpen) {
+      // Previous verse
+      if (matchesKeybind(keybinds['prev-verse'], e)) {
+        e.preventDefault();
         selectPrevSongVerse();
-      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        return;
+      }
+      
+      // Next verse
+      if (matchesKeybind(keybinds['next-verse'], e)) {
+        e.preventDefault();
         selectNextSongVerse();
+        return;
       }
-    } else if (isInSongsTab && isSongDisplayOpen && e.key === 'Enter') {
-      // Go live with selected song verse
-      e.preventDefault();
-      if (selectedSongVerseIndex !== null) {
-        handleSongVerseDoubleClick(selectedSongVerseIndex);
-      }
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      // Bible verse navigation
-      e.preventDefault();
-      if (e.key === 'ArrowLeft') {
+      
+      // Verse selection keybinds (Alt+1-9)
+      if (matchesKeybind(keybinds['select-verse-1'], e)) { e.preventDefault(); selectSongVerseByNumber(1); return; }
+      if (matchesKeybind(keybinds['select-verse-2'], e)) { e.preventDefault(); selectSongVerseByNumber(2); return; }
+      if (matchesKeybind(keybinds['select-verse-3'], e)) { e.preventDefault(); selectSongVerseByNumber(3); return; }
+      if (matchesKeybind(keybinds['select-verse-4'], e)) { e.preventDefault(); selectSongVerseByNumber(4); return; }
+      if (matchesKeybind(keybinds['select-verse-5'], e)) { e.preventDefault(); selectSongVerseByNumber(5); return; }
+      if (matchesKeybind(keybinds['select-verse-6'], e)) { e.preventDefault(); selectSongVerseByNumber(6); return; }
+      if (matchesKeybind(keybinds['select-verse-7'], e)) { e.preventDefault(); selectSongVerseByNumber(7); return; }
+      if (matchesKeybind(keybinds['select-verse-8'], e)) { e.preventDefault(); selectSongVerseByNumber(8); return; }
+      if (matchesKeybind(keybinds['select-verse-9'], e)) { e.preventDefault(); selectSongVerseByNumber(9); return; }
+      
+      // Chorus selection keybinds (Alt+C and Alt+2-9)
+      if (matchesKeybind(keybinds['select-chorus-1'], e)) { e.preventDefault(); selectSongChorusByNumber(1); return; }
+      if (matchesKeybind(keybinds['select-chorus-2'], e)) { e.preventDefault(); selectSongChorusByNumber(2); return; }
+      if (matchesKeybind(keybinds['select-chorus-3'], e)) { e.preventDefault(); selectSongChorusByNumber(3); return; }
+      if (matchesKeybind(keybinds['select-chorus-4'], e)) { e.preventDefault(); selectSongChorusByNumber(4); return; }
+      if (matchesKeybind(keybinds['select-chorus-5'], e)) { e.preventDefault(); selectSongChorusByNumber(5); return; }
+      if (matchesKeybind(keybinds['select-chorus-6'], e)) { e.preventDefault(); selectSongChorusByNumber(6); return; }
+      if (matchesKeybind(keybinds['select-chorus-7'], e)) { e.preventDefault(); selectSongChorusByNumber(7); return; }
+      if (matchesKeybind(keybinds['select-chorus-8'], e)) { e.preventDefault(); selectSongChorusByNumber(8); return; }
+      if (matchesKeybind(keybinds['select-chorus-9'], e)) { e.preventDefault(); selectSongChorusByNumber(9); return; }
+    }
+    
+    // Check keybinds in Bible tab
+    if (!isInSongsTab) {
+      // Previous verse
+      if (matchesKeybind(keybinds['prev-verse'], e)) {
+        e.preventDefault();
         selectPrevVerse(e.shiftKey);
-      } else {
+        return;
+      }
+      
+      // Next verse
+      if (matchesKeybind(keybinds['next-verse'], e)) {
+        e.preventDefault();
         selectNextVerse(e.shiftKey);
+        return;
       }
     }
   });
@@ -2623,6 +2690,19 @@ async function handleVerseDoubleClick(i) {
   saveLastSelectionToSettings().catch(err => console.error('Failed to persist live selection', err));
 }
 
+// Update search box when navigating verses with arrow keys
+function updateSearchBoxForVerse(verseIndex) {
+  const verse = allVerses[verseIndex];
+  if (!verse || !verse.key) return;
+  
+  const searchInput = document.getElementById('search-autocomplete-input');
+  if (searchInput) {
+    searchInput.value = verse.key;
+    // Trigger the search box update event so it highlights the match
+    searchInput.dispatchEvent(new Event('input'));
+  }
+}
+
 function selectNextVerse(extendSelection = false) {
   if (!selectedIndices.length) {
     selectedIndices = [0];
@@ -2663,11 +2743,13 @@ function selectNextVerse(extendSelection = false) {
   // Re-render after scroll to ensure the item is visible
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
   
-  // Focus the verse item - use a slightly longer timeout to ensure rendering is complete
-  setTimeout(() => {
-    const el = document.querySelector(`.verse-item[data-index="${targetIndex}"]`);
-    if (el) el.focus();
-  }, 5);
+  // Blur any focused element to ensure global keyboard handler works properly
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
+  
+  // Update search box with new verse reference
+  updateSearchBoxForVerse(targetIndex);
 }
 
 function selectPrevVerse(extendSelection = false) {
@@ -2710,11 +2792,14 @@ function selectPrevVerse(extendSelection = false) {
   // Re-render after scroll to ensure the item is visible
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
   
-  // Focus the verse item - use a slightly longer timeout to ensure rendering is complete
+  // Blur any focused element to ensure global keyboard handler works properly
   setTimeout(() => {
     const el = document.querySelector(`.verse-item[data-index="${targetIndex}"]`);
     if (el) el.focus();
   }, 5);
+  
+  // Update search box with new verse reference
+  updateSearchBoxForVerse(targetIndex);
 }
 
 // Schedule navigation functions
@@ -4747,6 +4832,11 @@ function selectNextSongVerse() {
   
   displaySelectedSong();
   updatePreviewFromSongVerse(selectedSongVerseIndex);
+  
+  // Blur any focused element to ensure global keyboard handler works properly
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
 }
 
 function selectPrevSongVerse() {
@@ -4762,6 +4852,80 @@ function selectPrevSongVerse() {
   
   displaySelectedSong();
   updatePreviewFromSongVerse(selectedSongVerseIndex);
+  
+  // Blur any focused element to ensure global keyboard handler works properly
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
+}
+
+// Check if a keybind string matches the current key event
+function matchesKeybind(keybindStr, e) {
+  if (!keybindStr) return false;
+  
+  const parts = keybindStr.split('+');
+  const hasCtrl = parts.includes('Ctrl');
+  const hasShift = parts.includes('Shift');
+  const hasAlt = parts.includes('Alt');
+  
+  // Check modifiers
+  if ((e.ctrlKey || e.metaKey) !== hasCtrl) return false;
+  if (e.shiftKey !== hasShift) return false;
+  if (e.altKey !== hasAlt) return false;
+  
+  // Find the main key (not a modifier)
+  const modifiers = ['Ctrl', 'Shift', 'Alt'];
+  const mainKeys = parts.filter(p => !modifiers.includes(p));
+  
+  if (mainKeys.length === 0) return false;
+  
+  // Check if the key matches (case insensitive for all keys)
+  return mainKeys.some(k => k.toLowerCase() === e.key.toLowerCase());
+}
+
+// Select a verse by index (1-based input, 0-based internal)
+function selectSongVerseByNumber(verseNum) {
+  if (currentTab !== 'songs') return;
+  if (selectedSongIndices.length === 0) return;
+  
+  const song = allSongs[selectedSongIndices[0]];
+  if (!song) return;
+  
+  // Count total verses in song
+  let totalVerses = 0;
+  song.lyrics.forEach(section => {
+    totalVerses += section.text.split(/\n\n+/).length;
+  });
+  
+  if (verseNum >= 1 && verseNum <= totalVerses) {
+    selectedSongVerseIndex = verseNum - 1;
+    displaySelectedSong();
+    updatePreviewFromSongVerse(selectedSongVerseIndex);
+  }
+}
+
+// Select a chorus by number (1-based input, 0-based internal)
+function selectSongChorusByNumber(chorusNum) {
+  if (currentTab !== 'songs') return;
+  if (selectedSongIndices.length === 0) return;
+  
+  const song = allSongs[selectedSongIndices[0]];
+  if (!song) return;
+  
+  // Find chorus sections
+  const chorusSections = [];
+  song.lyrics.forEach((section, idx) => {
+    if (section.section.toLowerCase().includes('chorus')) {
+      chorusSections.push(idx);
+    }
+  });
+  
+  if (chorusNum >= 1 && chorusNum <= chorusSections.length) {
+    const sectionIdx = chorusSections[chorusNum - 1];
+    selectedSongVerseIndex = sectionIdx;
+    displaySelectedSong();
+    updatePreviewFromSongVerse(selectedSongVerseIndex);
+  }
 }
 
 // Song search
@@ -5462,8 +5626,9 @@ async function saveSongFromEditor() {
     renderSongList(allSongs);
     closeSongEditor();
     
-    // Select the song
-    selectedSongIndices = [allSongs.length - 1];
+    // Select the song - use editingIndex if available (editing), otherwise new song (last index)
+    const songIndexToSelect = editingIndex !== null && editingIndex !== '' ? parseInt(editingIndex) : allSongs.length - 1;
+    selectedSongIndices = [songIndexToSelect];
     displaySelectedSong();
     renderSongList(allSongs);
   } catch (err) {

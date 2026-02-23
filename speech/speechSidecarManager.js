@@ -245,8 +245,9 @@ class SpeechSidecarManager extends EventEmitter {
             for (const line of lines) {
               const matches = line.match(/\s+(\d+)\s*$/);
               if (matches && matches[1]) {
-                const pid = matches[1];
-                if (pid !== process.pid.toString()) { // Don't kill ourselves
+                const pid = parseInt(matches[1], 10);
+                // Validate: PID must be > 0 and not our own process
+                if (pid > 0 && pid !== process.pid) {
                   this.addLog(`Found process ${pid} using port ${this.port}, terminating...`);
                   try {
                     await execAsync(`taskkill /PID ${pid} /F /T`, { timeout: 2000 });
@@ -274,13 +275,17 @@ class SpeechSidecarManager extends EventEmitter {
           if (stdout && stdout.trim()) {
             const pids = stdout.trim().split('\n').filter(p => p && p !== process.pid.toString());
             for (const pid of pids) {
-              this.addLog(`Found process ${pid} using port ${this.port}, terminating...`);
-              try {
-                await execAsync(`kill -9 ${pid}`, { timeout: 2000 });
-                this.addLog(`Successfully terminated process ${pid}`);
-                await new Promise(resolve => setTimeout(resolve, 300));
-              } catch (killErr) {
-                this.addLog(`Failed to kill process ${pid}: ${killErr.message}`);
+              const pidNum = parseInt(pid, 10);
+              // Validate: PID must be > 0
+              if (pidNum > 0) {
+                this.addLog(`Found process ${pidNum} using port ${this.port}, terminating...`);
+                try {
+                  await execAsync(`kill -9 ${pidNum}`, { timeout: 2000 });
+                  this.addLog(`Successfully terminated process ${pidNum}`);
+                  await new Promise(resolve => setTimeout(resolve, 300));
+                } catch (killErr) {
+                  this.addLog(`Failed to kill process ${pidNum}: ${killErr.message}`);
+                }
               }
             }
           }

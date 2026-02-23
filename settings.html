@@ -300,7 +300,70 @@
     /* Ensure select matches input sizing and spacing */
     #default-display { min-width:180px; height:40px; box-sizing:border-box }
 
-  </style>
+    /* Keybinds styling */
+    .keybind-row {
+      display: flex;
+      align-items: center;
+      gap: 1em;
+      padding: 1em;
+      background: #f5f5f5;
+      border-radius: 6px;
+    }
+    body.dark-theme .keybind-row {
+      background: #333;
+    }
+    .keybind-label {
+      flex: 1;
+      font-weight: 500;
+      color: #333;
+    }
+    body.dark-theme .keybind-label {
+      color: #eee;
+    }
+    .keybind-input {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      min-width: 150px;
+      font-family: monospace;
+      background: #fff;
+      color: #333;
+    }
+    body.dark-theme .keybind-input {
+      background: #444;
+      color: #eee;
+      border-color: #555;
+    }
+    .keybind-input:focus {
+      outline: none;
+      border-color: #2196F3;
+      box-shadow: 0 0 4px rgba(33, 150, 243, 0.3);
+    }
+    .keybind-description {
+      font-size: 0.9em;
+      color: #666;
+      margin-top: 0.25em;
+    }
+    body.dark-theme .keybind-description {
+      color: #aaa;
+    }
+
+    /* Panel descriptions styling */
+    .settings-panel > p {
+      color: #666;
+    }
+    body.dark-theme .settings-panel > p {
+      color: #aaa;
+    }
+
+    /* Keybinds category styling */
+    #keybinds-list h3 {
+      color: #333;
+    }
+    body.dark-theme #keybinds-list h3 {
+      color: #eee;
+    }
+
   </style>
 </head>
 <body>
@@ -312,6 +375,7 @@
       <button data-panel="about">About</button>
       <button data-panel="relay">Cloud Relay</button>
       <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
+      <button data-panel="keybinds">Keybinds</button>
     </div>
     <div class="settings-content">
       <div class="settings-panel active" id="panel-general">
@@ -509,6 +573,18 @@
         <div id="bibles-list">
           <div class="bible-loading">Loading Bible versions...</div>
         </div>
+      </div>
+      
+      <div class="settings-panel" id="panel-keybinds">
+        <h2>Keyboard Shortcuts</h2>
+        <p style="margin-bottom: 1.5em;">Configure keyboard shortcuts for navigation and common actions.</p>
+        
+        <div id="keybinds-list" style="display: flex; flex-direction: column; gap: 1.5em;">
+          <!-- Keybinds will be loaded here -->
+        </div>
+        
+        <button class="save-settings btn" data-panel="keybinds" style="margin-top: 1.5em;">Save</button>
+        <span class="save-status" data-panel="keybinds"></span>
       </div>
     </div>
   </div>

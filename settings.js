@@ -240,33 +240,369 @@ function decodeJwtPayload(token) {
 }
 
 // Save settings from any panel
+// Save button now just provides feedback (actual saving is atomic and automatic)
 document.querySelectorAll('.save-settings').forEach(btn => {
   btn.addEventListener('click', async () => {
-    // Back-compat: username field might not exist anymore
-    const usernameEl = document.getElementById('username');
-    const username = usernameEl ? usernameEl.value : undefined;
-    const themeEl = document.getElementById('theme');
-    const theme = themeEl ? themeEl.value : '';
-    const darkEl = document.getElementById('dark-theme');
-    const darkTheme = darkEl ? !!darkEl.checked : false;
-    const defaultDisplayEl = document.getElementById('default-display');
-    const defaultDisplay = defaultDisplayEl ? defaultDisplayEl.value : '';
-    
-    // Use server-side atomic update to avoid races
-    const patch = { theme, darkTheme, defaultDisplay };
-    if (username !== undefined) patch.username = username;
-    // Include auto-update preference
-    const auEl = document.getElementById('auto-update-startup');
-    if (auEl) patch.autoCheckUpdates = !!auEl.checked;
-    await ipcRenderer.invoke('update-settings', patch);
-    applyDarkTheme(darkTheme);
-    // Show status only for the current panel
     const panel = btn.getAttribute('data-panel');
     const status = document.querySelector('.save-status[data-panel="' + panel + '"]');
+    
+    // Just show saved status - actual saving is happening automatically via atomic save
     status.textContent = 'Saved!';
     setTimeout(() => status.textContent = '', 1500);
   });
 });
+
+// Initialize keybinds on settings load
+async function loadKeybinds() {
+  const settings = await ipcRenderer.invoke('load-settings');
+  const keybindsList = document.getElementById('keybinds-list');
+  keybindsList.innerHTML = '';
+  
+  // Default keybinds structure
+  const defaultKeybinds = {
+    'next-verse': 'ArrowRight',
+    'prev-verse': 'ArrowLeft',
+    'go-live': 'Enter',
+    'select-chorus-1': 'Alt+c',
+    'select-verse-1': 'Alt+1',
+    'select-verse-2': 'Alt+2',
+    'select-verse-3': 'Alt+3',
+    'select-verse-4': 'Alt+4',
+    'select-verse-5': 'Alt+5',
+    'select-verse-6': 'Alt+6',
+    'select-verse-7': 'Alt+7',
+    'select-verse-8': 'Alt+8',
+    'select-verse-9': 'Alt+9',
+    'select-chorus-2': '',
+    'select-chorus-3': '',
+    'select-chorus-4': '',
+    'select-chorus-5': '',
+    'select-chorus-6': '',
+    'select-chorus-7': '',
+    'select-chorus-8': '',
+    'select-chorus-9': ''
+  };
+  
+  const saved = settings.keybinds || {};
+  const keybinds = { ...defaultKeybinds, ...saved };
+  
+  // Organize keybinds by category for better UI
+  const categories = {
+    'Navigation': ['prev-verse', 'next-verse', 'go-live'],
+    'Song Selection': ['select-verse-1', 'select-verse-2', 'select-verse-3', 'select-verse-4', 'select-verse-5', 'select-verse-6', 'select-verse-7', 'select-verse-8', 'select-verse-9', 'select-chorus-1', 'select-chorus-2', 'select-chorus-3', 'select-chorus-4', 'select-chorus-5', 'select-chorus-6', 'select-chorus-7', 'select-chorus-8', 'select-chorus-9']
+  };
+  
+  // Display keybinds by category
+  for (const [category, bindIds] of Object.entries(categories)) {
+    const categoryDiv = document.createElement('div');
+    categoryDiv.style.marginBottom = '2em';
+    
+    const categoryTitle = document.createElement('h3');
+    categoryTitle.textContent = category;
+    categoryTitle.style.marginBottom = '1em';
+    categoryTitle.style.fontSize = '1.1em';
+    categoryTitle.style.fontWeight = '600';
+    categoryTitle.style.color = '#333';
+    categoryDiv.appendChild(categoryTitle);
+    
+    const categoryBody = document.createElement('div');
+    categoryBody.style.display = 'flex';
+    categoryBody.style.flexDirection = 'column';
+    categoryBody.style.gap = '0.75em';
+    
+    bindIds.forEach(bindId => {
+      if (keybinds.hasOwnProperty(bindId)) {
+        const row = document.createElement('div');
+        row.className = 'keybind-row';
+        row.setAttribute('data-bind-id', bindId);
+        
+        // Format label nicely
+        const labelText = bindId
+          .split('-')
+          .map((word, i) => i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word)
+          .join(' ');
+        
+        const labelEl = document.createElement('div');
+        labelEl.className = 'keybind-label';
+        labelEl.textContent = labelText;
+        
+        const input = document.createElement('input');
+        input.className = 'keybind-input';
+        input.type = 'text';
+        input.value = keybinds[bindId];
+        input.placeholder = 'Click to set...';
+        input.readOnly = true;
+        input.setAttribute('data-bind-id', bindId);
+        
+        // Record keybind on click
+        input.addEventListener('click', (e) => {
+          e.stopPropagation();
+          recordKeybind(input);
+        });
+        
+        row.appendChild(labelEl);
+        row.appendChild(input);
+        categoryBody.appendChild(row);
+      }
+    });
+    
+    categoryDiv.appendChild(categoryBody);
+    keybindsList.appendChild(categoryDiv);
+  }
+}
+
+// Record a keybind by listening for key/mouse events
+function recordKeybind(inputElement) {
+  inputElement.value = '';
+  inputElement.placeholder = 'Press any key or button...';
+  
+  const pressedKeys = new Set();
+  const pressedButtons = new Set();
+  let recordingTimeout;
+  
+  // Track keyboard keys
+  const keydownHandler = (e) => {
+    // Allow ESC to cancel recording
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelRecording();
+      return;
+    }
+    
+    e.preventDefault();
+    e.stopPropagation();
+    pressedKeys.add(e.key);
+    updateInputDisplay();
+  };
+  
+  const keyupHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    pressedKeys.delete(e.key);
+    checkIfDone();
+  };
+  
+  // Track mouse buttons
+  const mousedownHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    let buttonName = '';
+    switch (e.button) {
+      case 0: buttonName = 'MouseLeft'; break;
+      case 1: buttonName = 'MouseMiddle'; break;
+      case 2: buttonName = 'MouseRight'; break;
+      case 3: buttonName = 'MouseButton4'; break;
+      case 4: buttonName = 'MouseButton5'; break;
+      default: buttonName = `MouseButton${e.button}`;
+    }
+    
+    pressedButtons.add(buttonName);
+    updateInputDisplay();
+  };
+  
+  const mouseupHandler = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    let buttonName = '';
+    switch (e.button) {
+      case 0: buttonName = 'MouseLeft'; break;
+      case 1: buttonName = 'MouseMiddle'; break;
+      case 2: buttonName = 'MouseRight'; break;
+      case 3: buttonName = 'MouseButton4'; break;
+      case 4: buttonName = 'MouseButton5'; break;
+      default: buttonName = `MouseButton${e.button}`;
+    }
+    
+    pressedButtons.delete(buttonName);
+    checkIfDone();
+  };
+  
+  const updateInputDisplay = () => {
+    const combo = buildKeybindString();
+    inputElement.value = combo;
+  };
+  
+  const buildKeybindString = () => {
+    const parts = [];
+    
+    // Add modifier keys if pressed
+    if (pressedKeys.has('Control') || pressedKeys.has('Meta')) {
+      parts.push('Ctrl');
+    }
+    if (pressedKeys.has('Shift')) {
+      parts.push('Shift');
+    }
+    if (pressedKeys.has('Alt')) {
+      parts.push('Alt');
+    }
+    
+    // Add mouse buttons
+    pressedButtons.forEach(btn => parts.push(btn));
+    
+    // Add regular keys (filter out modifiers)
+    const modifiers = ['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'NumLock'];
+    pressedKeys.forEach(key => {
+      if (!modifiers.includes(key)) {
+        const displayKey = key.length === 1 ? key.toUpperCase() : key;
+        parts.push(displayKey);
+      }
+    });
+    
+    return parts.length > 0 ? parts.join('+') : '';
+  };
+  
+  const checkIfDone = () => {
+    // If all keys/buttons are released, save and stop recording
+    if (pressedKeys.size === 0 && pressedButtons.size === 0) {
+      clearTimeout(recordingTimeout);
+      stopRecording();
+    } else {
+      // Reset timeout when keys are still pressed
+      clearTimeout(recordingTimeout);
+    }
+  };
+  
+  const cancelRecording = () => {
+    inputElement.value = '';
+    stopRecording();
+  };
+  
+  const stopRecording = () => {
+    document.removeEventListener('keydown', keydownHandler, true);
+    document.removeEventListener('keyup', keyupHandler, true);
+    document.removeEventListener('mousedown', mousedownHandler, true);
+    document.removeEventListener('mouseup', mouseupHandler, true);
+    
+    inputElement.placeholder = 'Click to set...';
+    if (!inputElement.value) {
+      inputElement.value = '';
+    }
+  };
+  
+  // Start listening
+  document.addEventListener('keydown', keydownHandler, true);
+  document.addEventListener('keyup', keyupHandler, true);
+  document.addEventListener('mousedown', mousedownHandler, true);
+  document.addEventListener('mouseup', mouseupHandler, true);
+  
+  // Auto-stop after 30 seconds of no activity
+  recordingTimeout = setTimeout(stopRecording, 30000);
+}
+
+// Add keybinds button listener to load on tab switch
+document.addEventListener('DOMContentLoaded', () => {
+  const keybindsButton = document.querySelector('[data-panel="keybinds"]');
+  if (keybindsButton) {
+    keybindsButton.addEventListener('click', loadKeybinds);
+  }
+  
+  // Setup atomic saving for all settings
+  setupAtomicSaving();
+});
+
+// Setup immediate atomic saving for all settings
+function setupAtomicSaving() {
+  let savingTimeout = null;
+  
+  // Helper to save settings atomically
+  const saveCurrentSettings = async () => {
+    const patch = {};
+    
+    // Collect all current settings
+    const usernameEl = document.getElementById('username');
+    if (usernameEl) patch.username = usernameEl.value;
+    
+    const themeEl = document.getElementById('theme');
+    if (themeEl) patch.theme = themeEl.value;
+    
+    const darkEl = document.getElementById('dark-theme');
+    if (darkEl) {
+      patch.darkTheme = !!darkEl.checked;
+      applyDarkTheme(!!darkEl.checked);
+    }
+    
+    const defaultDisplayEl = document.getElementById('default-display');
+    if (defaultDisplayEl) patch.defaultDisplay = defaultDisplayEl.value;
+    
+    const auEl = document.getElementById('auto-update-startup');
+    if (auEl) patch.autoCheckUpdates = !!auEl.checked;
+    
+    // Collect keybinds
+    const inputs = document.querySelectorAll('#keybinds-list .keybind-input');
+    if (inputs.length > 0) {
+      const keybinds = {};
+      inputs.forEach(input => {
+        const bindId = input.getAttribute('data-bind-id');
+        if (bindId) keybinds[bindId] = input.value;
+      });
+      patch.keybinds = keybinds;
+    }
+    
+    // Save atomically
+    try {
+      await ipcRenderer.invoke('update-settings', patch);
+    } catch (err) {
+      console.error('Failed to auto-save settings:', err);
+    }
+  };
+  
+  // Setup listeners for theme dropdown
+  const themeEl = document.getElementById('theme');
+  if (themeEl) {
+    themeEl.addEventListener('change', () => {
+      clearTimeout(savingTimeout);
+      savingTimeout = setTimeout(saveCurrentSettings, 500);
+    });
+  }
+  
+  // Setup listeners for dark theme checkbox
+  const darkEl = document.getElementById('dark-theme');
+  if (darkEl) {
+    darkEl.addEventListener('change', () => {
+      clearTimeout(savingTimeout);
+      savingTimeout = setTimeout(saveCurrentSettings, 500);
+    });
+  }
+  
+  // Setup listeners for default display dropdown
+  const defaultDisplayEl = document.getElementById('default-display');
+  if (defaultDisplayEl) {
+    defaultDisplayEl.addEventListener('change', () => {
+      clearTimeout(savingTimeout);
+      savingTimeout = setTimeout(saveCurrentSettings, 500);
+    });
+  }
+  
+  // Setup listeners for auto-update checkbox
+  const auEl = document.getElementById('auto-update-startup');
+  if (auEl) {
+    auEl.addEventListener('change', () => {
+      clearTimeout(savingTimeout);
+      savingTimeout = setTimeout(saveCurrentSettings, 500);
+    });
+  }
+  
+  // Setup listeners for keybind inputs (after they're loaded)
+  const observeKeybindsTab = () => {
+    const keybindInputs = document.querySelectorAll('#keybinds-list .keybind-input');
+    if (keybindInputs.length > 0) {
+      keybindInputs.forEach(input => {
+        // Save when recording is done (value changes)
+        input.addEventListener('blur', () => {
+          clearTimeout(savingTimeout);
+          savingTimeout = setTimeout(saveCurrentSettings, 500);
+        });
+      });
+    } else {
+      // Recheck in a moment if keybinds haven't loaded yet
+      setTimeout(observeKeybindsTab, 100);
+    }
+  };
+  observeKeybindsTab();
+}
 
 // Remote Control UI removed in favor of AI tab.
 
