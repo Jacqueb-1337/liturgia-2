@@ -18,8 +18,20 @@ function normalizeModelSize(value) {
   return ALLOWED_MODEL_SIZES.has(next) ? next : 'small';
 }
 
-function getModelDir(rootDir, size) {
+function getModelDir(rootDir, size, userDataDir) {
   const modelDirName = MODEL_DIR_BY_SIZE[normalizeModelSize(size)] || MODEL_DIR_BY_SIZE.small;
+  
+  // If app is installed in Program Files, use AppData for models (writable)
+  const isWindows = process.platform === 'win32';
+  if (isWindows && rootDir.includes('Program Files')) {
+    if (!userDataDir) {
+      // Fallback to environment variable if userDataDir not provided
+      userDataDir = path.join(process.env.APPDATA || process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE, 'AppData', 'Local'), 'Liturgia');
+    }
+    return path.join(userDataDir, 'speech', 'models', modelDirName);
+  }
+  
+  // Default: models in installation directory (or AppData on new installs)
   return path.join(rootDir, 'backend', 'models', modelDirName);
 }
 
@@ -131,6 +143,7 @@ class SpeechSidecarManager extends EventEmitter {
       rootDir = rootDir.replace(path.sep + 'app.asar' + path.sep, path.sep + 'app.asar.unpacked' + path.sep);
     }
     this.rootDir = rootDir;
+    this.userDataDir = options.userDataDir; // Optional: for redirecting models in Program Files
     this.modelSize = normalizeModelSize(options.modelSize || 'small');
     this.sidecarProcess = null;
     this.expectedExitPid = null;
@@ -156,7 +169,7 @@ class SpeechSidecarManager extends EventEmitter {
       lastError: '',
       runtimeCommand: '',
       modelSize: this.modelSize,
-      modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
+      modelDownloadDir: getModelDir(this.rootDir, this.modelSize, this.userDataDir),
       restarting: false,
       lastStartAt: 0
     };
@@ -166,7 +179,7 @@ class SpeechSidecarManager extends EventEmitter {
     return {
       ...this.state,
       modelSize: this.modelSize,
-      modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
+      modelDownloadDir: getModelDir(this.rootDir, this.modelSize, this.userDataDir),
       sidecarWsUrl: `ws://${this.host}:${this.port}/transcribe`,
       diagnosticLog: this.logBuffer.join('\n')
     };
@@ -185,7 +198,7 @@ class SpeechSidecarManager extends EventEmitter {
   updateState(patch) {
     this.state = { ...this.state, ...patch };
     if (!this.state.modelDownloadDir) {
-      this.state.modelDownloadDir = getModelDir(this.rootDir, this.modelSize);
+      this.state.modelDownloadDir = getModelDir(this.rootDir, this.modelSize, this.userDataDir);
     }
     this.emit('status', this.getStatus());
   }
@@ -586,7 +599,7 @@ class SpeechSidecarManager extends EventEmitter {
         downloadProgress: null,
         downloadBytes: 0,
         downloadTotalBytes: 0,
-        modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
+        modelDownloadDir: getModelDir(this.rootDir, this.modelSize, this.userDataDir),
         statusMessage: 'loading-vosk-model',
         lastError: '',
         runtimeCommand: pythonCmd,
@@ -701,7 +714,7 @@ class SpeechSidecarManager extends EventEmitter {
       return { ok: true, modelSize: normalized, restarted: false };
     }
     this.modelSize = normalized;
-    this.updateState({ modelSize: normalized, modelDownloadDir: getModelDir(this.rootDir, normalized) });
+    this.updateState({ modelSize: normalized, modelDownloadDir: getModelDir(this.rootDir, normalized, this.userDataDir) });
     if (restart) {
       const ok = await this.restart();
       return { ok, modelSize: normalized, restarted: true };
@@ -710,7 +723,7 @@ class SpeechSidecarManager extends EventEmitter {
   }
 
   getModelFolder() {
-    return getModelDir(this.rootDir, this.modelSize);
+    return getModelDir(this.rootDir, this.modelSize, this.userDataDir);
   }
 
   dispose() {

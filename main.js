@@ -609,7 +609,7 @@ function loadAiSettingsFromDisk() {
 
 cachedAiSettings = loadAiSettingsFromDisk();
 let aiEnabled = cachedAiSettings.enabled !== false;
-speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize });
+speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize, userDataDir: app.getPath('userData') });
 
 // If AI is disabled, we don't need to wait for sidecar initialization
 sidecarInitialized = !aiEnabled;
@@ -806,7 +806,7 @@ async function setAiEnabled(nextEnabled) {
     broadcastToAllWindows('ai:suggestions', latestAiSuggestions);
   } else {
     if (!speechSidecarManager) {
-      speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize });
+      speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize, userDataDir: app.getPath('userData') });
       bindSidecarStatusEmitter(speechSidecarManager);
     }
     try {

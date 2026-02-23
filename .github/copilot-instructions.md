@@ -2,6 +2,13 @@
 
 ## General Guidelines
 
+### CRITICAL: Website Files Location
+**The website files are located in `./liturgia/` directory, NOT in the root or `./site/` directories.**
+- All `.php`, `.html`, `.css` files for the website are in: `c:\Users\Jacqueb\liturgia\liturgia-2\liturgia\`
+- When the user references "the site" or "website", they are asking about files in the `./liturgia/` folder
+- Do NOT search in the root directory or look for a `site/` folder
+- Always use the correct path: `./liturgia/index.php`, `./liturgia/style.css`, `./liturgia/pricing.php`, etc.
+
 ### NEVER use Emojis (CRITICAL)
 **Do NOT use any emoji characters in code, comments, or documentation:**
 - No emoji in UI labels, buttons, messages, or strings
