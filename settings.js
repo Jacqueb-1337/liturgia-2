@@ -515,6 +515,16 @@ function initAiTab(settings) {
       ui.endpoint.textContent = status.sidecarWsUrl || 'ws://127.0.0.1:8765/transcribe';
     }
 
+    if (ui.log && status.diagnosticLog) {
+      ui.log.innerHTML = '';
+      const lines = status.diagnosticLog.split('\n').filter(l => l.trim());
+      lines.forEach(line => {
+        const entry = document.createElement('div');
+        entry.textContent = line;
+        ui.log.appendChild(entry);
+      });
+    }
+
     if (!state.modelTouched && status.modelSize && ui.modelSelect) {
       ui.modelSelect.value = status.modelSize;
     }

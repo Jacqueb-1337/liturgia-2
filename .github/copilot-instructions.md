@@ -11,6 +11,12 @@
 
 Use plain text labels instead (e.g., "LIVE NOW" not "📺 LIVE NOW", "Previous" not "⬅️ Previous")
 
+### Windows PowerShell Environment (CRITICAL)
+**Command compatibility issues:**
+- Do NOT use `head`, `tail`, `grep` or other Unix utilities - they don't work in this environment
+- Use PowerShell cmdlets instead: `Get-Content -TotalCount N`, `Select-Object -First N`, `Select-String`
+- Avoid piping to Unix commands in terminal operations
+
 ### Dark Mode Support (CRITICAL)
 **ALWAYS ensure dark mode compatibility when adding new UI elements:**
 

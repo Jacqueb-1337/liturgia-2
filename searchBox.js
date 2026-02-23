@@ -103,10 +103,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   clearBtn.style.padding = '4px 8px';
   clearBtn.addEventListener('click', () => {
     if (onToggleClear) onToggleClear();
-    clearBtn.classList.toggle('active');
-    if (clearBtn.classList.contains('active')) {
-      blackBtn.classList.remove('active');
-    }
+    // Don't manually toggle button state - let toggleClear() in renderer.js handle it
   });
   
   // Store reference globally so renderer.js can update it
@@ -118,10 +115,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   blackBtn.style.padding = '4px 8px';
   blackBtn.addEventListener('click', () => {
     if (onToggleBlack) onToggleBlack();
-    blackBtn.classList.toggle('active');
-    if (blackBtn.classList.contains('active')) {
-      clearBtn.classList.remove('active');
-    }
+    // Don't manually toggle button state - let toggleBlack() in renderer.js handle it
   });
   
   // Store reference globally so renderer.js can update it

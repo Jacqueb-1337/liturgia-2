@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { spawn, exec, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const EventEmitter = require('events');
@@ -124,15 +124,25 @@ class SpeechSidecarManager extends EventEmitter {
     super();
     this.host = options.host || HOST;
     this.port = options.port || PORT;
-    this.rootDir = options.rootDir || path.resolve(__dirname);
+    
+    // Handle ASAR unpacking - if __dirname is inside app.asar, redirect to app.asar.unpacked
+    let rootDir = options.rootDir || path.resolve(__dirname);
+    if (rootDir.includes('.asar' + path.sep)) {
+      rootDir = rootDir.replace(path.sep + 'app.asar' + path.sep, path.sep + 'app.asar.unpacked' + path.sep);
+    }
+    this.rootDir = rootDir;
     this.modelSize = normalizeModelSize(options.modelSize || 'small');
     this.sidecarProcess = null;
     this.expectedExitPid = null;
     this.restartTimer = null;
     this.appQuitting = false;
+    this.isStartingProcess = false; // Prevent concurrent startProcess calls
     // Backoff tracking (prevent thrashing when spawn keeps failing)
     this.consecutiveSpawnFailures = 0;
     this.spawnFailureBackoffUntil = 0;
+    // Diagnostic log buffer
+    this.logBuffer = [];
+    this.maxLogSize = 200;
 
     this.state = {
       processRunning: false,
@@ -157,8 +167,19 @@ class SpeechSidecarManager extends EventEmitter {
       ...this.state,
       modelSize: this.modelSize,
       modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
-      sidecarWsUrl: `ws://${this.host}:${this.port}/transcribe`
+      sidecarWsUrl: `ws://${this.host}:${this.port}/transcribe`,
+      diagnosticLog: this.logBuffer.join('\n')
     };
+  }
+
+  addLog(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    const entry = `[${timestamp}] ${message}`;
+    this.logBuffer.push(entry);
+    if (this.logBuffer.length > this.maxLogSize) {
+      this.logBuffer.shift();
+    }
+    console.log(entry);
   }
 
   updateState(patch) {
@@ -201,6 +222,77 @@ class SpeechSidecarManager extends EventEmitter {
       if (this.appQuitting || this.sidecarProcess) return;
       this.startProcess();
     }, 1500);
+  }
+
+  async cleanupPortIfNeeded() {
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    try {
+      if (process.platform === 'win32') {
+        // On Windows, use netstat to find and kill process using port
+        // Need to wrap in cmd /c to make pipes work
+        try {
+          const { stdout } = await execAsync(`cmd /c netstat -ano | findstr :${this.port}`, { 
+            timeout: 3000,
+            encoding: 'utf8',
+            shell: 'cmd.exe'
+          });
+          
+          if (stdout && stdout.trim()) {
+            // Extract PID from netstat output (last column)
+            const lines = stdout.trim().split('\n');
+            for (const line of lines) {
+              const matches = line.match(/\s+(\d+)\s*$/);
+              if (matches && matches[1]) {
+                const pid = matches[1];
+                if (pid !== process.pid.toString()) { // Don't kill ourselves
+                  this.addLog(`Found process ${pid} using port ${this.port}, terminating...`);
+                  try {
+                    await execAsync(`taskkill /PID ${pid} /F /T`, { timeout: 2000 });
+                    this.addLog(`Successfully terminated process ${pid}`);
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                  } catch (killErr) {
+                    this.addLog(`Failed to kill process ${pid}: ${killErr.message}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (netErr) {
+          // netstat might fail if nothing is using the port, that's okay
+          this.addLog(`netstat check (port may be free or netstat failed)`);
+        }
+      } else {
+        // On macOS/Linux, use lsof
+        try {
+          const { stdout } = await execAsync(`lsof -i :${this.port} -t`, { 
+            timeout: 3000,
+            encoding: 'utf8'
+          });
+          
+          if (stdout && stdout.trim()) {
+            const pids = stdout.trim().split('\n').filter(p => p && p !== process.pid.toString());
+            for (const pid of pids) {
+              this.addLog(`Found process ${pid} using port ${this.port}, terminating...`);
+              try {
+                await execAsync(`kill -9 ${pid}`, { timeout: 2000 });
+                this.addLog(`Successfully terminated process ${pid}`);
+                await new Promise(resolve => setTimeout(resolve, 300));
+              } catch (killErr) {
+                this.addLog(`Failed to kill process ${pid}: ${killErr.message}`);
+              }
+            }
+          }
+        } catch (lsofErr) {
+          // lsof might fail, that's okay - port may be free
+          this.addLog(`lsof check (port may be free or lsof failed)`);
+        }
+      }
+    } catch (err) {
+      this.addLog(`Port cleanup check error: ${err.message}`);
+      // Don't fail startup, just proceed
+    }
   }
 
   parseSidecarLogLine(line) {
@@ -298,11 +390,25 @@ class SpeechSidecarManager extends EventEmitter {
   }
 
   async startProcess() {
+    if (this.isStartingProcess) {
+      this.addLog('startProcess already in progress, skipping concurrent call');
+      return false;
+    }
+    
     if (this.sidecarProcess) {
       this.updateState({ processRunning: true, statusMessage: this.state.statusMessage || 'running' });
       return true;
     }
 
+    this.isStartingProcess = true;
+    try {
+      return await this._doStartProcess();
+    } finally {
+      this.isStartingProcess = false;
+    }
+  }
+
+  async _doStartProcess() {
     const scriptPath = path.join(this.rootDir, 'backend', 'server.py');
     if (!fs.existsSync(scriptPath)) {
       console.warn('[speech-sidecar] server.py missing at', scriptPath);
@@ -319,151 +425,185 @@ class SpeechSidecarManager extends EventEmitter {
     const candidates = resolvePythonCandidates(this.rootDir);
     const errors = [];
     
+    // Use exec to verify Python candidates work BEFORE attempting to spawn
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    let verifiedPythonCmd = null;
     for (const candidate of candidates) {
       try {
-        // Fire off dependency check in background (don't block startup with pip install)
-        // Dependencies will be installed in parallel while we try to spawn/wait for sidecar
-        setImmediate(async () => {
-          const depCheck = await checkAndInstallDependencies(candidate.cmd);
-          if (depCheck.success) {
-            console.log('[speech-sidecar] dependencies installed with ' + candidate.cmd);
-          } else {
-            console.warn('[speech-sidecar] dependency installation attempted with ' + candidate.cmd + ': ' + depCheck.message);
-          }
-        });
+        this.addLog(`Verifying Python candidate: ${candidate.cmd}`);
+        const { stdout } = await execAsync(`"${candidate.cmd}" --version`, { timeout: 1000, encoding: 'utf8' });
+        this.addLog(`Verified Python: ${candidate.cmd} → ${stdout.trim()}`);
         
-        const spawnCmd = candidate.cmd;
-        const spawnArgs = [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)];
-        console.log(`[speech-sidecar] Attempting to spawn: ${spawnCmd} ${spawnArgs.join(' ')} (cwd: ${this.rootDir})`);
-        
-        const child = spawn(spawnCmd, spawnArgs, {
-          cwd: this.rootDir,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          shell: false,
-          env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize }
-        });
-
-        // Set up error handler
-        let spawnError = null;
-        child.on('error', (err) => {
-          spawnError = err;
-          const errorDesc = err.code === 'ENOENT' ? 'not found in PATH' : err.code === 'EACCES' ? 'permission denied' : err.code;
-          errors.push({ cmd: candidate.cmd, code: err.code, message: err.message, interpreted: errorDesc });
-          console.warn(`[speech-sidecar] spawn failed: "${spawnCmd}" (${err.code}: ${errorDesc}) - ${err.message}`);
-        });
-
-        // Wait very briefly to see if spawn fails immediately
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        // If spawn failed, continue to next candidate
-        if (spawnError) {
-          // Don't add duplicate error, we already logged it
-          continue;
+        // Get the full path to Python - this is what actually works for spawn
+        const baseName = candidate.cmd.split('\\').pop().split('/').pop();
+        const findCmd = process.platform === 'win32' ? `where ${baseName}` : `which ${baseName}`;
+        try {
+          const { stdout: pathOutput } = await execAsync(findCmd, { timeout: 1000, encoding: 'utf8' });
+          const fullPath = pathOutput.trim().split('\n')[0];
+          this.addLog(`Full path: ${fullPath}`);
+          verifiedPythonCmd = { ...candidate, cmd: fullPath };
+        } catch (pathErr) {
+          this.addLog(`Could not resolve full path, using candidate as-is: ${candidate.cmd}`);
+          verifiedPythonCmd = candidate;
         }
-        
-        console.log(`[speech-sidecar] spawn succeeded for "${spawnCmd}", pid=${child.pid}`);
+        break;
+      } catch (err) {
+        this.addLog(`Python candidate failed: ${candidate.cmd} - ${err.message}`);
+        errors.push({ cmd: candidate.cmd, message: err.message });
+      }
+    }
+    
+    // If no Python found, fail immediately
+    if (!verifiedPythonCmd) {
+      const triedCandidates = candidates.map(c => c.cmd).join(', ');
+      const errorSummary = errors.map(e => `${e.cmd} (${e.message})`).join('; ');
+      this.addLog(`Python verification failed. Tried: ${triedCandidates}`);
+      this.addLog(`Errors: ${errorSummary}`);
+      
+      // Exponential backoff
+      this.consecutiveSpawnFailures++;
+      const backoffSeconds = Math.min(15 * Math.pow(2, this.consecutiveSpawnFailures - 1), 120);
+      this.spawnFailureBackoffUntil = Date.now() + (backoffSeconds * 1000);
+      this.addLog(`Spawn failed ${this.consecutiveSpawnFailures} time(s). Backing off for ${backoffSeconds}s`);
+      
+      const errorMsg = `Python 3.7+ not found in PATH. Install from https://python.org and restart Liturgia.`;
+      this.updateState({
+        processRunning: false,
+        managedProcess: false,
+        portOpen: false,
+        modelReady: false,
+        statusMessage: 'sidecar-spawn-error',
+        lastError: errorMsg,
+        runtimeCommand: '',
+        restarting: false
+      });
+      return false;
+    }
+    
+    const candidate = verifiedPythonCmd;
+    try {
+      // BEFORE spawning, try to clean up any existing process using the port
+      await this.cleanupPortIfNeeded();
+      
+      // Fire off dependency check in background
+      setImmediate(async () => {
+        const depCheck = await checkAndInstallDependencies(candidate.cmd);
+        if (depCheck.success) {
+          console.log('[speech-sidecar] dependencies installed with ' + candidate.cmd);
+        } else {
+          console.warn('[speech-sidecar] dependency installation attempted with ' + candidate.cmd + ': ' + depCheck.message);
+        }
+      });
+      
+      const pythonCmd = candidate.cmd.trim();
+      const pythonArgs = [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)];
+      
+      this.addLog(`Spawning: "${pythonCmd}" with ${pythonArgs.length} args (cwd: ${this.rootDir})`);
+      
+      // Spawn Python directly - rootDir is now correctly outside ASAR
+      const child = spawn(pythonCmd, pythonArgs, {
+        cwd: this.rootDir,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize },
+        windowsHide: true
+      });
 
-        child.stdout.on('data', (buf) => {
-          const text = buf.toString();
-          text.split(/\r?\n/).forEach((line) => {
-            const trimmed = line.trim();
-            if (trimmed) {
-              console.log(`[sidecar:${child.pid}] ${trimmed}`);
-              this.parseSidecarLogLine(trimmed);
-            }
-          });
-        });
+      // Set up error handler
+      let spawnError = null;
+      child.on('error', (err) => {
+        spawnError = err;
+        const errorDesc = err.code === 'ENOENT' ? 'not found on disk' : err.code === 'EACCES' ? 'permission denied' : err.code;
+        this.addLog(`Spawn error: "${pythonCmd}" (${err.code}: ${errorDesc}) - ${err.message}`);
+      });
 
-        child.stderr.on('data', (buf) => {
-          const text = buf.toString();
-          text.split(/\r?\n/).forEach((line) => {
-            const trimmed = line.trim();
-            if (trimmed) {
-              console.error(`[sidecar:${child.pid}] ${trimmed}`);
-              this.parseSidecarLogLine(trimmed);
-            }
-          });
-        });
+      // Wait briefly to see if spawn fails immediately
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      if (spawnError) {
+        throw spawnError;
+      }
+      
+      this.addLog(`Spawn executed (detached process)`);
 
-        child.on('exit', (code, signal) => {
-          const expectedExit = this.expectedExitPid === child.pid;
-          if (expectedExit) this.expectedExitPid = null;
-          console.warn(`[sidecar:${child.pid}] exited code=${code} signal=${signal || 'none'} expected=${expectedExit}`);
-          if (this.sidecarProcess === child) {
-            this.sidecarProcess = null;
-            this.updateState({
-              processRunning: false,
-              managedProcess: false,
-              portOpen: false,
-              modelReady: false,
-              downloadProgress: null,
-              downloadBytes: 0,
-              downloadTotalBytes: 0,
-              statusMessage: 'sidecar-exited',
-              lastError: expectedExit ? '' : `sidecar-exited code=${code} signal=${signal || 'none'}`,
-              restarting: false
-            });
-            if (!expectedExit) this.scheduleUnexpectedRestart();
+
+      child.stdout.on('data', (buf) => {
+        const text = buf.toString();
+        text.split(/\r?\n/).forEach((line) => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            console.log(`[sidecar:${child.pid}] ${trimmed}`);
+            this.parseSidecarLogLine(trimmed);
           }
         });
+      });
 
-        this.sidecarProcess = child;
+      child.stderr.on('data', (buf) => {
+        const text = buf.toString();
+        text.split(/\r?\n/).forEach((line) => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            console.error(`[sidecar:${child.pid}] ${trimmed}`);
+            this.parseSidecarLogLine(trimmed);
+          }
+        });
+      });
+
+      child.on('exit', (code, signal) => {
+        const expectedExit = this.expectedExitPid === child.pid;
+        if (expectedExit) this.expectedExitPid = null;
+        console.warn(`[sidecar:${child.pid}] exited code=${code} signal=${signal || 'none'} expected=${expectedExit}`);
+        if (this.sidecarProcess === child) {
+          this.sidecarProcess = null;
+          this.updateState({
+            processRunning: false,
+            managedProcess: false,
+            portOpen: false,
+            modelReady: false,
+            downloadProgress: null,
+            downloadBytes: 0,
+            downloadTotalBytes: 0,
+            statusMessage: 'sidecar-exited',
+            lastError: expectedExit ? '' : `sidecar-exited code=${code} signal=${signal || 'none'}`,
+            restarting: false
+          });
+          if (!expectedExit) this.scheduleUnexpectedRestart();
+        }
+      });
+
+      this.sidecarProcess = child;
+      this.updateState({
+        processRunning: true,
+        managedProcess: true,
+        portOpen: false,
+        modelReady: false,
+        downloadProgress: null,
+        downloadBytes: 0,
+        downloadTotalBytes: 0,
+        modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
+        statusMessage: 'loading-vosk-model',
+        lastError: '',
+        runtimeCommand: pythonCmd,
+        lastStartAt: Date.now(),
+        restarting: false
+      });
+      console.log(`[speech-sidecar] started python process ${child.pid} via ${pythonCmd}`);
+      return true;
+      } catch (err) {
+        console.warn('[speech-sidecar] spawn failed with exception:', err.message || err);
         this.updateState({
-          processRunning: true,
-          managedProcess: true,
+          processRunning: false,
+          managedProcess: false,
           portOpen: false,
           modelReady: false,
-          downloadProgress: null,
-          downloadBytes: 0,
-          downloadTotalBytes: 0,
-          modelDownloadDir: getModelDir(this.rootDir, this.modelSize),
-          statusMessage: 'loading-vosk-model',
-          lastError: '',
-          runtimeCommand: candidate.cmd,
-          lastStartAt: Date.now(),
+          statusMessage: 'sidecar-spawn-error',
+          lastError: `Spawn error: ${err.message}`,
+          runtimeCommand: '',
           restarting: false
         });
-        console.log(`[speech-sidecar] started python process ${child.pid} via ${candidate.cmd}`);
-        return true;
-      } catch (err) {
-        console.warn('[speech-sidecar] spawn failed with', candidate.cmd, err.message || err);
+        return false;
       }
-    }
-
-    // All candidates failed
-    const triedCandidates = candidates.map(c => c.cmd).join(', ');
-    const errorSummary = errors.map(e => `${e.cmd} (${e.interpreted || e.code})`).join('; ');
-    console.error(`[speech-sidecar] Python startup failed. Tried: ${triedCandidates}`);
-    console.error(`[speech-sidecar] Errors: ${errorSummary}`);
-    console.error(`[speech-sidecar] Full error details:`, JSON.stringify(errors, null, 2));
-    
-    // Implement exponential backoff: fail once = 15s backoff, fail twice = 30s, fail 3+ = 60s
-    this.consecutiveSpawnFailures++;
-    const backoffSeconds = Math.min(15 * Math.pow(2, this.consecutiveSpawnFailures - 1), 120);
-    this.spawnFailureBackoffUntil = Date.now() + (backoffSeconds * 1000);
-    console.warn(`[speech-sidecar] Spawn failed ${this.consecutiveSpawnFailures} time(s). Backing off for ${backoffSeconds}s`);
-    
-    let errorMsg = `Python 3.7+ is required and must be in PATH. Install from https://python.org, then restart Liturgia.`;
-    if (errors.length > 0) {
-      const firstError = errors[0];
-      if (firstError.code === 'ENOENT') {
-        errorMsg = `Python not found in PATH. Ensure Python 3.7+ is installed and accessible. Attempted: ${triedCandidates}`;
-      } else if (firstError.code === 'EACCES') {
-        errorMsg = `Permission denied running Python. Check file permissions and try running Liturgia as administrator.`;
-      }
-    }
-    
-    this.updateState({
-      processRunning: false,
-      managedProcess: false,
-      portOpen: false,
-      modelReady: false,
-      statusMessage: 'sidecar-spawn-error',
-      lastError: errorMsg,
-      runtimeCommand: '',
-      restarting: false
-    });
-    return false;
   }
 
   stopProcess() {
@@ -536,7 +676,7 @@ class SpeechSidecarManager extends EventEmitter {
       this.updateState({ restarting: false, statusMessage: 'sidecar-restart-failed' });
       return false;
     }
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 120000;
     while (Date.now() < deadline) {
       const portOpen = await this.checkPortOpen(1200);
       if (portOpen) {

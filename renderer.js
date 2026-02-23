@@ -1460,6 +1460,15 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     }
   });
+
+  // Signal main process that renderer is ready to display
+  // Called at the END of DOMContentLoaded after all sync initialization completes
+  try {
+    await ipcRenderer.invoke('renderer-ready');
+    console.log('[renderer] Signaled main process at end of DOMContentLoaded');
+  } catch (err) {
+    console.error('[renderer] Error signaling renderer-ready:', err);
+  }
 });
 
 async function selectReferenceRange(ref) {
@@ -3088,7 +3097,19 @@ async function ensureAuthSetup() {
       scheduleLicensePolling();
       return; // proceed
     }
-    // invalid token: clear and show setup
+    
+    // Don't clear token on server errors (5xx) - keep it for retry
+    const reason = result && result.reason ? result.reason : '';
+    const isServerError = reason && reason.match(/^http-5/);  // 500-599 errors
+    
+    if (isServerError) {
+      // Server error - don't clear the valid token, just mark license inactive and proceed with app
+      console.warn('License server error (' + reason + '), proceeding without active license');
+      scheduleLicensePolling();
+      return;
+    }
+    
+    // Token is actually invalid - clear it and show setup
     await clearToken();
     ipcRenderer.send('license-status-update', { active: false, reason: 'invalid-token' });
   } else {
@@ -5348,9 +5369,9 @@ function renderSongVerse(verseText, query) {
   if (!query || !query.trim()) return parseMarkdown(verseText);
   const q = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(`(${q})`, 'gi');
-  // Use safe markers that won't be interpreted by HTML escaping
-  const START = '___HIGHLIGHT_START___';
-  const END = '___HIGHLIGHT_END___';
+  // Use markers that don't contain markdown special characters
+  const START = '\u0001START\u0001';
+  const END = '\u0001END\u0001';
   const marked = verseText.replace(regex, `${START}$1${END}`);
   // Parse markdown which will escape HTML and convert markdown
   let html = parseMarkdown(marked);

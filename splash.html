@@ -43,56 +43,27 @@
   <script>
     const { ipcRenderer } = require('electron');
     
-    const statusMessages = {
-      'sidecar-not-started': 'Starting...',
-      'sidecar-script-missing': 'Error',
-      'loading-vosk-model': 'Loading speech model...',
-      'downloading-vosk-model': 'Downloading speech model...',
-      'model-ready': 'Ready',
-      'model-error': 'Error loading model',
-      'running': 'Ready'
-    };
-
     let currentProgress = 0;
     const bar = document.getElementById('bar');
     const statusText = document.getElementById('status-text');
     const motto = document.getElementById('motto');
+    
+    console.log('[splash] Splash HTML loaded, setting up listeners');
 
-    // Listen to sidecar status updates
-    ipcRenderer.on('sidecar:status', (event, status) => {
-      if (!status) return;
-
-      // Get status message
-      const message = statusMessages[status.statusMessage] || status.statusMessage || '';
-      
-      // Update status text
-      if (message) {
-        statusText.textContent = message;
-      }
-      
-      // Update progress bar based on download progress or status
-      let targetProgress = 0;
-      
-      if (status.statusMessage === 'downloading-vosk-model' && status.downloadTotalBytes > 0) {
-        // Show download progress (0-90%)
-        targetProgress = Math.round((status.downloadBytes / status.downloadTotalBytes) * 90);
-      } else if (status.statusMessage === 'loading-vosk-model') {
-        // Show loading state (90-100%)
-        targetProgress = 90;
-      } else if (status.statusMessage === 'model-ready' || status.statusMessage === 'running' || status.processRunning) {
-        // Complete
-        targetProgress = 100;
-      } else if (status.statusMessage === 'sidecar-not-started') {
-        // Just started
-        targetProgress = Math.max(5, currentProgress);
-      }
-      
-      // Smoothly transition to target progress
-      if (targetProgress > currentProgress) {
-        currentProgress = targetProgress;
-        bar.style.width = currentProgress + '%';
+    // Listen to splash status updates from main process (what we're waiting on)
+    ipcRenderer.on('splash:update-status', (event, data) => {
+      if (data && data.message) {
+        console.log('[splash] Received status update: ' + data.message + ' (' + (data.progress || 0) + '%)');
+        statusText.textContent = data.message;
+        
+        // Animate progress bar to the new progress value
+        const newProgress = data.progress || 0;
+        bar.style.transition = 'width 500ms ease-out';
+        bar.style.width = newProgress + '%';
       }
     });
+    
+    console.log('[splash] splash:update-status listener registered');
 
     (function(){
       // Start animation after slight delay so everything appears smooth

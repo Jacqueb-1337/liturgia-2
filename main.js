@@ -1,6 +1,7 @@
 // main.js
 
 const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } = require('electron');
+const RtfParser = require('rtf-parser');
 
 // Instrument dialog.showMessageBox during development to find stray native dialogs
 if (process.env.NODE_ENV !== 'production') {
@@ -139,9 +140,16 @@ app.setName('liturgia');
 let mainWindow; // Add this at the top
 let splashWindow = null;
 let splashClosed = false;
+let splashShownTime = 0;
+let lastStatusUpdateTime = 0; // Track when status last changed
 let settingsWindow = null; // Reference to settings window for IPC communication
 let mainWindowReady = false;
+let mainWindowLoaded = false;
+let rendererReady = false; // Set when renderer finishes DOMContentLoaded initialization
 let aiWorkerWindowReady = false;
+let sidecarInitialized = false;
+let initialWindowX = 100;
+let initialWindowY = 100;
 let defaultBible = 'en_kjv.json'; // Default Bible
 let liveWindow = null;
 let speechWindow = null;
@@ -156,111 +164,233 @@ let cachedAiSettings = { modelSize: 'small' };
 
 
 // --- EasyWorship Import Helpers ---
+// RTF Parser data structures
+const destinations = new Set([
+  'aftncn', 'aftnsep', 'aftnsepc', 'annotation', 'atnauthor', 'atndate', 'atnicn', 'atnid',
+  'atnparent', 'atnref', 'atntime', 'atrfend', 'atrfstart', 'author', 'background', 'bkmkend',
+  'bkmkstart', 'blipuid', 'buptim', 'category', 'colorschememapping', 'colortbl', 'comment',
+  'company', 'creatim', 'datafield', 'datastore', 'defchp', 'defpap', 'do', 'doccomm', 'docvar',
+  'dptxbxtext', 'ebcend', 'ebcstart', 'factoidname', 'falt', 'fchars', 'ffdeftext', 'ffentrymcr',
+  'ffexitmcr', 'ffformat', 'ffhelptext', 'ffl', 'ffname', 'ffstattext', 'field', 'file', 'filetbl',
+  'fldinst', 'fldrslt', 'fldtype', 'fname', 'fontemb', 'fontfile', 'fonttbl', 'footer', 'footerf',
+  'footerl', 'footerr', 'footnote', 'formfield', 'ftncn', 'ftnsep', 'ftnsepc', 'g', 'generator',
+  'gridtbl', 'header', 'headerf', 'headerl', 'headerr', 'hl', 'hlfr', 'hlinkbase', 'hlloc', 'hlsrc',
+  'hsv', 'htmltag', 'info', 'keycode', 'keywords', 'latentstyles', 'lchars', 'levelnumbers',
+  'leveltext', 'lfolevel', 'linkval', 'list', 'listlevel', 'listname', 'listoverride',
+  'listoverridetable', 'listpicture', 'liststylename', 'listtable', 'listtext', 'lsdlockedexcept',
+  'macc', 'maccPr', 'mailmerge', 'maln', 'malnScr', 'manager', 'margPr', 'mbar', 'mbarPr',
+  'mbaseJc', 'mbegChr', 'mborderBox', 'mborderBoxPr', 'mbox', 'mboxPr', 'mchr', 'mcount', 'mctrlPr',
+  'md', 'mdeg', 'mdegHide', 'mden', 'mdiff', 'mdPr', 'me', 'mendChr', 'meqArr', 'meqArrPr', 'mf',
+  'mfName', 'mfPr', 'mfunc', 'mfuncPr', 'mgroupChr', 'mgroupChrPr', 'mgrow', 'mhideBot', 'mhideLeft',
+  'mhideRight', 'mhideTop', 'mhtmltag', 'mlim', 'mlimloc', 'mlimlow', 'mlimlowPr', 'mlimupp',
+  'mlimuppPr', 'mm', 'mmaddfieldname', 'mmath', 'mmathPict', 'mmathPr', 'mmaxdist', 'mmc', 'mmcJc',
+  'mmconnectstr', 'mmconnectstrdata', 'mmcPr', 'mmcs', 'mmdatasource', 'mmheadersource', 'mmmailsubject',
+  'mmodso', 'mmodsofilter', 'mmodsofldmpdata', 'mmodsomappedname', 'mmodsoname', 'mmodsorecipdata',
+  'mmodsosort', 'mmodsosrc', 'mmodsotable', 'mmodsoudl', 'mmodsoudldata', 'mmodsouniquetag', 'mmPr',
+  'mmquery', 'mmr', 'mnary', 'mnaryPr', 'mnoBreak', 'mnum', 'mobjDist', 'moMath', 'moMathPara',
+  'moMathParaPr', 'mopEmu', 'mphant', 'mphantPr', 'mplcHide', 'mpos', 'mr', 'mrad', 'mradPr', 'mrPr',
+  'msepChr', 'mshow', 'mshp', 'msPre', 'msPrePr', 'msSub', 'msSubPr', 'msSubSup', 'msSubSupPr', 'msSup',
+  'msSupPr', 'mstrikeBLTR', 'mstrikeH', 'mstrikeTLBR', 'mstrikeV', 'msub', 'msubHide', 'msup', 'msupHide',
+  'mtransp', 'mtype', 'mvertJc', 'mvfmf', 'mvfml', 'mvtof', 'mvtol', 'mzeroAsc', 'mzeroDesc', 'mzeroWid',
+  'nesttableprops', 'nextfile', 'nonesttables', 'objalias', 'objclass', 'objdata', 'object', 'objname',
+  'objsect', 'objtime', 'oldcprops', 'oldpprops', 'oldsprops', 'oldtprops', 'oleclsid', 'operator',
+  'panose', 'password', 'passwordhash', 'pgp', 'pgptbl', 'picprop', 'pict', 'pn', 'pnseclvl', 'pntext',
+  'pntxta', 'pntxtb', 'printim', 'private', 'propname', 'protend', 'protstart', 'protusertbl', 'pxe',
+  'result', 'revtbl', 'revtim', 'rsidtbl', 'rxe', 'shp', 'shpgrp', 'shpinst', 'shppict', 'shprslt',
+  'shptxt', 'sn', 'sp', 'staticval', 'stylesheet', 'subject', 'sv', 'svb', 'tc', 'template', 'themedata',
+  'title', 'txe', 'ud', 'upr', 'userprops', 'wgrffmtfilter', 'windowcaption', 'writereservation',
+  'writereservhash', 'xe', 'xform', 'xmlattrname', 'xmlattrvalue', 'xmlclose', 'xmlname', 'xmlnstbl',
+  'xmlopen'
+]);
+
+const specialCharacters = {
+  'par': '\n',
+  'sect': '\n\n',
+  'page': '\n\n',
+  'line': '\n',
+  'tab': '\t',
+  'emdash': '\u2014',
+  'endash': '\u2013',
+  'emspace': '\u2003',
+  'enspace': '\u2002',
+  'qmspace': '\u2005',
+  'bullet': '\u2022',
+  'lquote': '\u2018',
+  'rquote': '\u2019',
+  'ldblquote': '\u201C',
+  'rdblquote': '\u201D',
+};
+
+function normalizeVerseSpacing(text) {
+  // Add double newline before verse/section tags (except the first one)
+  // Match patterns like [Verse 1], [Chorus], etc.
+  let lines = text.split('\n');
+  let result = [];
+  let firstTagFound = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    const isTag = line.startsWith('[') && line.endsWith(']');
+
+    if (isTag) {
+      if (firstTagFound) {
+        // Add blank line before tag if not already there
+        if (result.length > 0 && result[result.length - 1] !== '') {
+          result.push('');
+        }
+      }
+      firstTagFound = true;
+    }
+
+    result.push(lines[i]);
+  }
+
+  return result.join('\n');
+}
+
 function stripRtf(rtf) {
   if (!rtf) return '';
   
-  // If it's a Buffer or Uint8Array, convert to string
   let s = Buffer.isBuffer(rtf) || rtf instanceof Uint8Array
     ? rtf.toString('utf8')
     : String(rtf);
-  
-  // Remove RTF font table - improved regex to handle nested braces
-  s = s.replace(/\{\\fonttbl\{[^}]*\}\{[^}]*\}\}/g, '');
-  
-  // Remove RTF color table - more comprehensive
-  s = s.replace(/\{\\colortbl[^}]*\\blue\d+;[^}]*\}/g, '');
-  
-  // Remove stylesheet
-  s = s.replace(/\{\\stylesheet[^}]*\}/g, '');
-  
-  // Remove pnseclvl blocks (paragraph numbering styles) - more comprehensive
-  s = s.replace(/\{\\[*]\\pnseclvl\d+[^}]*\{[^}]*\}\{[^}]*\}\}/g, '');
-  
-  // Remove all the RTF header stuff (paperw, margl, etc.)
-  s = s.replace(/\\paperw\d+/g, '');
-  s = s.replace(/\\paperh\d+/g, '');
-  s = s.replace(/\\margl\d+/g, '');
-  s = s.replace(/\\margr\d+/g, '');
-  s = s.replace(/\\margt\d+/g, '');
-  s = s.replace(/\\margb\d+/g, '');
-  
-  // Convert \par and \pard to newlines (but keep the text after them)
-  s = s.replace(/\\par\b/g, '\n');
-  s = s.replace(/\\pard\b/g, '\n');
-  s = s.replace(/\\line\b/g, '\n');
-  
-  // Remove common RTF control sequences (but NOT the text)
-  s = s.replace(/\\rtf1/g, '');
-  s = s.replace(/\\ansi/g, '');
-  s = s.replace(/\\deff\d+/g, '');
-  s = s.replace(/\\deftab\d+/g, '');
-  
-  // Remove formatting codes like \li0\fi0\ri0\sb0\sl\sa0
-  s = s.replace(/\\li\d+/g, '');
-  s = s.replace(/\\fi\d+/g, '');
-  s = s.replace(/\\ri\d+/g, '');
-  s = s.replace(/\\sb\d+/g, '');
-  s = s.replace(/\\sl\b/g, '');
-  s = s.replace(/\\sa\d+/g, '');
-  
-  // Remove font and formatting codes
-  s = s.replace(/\\plain/g, '');
-  s = s.replace(/\\f\d+/g, '');
-  s = s.replace(/\\fnil/g, '');
-  s = s.replace(/\\fcharset\d+/g, '');
-  s = s.replace(/\\fntnamaut\b/g, '');
-  s = s.replace(/\\b\b/g, ''); // bold
-  s = s.replace(/\\i\b/g, ''); // italic
-  s = s.replace(/\\ul\b/g, ''); // underline
-  s = s.replace(/\\fs\d+/g, ''); // font size
-  
-  // Remove all remaining control words (\xxx or \xxx123)
-  s = s.replace(/\\[a-z]+\d*/gi, '');
-  
-  // Remove all braces
-  s = s.replace(/[{}]/g, '');
-  
-  // Remove specific font names that leaked through
-  s = s.replace(/Arial;?/gi, '');
-  s = s.replace(/Verdana;?/gi, '');
-  s = s.replace(/Tahoma;?/gi, '');
-  s = s.replace(/Times New Roman;?/gi, '');
-  s = s.replace(/Calibri;?/gi, '');
-  s = s.replace(/Georgia;?/gi, '');
-  
-  // Remove any remaining backslashes before regular characters
-  s = s.replace(/\\(.)/g, '$1');
-  
-  // Remove semicolons that are alone or repeated
-  s = s.replace(/;+/g, '');
-  
-  // Remove patterns like "-1*" or "72.9000015258789*" (RTF formatting artifacts)
-  s = s.replace(/-?\d+(\.\d+)?\*/g, '');
-  
-  // Remove standalone large decimal numbers (RTF font sizes/coordinates)
-  s = s.replace(/\b\d{2,}\.\d{10,}\b/g, '');
-  
-  // Remove "Riched20" and similar generator strings
-  s = s.replace(/Riched\d+/gi, '');
-  
-  // Clean up whitespace
-  s = s.replace(/\r\n/g, '\n');
-  s = s.replace(/\r/g, '\n');
-  
-  // Remove lines that are only punctuation/symbols (., ), ;, *, etc.)
-  s = s.replace(/^[.\)\(;*\-\d\s]+$/gm, '');
-  
-  // Remove leading asterisks and spaces from lines
-  s = s.replace(/^\*\s+/gm, '');
-  
-  // Remove blank lines that only have spaces
-  s = s.replace(/^\s+$/gm, '');
-  
-  // Collapse more than 2 newlines into just 2
-  s = s.replace(/\n{3,}/g, '\n\n');
-  
-  // Trim and return
-  return s.trim();
+
+  let output = '';
+  let stack = [];
+  let ignorable = false;
+  let ucskip = 1;
+  let curskip = 0;
+  let i = 0;
+
+  while (i < s.length) {
+    const c = s[i];
+
+    if (c === '\\') {
+      const next = s[i + 1];
+      
+      if (next === '\'') {
+        // Hex: \'xx
+        if (curskip > 0) {
+          curskip--;
+        } else if (!ignorable) {
+          const hex = s.substr(i + 2, 2);
+          output += String.fromCharCode(parseInt(hex, 16));
+        }
+        i += 4;
+        continue;
+      }
+      
+      if (next === '~') {
+        // Non-breaking space
+        if (curskip > 0) {
+          curskip--;
+        } else if (!ignorable) {
+          output += '\xA0';
+        }
+        i += 2;
+        continue;
+      }
+      
+      if ('{}\\'.includes(next)) {
+        // Escaped character
+        curskip = 0;
+        if (!ignorable) {
+          output += next;
+        }
+        i += 2;
+        continue;
+      }
+      
+      if (/[a-z]/i.test(next)) {
+        // Control word: \word or \word123
+        let word = '';
+        let j = i + 1;
+        while (j < s.length && /[a-z]/i.test(s[j])) {
+          word += s[j];
+          j++;
+        }
+        
+        // Get optional number
+        let num = '';
+        let hasNum = false;
+        if (j < s.length && (s[j] === '-' || /\d/.test(s[j]))) {
+          if (s[j] === '-') {
+            num = '-';
+            j++;
+          }
+          while (j < s.length && /\d/.test(s[j])) {
+            num += s[j];
+            j++;
+          }
+          hasNum = true;
+        }
+        
+        // Skip space after control word
+        if (j < s.length && s[j] === ' ') {
+          j++;
+        }
+        
+        curskip = 0;
+        word_lower = word.toLowerCase();
+        
+        if (destinations.has(word_lower)) {
+          ignorable = true;
+        } else if (!ignorable) {
+          if (specialCharacters[word_lower]) {
+            output += specialCharacters[word_lower];
+          } else if (word_lower === 'uc') {
+            ucskip = parseInt(num) || 1;
+          } else if (word_lower === 'u') {
+            let code = parseInt(num) || 0;
+            if (code < 0) code += 0x10000;
+            output += String.fromCharCode(code);
+            curskip = ucskip;
+          }
+        }
+        
+        i = j;
+        continue;
+      }
+      
+      i++;
+      continue;
+    }
+    
+    if (c === '{') {
+      curskip = 0;
+      stack.push({ ucskip, ignorable });
+      i++;
+      continue;
+    }
+    
+    if (c === '}') {
+      curskip = 0;
+      if (stack.length > 0) {
+        const entry = stack.pop();
+        ucskip = entry.ucskip;
+        ignorable = entry.ignorable;
+      }
+      i++;
+      continue;
+    }
+    
+    if (c === '*') {
+      ignorable = true;
+      i++;
+      continue;
+    }
+    
+    // Regular character
+    if (curskip > 0) {
+      curskip--;
+    } else if (!ignorable) {
+      output += c;
+    }
+    
+    i++;
+  }
+
+  return output.trim();
 }
 
 function findDatabasesDirUnder(root, maxDepth = 4) {
@@ -327,7 +457,7 @@ async function importEasyWorshipFromDir(databasesDir) {
       } catch (e) {
         console.warn('Failed to retrieve lyrics for', id, e.message || e);
       }
-      out.push({ title, author, text: stripRtf(lyrics) });
+      out.push({ title, author, text: normalizeVerseSpacing(stripRtf(lyrics)) });
     }
   }
 
@@ -405,14 +535,16 @@ async function importEasyWorshipHandler() {
       const lines = s.text.split(/\r?\n/);
       let currentSection = '';
       let currentText = [];
+      let hasDetectedSections = false;
       
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed) continue; // Skip blank lines
+        if (!trimmed) continue; // Skip blank lines during section detection
         
-        // Check if line is a section header (Verse 1, Chorus, Bridge, etc.)
-        const sectionMatch = trimmed.match(/^(Verse|Chorus|Bridge|Intro|Outro|Pre-?Chorus|Tag|Refrain|Ending)\s*(\d*)$/i);
+        // Check if line is a section header (Verse 1, Chorus, Bridge, etc.) - with or without brackets
+        const sectionMatch = trimmed.match(/^\[?(Verse|Chorus|Bridge|Intro|Outro|Pre-?Chorus|Tag|Refrain|Ending)\s*(\d*)\]?$/i);
         if (sectionMatch) {
+          hasDetectedSections = true;
           // Save previous section if exists
           if (currentText.length > 0) {
             lyrics.push({ section: currentSection, text: currentText.join('\n') });
@@ -429,11 +561,21 @@ async function importEasyWorshipHandler() {
       if (currentText.length > 0) {
         lyrics.push({ section: currentSection, text: currentText.join('\n') });
       }
-    }
-    
-    // If no sections were detected, add as single section
-    if (lyrics.length === 0) {
-      lyrics.push({ section: '', text: (s.text || '').trim() });
+      
+      // If no sections were detected, try to auto-generate by splitting on blank lines
+      if (!hasDetectedSections && lyrics.length === 1 && lyrics[0].section === '') {
+        const text = (s.text || '').trim();
+        const verses = text.split(/\n\n+/); // Split on one or more blank lines
+        if (verses.length > 1) {
+          // Multiple blank-line-separated blocks: auto-generate section headers
+          lyrics.length = 0; // Clear the single un-sectioned block
+          verses.forEach((verseText, idx) => {
+            if (verseText.trim()) {
+              lyrics.push({ section: `Verse ${idx + 1}`, text: verseText.trim() });
+            }
+          });
+        }
+      }
     }
     
     existing.push({ title: s.title, author: s.author, lyrics });
@@ -469,6 +611,9 @@ cachedAiSettings = loadAiSettingsFromDisk();
 let aiEnabled = cachedAiSettings.enabled !== false;
 speechSidecarManager = createSpeechSidecarManager({ modelSize: cachedAiSettings.modelSize });
 
+// If AI is disabled, we don't need to wait for sidecar initialization
+sidecarInitialized = !aiEnabled;
+
 function decorateSidecarStatus(status) {
   return { ...(status || {}), aiDisabled: !aiEnabled };
 }
@@ -483,9 +628,18 @@ function bindSidecarStatusEmitter(manager) {
   manager.on('status', (status) => {
     const decorated = decorateSidecarStatus(status);
     latestSidecarStatus = decorated;
+    console.log('[sidecar-status] Received:', status ? status.statusMessage : 'null', '(sidecarInitialized=' + sidecarInitialized + ')');
     if (status && status.modelSize) {
       cachedAiSettings = { ...cachedAiSettings, modelSize: status.modelSize };
     }
+    
+    // Detect when sidecar has begun initializing (not just 'sidecar-not-started' initial state)
+    if (!sidecarInitialized && status && status.statusMessage && status.statusMessage !== 'sidecar-not-started') {
+      sidecarInitialized = true;
+      console.log('[main] Sidecar initialization begun: ' + status.statusMessage);
+      tryCloseSplashScreen();
+    }
+    
     broadcastToAllWindows('sidecar:status', decorated);
   });
 }
@@ -555,14 +709,14 @@ function ensureAiSpeechWorkerWindow() {
     aiSpeechWorkerWindow.loadFile(workerEntry, { query: { headless: '1', autostart: '1' } }).catch((err) => {
       console.warn('[ai-worker] failed to load speech worker', err && err.message ? err.message : err);
       aiWorkerWindowReady = true;
-      tryCloseSplashScreen();
     });
 
-    // Mark as ready when the worker window finishes loading
-    aiSpeechWorkerWindow.webContents.on('did-finish-load', () => {
-      aiWorkerWindowReady = true;
-      tryCloseSplashScreen();
-    });
+    // Start sidecar manager to begin emitting status updates
+    if (speechSidecarManager) {
+      speechSidecarManager.ensureRunning().catch((err) => {
+        console.warn('[ai-worker] speechSidecarManager.ensureRunning failed:', err && err.message ? err.message : err);
+      });
+    }
 
     aiSpeechWorkerWindow.on('closed', () => {
       aiSpeechWorkerWindow = null;
@@ -574,37 +728,62 @@ function ensureAiSpeechWorkerWindow() {
     console.warn('[ai-worker] creation failed', err && err.message ? err.message : err);
     aiSpeechWorkerWindow = null;
     aiWorkerWindowReady = true;
-    tryCloseSplashScreen();
   }
 }
 
 // Keep track of when splash was first shown
-let splashShownTime = 0;
-
 // Check if both windows are ready and close splash if so (with minimum display time)
 function tryCloseSplashScreen() {
-  console.log('[main] tryCloseSplashScreen: mainWindowReady=' + mainWindowReady + ' aiWorkerWindowReady=' + aiWorkerWindowReady + ' aiEnabled=' + aiEnabled);
-  if (mainWindowReady && (aiWorkerWindowReady || !aiEnabled || launchSpeechUi || aiWorkerSuppressed)) {
-    console.log('[main] Conditions met, closing splash');
+  const sidecarReadyOrNotNeeded = sidecarInitialized || !aiEnabled || aiWorkerSuppressed || launchSpeechUi;
+  const allConditionsMet = mainWindowLoaded && rendererReady && sidecarReadyOrNotNeeded;
+  
+  // Update progress based on what's completed
+  if (allConditionsMet && splashWindow && !splashWindow.isDestroyed()) {
+    try { 
+      splashWindow.webContents.send('splash:update-status', { message: 'Ready', progress: 100 }); 
+      lastStatusUpdateTime = Date.now();
+      console.log('[main] All ready, showing final status');
+    } catch(e){ console.error('[main] Error sending ready status:', e); }
+  }
+  
+  // Only close splash when ALL conditions are met
+  if (allConditionsMet) {
     if (splashWindow && !splashWindow.isDestroyed()) {
-      // Ensure splash is visible for at least 1.2 seconds (covers transition animations)
-      const timeShown = Date.now() - splashShownTime;
-      const delayNeeded = Math.max(0, 1200 - timeShown);
-      console.log('[main] Closing splash in ' + delayNeeded + 'ms');
+      // Enforce minimum times:
+      // 1. Ensure splash visible for at least 800ms total
+      const timeShown = splashShownTime > 0 ? Date.now() - splashShownTime : 0;
+      const minTotalDisplayTime = 800;
+      
+      // 2. Ensure final "Ready" message visible for 1.5s
+      const timeSinceLastStatus = Date.now() - lastStatusUpdateTime;
+      const minStatusDisplayTime = 1500;
+      
+      const totalDelayNeeded = Math.max(0, minTotalDisplayTime - timeShown);
+      const statusDelayNeeded = Math.max(0, minStatusDisplayTime - timeSinceLastStatus);
+      const finalDelay = Math.max(totalDelayNeeded, statusDelayNeeded);
+      
+      console.log('[main] Closing splash after ' + finalDelay + 'ms (total: ' + timeShown + 'ms, status: ' + timeSinceLastStatus + 'ms)');
       
       setTimeout(() => {
         splashClosed = true;
-        console.log('[main] Destroying splash window');
+        console.log('[splash-close] Destroying splash window');
         try { splashWindow.destroy(); splashWindow = null; } catch(e){ console.error('[main] Error destroying splash:', e); }
-        console.log('[main] Showing main window');
-        try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } } catch(e){ console.error('[main] Error showing main window:', e); }
-        try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
-      }, delayNeeded);
+        
+        setTimeout(() => {
+          try { 
+            if (mainWindow && !mainWindow.isDestroyed()) { 
+              mainWindow.setPosition(initialWindowX, initialWindowY);
+              mainWindow.show(); 
+              mainWindow.focus(); 
+            } 
+          } catch(e){ console.error('[main] Error showing main window:', e); }
+          try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
+        }, 50);
+      }, finalDelay);
     }
-  } else {
-    console.log('[main] Conditions not met yet');
   }
 }
+
 
 async function setAiEnabled(nextEnabled) {
   const desired = !!nextEnabled;
@@ -852,6 +1031,23 @@ ipcMain.handle('ai:set-enabled', async (_event, desiredState) => {
   }
   const result = await setAiEnabled(desiredState);
   return { ...result, status: getCurrentSidecarStatus() };
+});
+
+// Renderer signals it's ready to display (after DOMContentLoaded initialization)
+ipcMain.handle('renderer-ready', async () => {
+  console.log('[main] Renderer initialization complete');
+  rendererReady = true;
+  
+  // Send next stage message
+  try {
+    splashWindow.webContents.send('splash:update-status', { message: 'Initializing speech...', progress: 65 });
+    lastStatusUpdateTime = Date.now();
+  } catch (err) {
+    console.warn('[main] Failed to send initialization message', err);
+  }
+  
+  tryCloseSplashScreen();
+  return { success: true };
 });
 
 // Remote control pairing callback
@@ -1198,6 +1394,10 @@ ipcMain.handle('get-current-license-status', () => {
 // Allow other windows to request opening the setup modal in the main window
 ipcMain.on('show-setup-modal', () => {
   try {
+    if (mainWindow && !splashClosed) {
+      console.log('[show-setup-modal] Splash still active, deferring window show');
+      return; // Don't show window while splash is active
+    }
     if (mainWindow) {
       // Ensure the main window is visible and focused before forwarding the request
       try { mainWindow.show(); mainWindow.focus(); } catch(e){}
@@ -1209,7 +1409,19 @@ ipcMain.on('show-setup-modal', () => {
 });
 
 ipcMain.handle('focus-main-window', async () => {
-  try { if (mainWindow) { mainWindow.show(); mainWindow.focus(); } return true; } catch (e) { return false; }
+  try { 
+    if (splashClosed && mainWindow) { 
+      console.log('[focus-main-window] Showing window');
+      mainWindow.show(); 
+      mainWindow.focus(); 
+    } else if (!splashClosed) {
+      console.log('[focus-main-window] Splash still active, not showing window');
+    }
+    return true; 
+  } catch (e) { 
+    console.error('[focus-main-window] error:', e);
+    return false; 
+  }
 });
 
 // IPC helper to write a combined diagnostic report
@@ -1407,24 +1619,18 @@ async function createWindow() {
       contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
     }
   };
+  
+  // Save initial position for moving window back on-screen after splash closes
+  initialWindowX = opts.x || 100;
+  initialWindowY = opts.y || 100;
 
-  // Create the main window instance (hidden)
+  // Create the main window instance (hidden but at proper position initially)
   mainWindow = new BrowserWindow(opts);
-
-  // Block DevTools shortcuts in production builds
-  if (process.env.NODE_ENV === 'production') {
-    mainWindow.webContents.on('before-input-event', (event, input) => {
-      // Block F12 and Ctrl+Shift+I
-      if ((input.key.toLowerCase() === 'f12') || 
-          (input.control && input.shift && input.key.toLowerCase() === 'i')) {
-        event.preventDefault();
-      }
-    });
-  }
-
-  // Create and show splash FIRST before loading any HTML
+  
+  // Create and show splash FIRST before loading any HTML and moving main window off-screen
   try {
     const b = mainWindow.getBounds();
+    console.log('[splash-init] Creating splash at position:', b.x, b.y, 'size:', b.width, 'x', b.height);
     splashWindow = new BrowserWindow({
       x: b.x,
       y: b.y,
@@ -1441,22 +1647,91 @@ async function createWindow() {
       show: false,
       webPreferences: { nodeIntegration: true, contextIsolation: false }
     });
+    console.log('[splash-init] Splash window created');
     splashWindow.setMenuBarVisibility(false);
     
     // Load splash and wait for it to be ready before loading main window
+    console.log('[splash-init] Loading splash.html');
     await splashWindow.loadFile('splash.html');
+    console.log('[splash-init] splash.html loaded');
     
     // Send current sidecar status to splash window once it's loaded
     if (latestSidecarStatus) {
       try { splashWindow.webContents.send('sidecar:status', latestSidecarStatus); } catch (err) { console.warn('[splash] Failed to send initial status', err); }
     }
     
+    console.log('[splash-init] Calling splashWindow.show()');
     splashWindow.show();
     splashShownTime = Date.now();  // Record when splash becomes visible
+    lastStatusUpdateTime = Date.now();  // Start tracking status update timing
+    console.log('[splash-init] Splash shown, splashShownTime set');
+    
+    // Send initial status message immediately
+    try {
+      splashWindow.webContents.send('splash:update-status', { message: 'Starting up...', progress: 5 });
+      console.log('[splash-init] Sent initial status message');
+    } catch (err) {
+      console.warn('[splash-init] Failed to send initial status', err);
+    }
+    
+    // Start sidecar initialization immediately (model download happens in background)
+    ensureAiSpeechWorkerWindow();
   } catch (e) { console.warn('Failed to create/show splash window', e); }
 
+  // NOW move main window off-screen until splash closes
+  console.log('[main-init] Moving main window off-screen');
+  mainWindow.setPosition(-10000, -10000);
+  
+  // Send message BEFORE loading main window
+  try {
+    splashWindow.webContents.send('splash:update-status', { message: 'Loading interface...', progress: 10 });
+    lastStatusUpdateTime = Date.now();
+  } catch (err) {
+    console.warn('[main-init] Failed to send loading message', err);
+  }
+  
+  // Intercept all show() calls to prevent showing before splash closes
+  const originalShow = mainWindow.show.bind(mainWindow);
+  mainWindow.show = function() {
+    const stack = new Error().stack.split('\n');
+    const caller = stack[2] ? stack[2].trim() : 'unknown';
+    
+    // If splash is still active, move window off-screen if it somehow got shown
+    if (!splashClosed) {
+      const pos = mainWindow.getPosition();
+      if (pos[0] !== -10000) {
+        console.log('[mainWindow.show] BLOCKED (splash active) - moving back off-screen from', pos);
+        mainWindow.setPosition(-10000, -10000);
+      }
+      return;
+    }
+    
+    // Splash is closed, restore position if off-screen
+    const pos = mainWindow.getPosition();
+    if (pos[0] === -10000) {
+      console.log('[mainWindow.show] Restoring to:', [initialWindowX, initialWindowY]);
+      mainWindow.setPosition(initialWindowX, initialWindowY);
+    }
+    
+    console.log('[mainWindow.show] Showing - called from:', caller);
+    return originalShow();
+  };
+
+  // Block DevTools shortcuts in production builds
+  if (process.env.NODE_ENV === 'production') {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      // Block F12 and Ctrl+Shift+I
+      if ((input.key.toLowerCase() === 'f12') || 
+          (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        event.preventDefault();
+      }
+    });
+  }
+
   // NOW load the main window HTML (will stay hidden behind visible splash)
+  console.log('[main-init] Calling mainWindow.loadFile');
   mainWindow.loadFile('index.html');
+  console.log('[main-init] loadFile called (window still hidden)');
   
   // Ensure fresh installs default to dark theme so UI is initialized in dark mode
   try {
@@ -1475,8 +1750,33 @@ async function createWindow() {
 
   // Mark main window as ready when it's ready to show
   mainWindow.once('ready-to-show', () => {
-    console.log('[main] Main window ready-to-show');
+    console.log('[main] Main window ready-to-show (off-screen until splash closes)');
     mainWindowReady = true;
+    
+    // Start sidecar if AI is enabled so splash can detect initialization
+    if (aiEnabled && !aiWorkerSuppressed && !launchSpeechUi) {
+      console.log('[main] Calling ensureAiSpeechWorkerWindow from ready-to-show');
+      ensureAiSpeechWorkerWindow();
+    } else {
+      console.log('[main] Not starting sidecar: aiEnabled=' + aiEnabled + ' suppressed=' + aiWorkerSuppressed + ' launchSpeech=' + launchSpeechUi);
+    }
+    
+    // Don't call tryCloseSplashScreen here - wait for content to load
+  });
+
+  // Listen for when the window content finishes loading
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[main] Main window content loaded');
+    mainWindowLoaded = true;
+    
+    // Send next stage message BEFORE renderer processes things
+    try {
+      splashWindow.webContents.send('splash:update-status', { message: 'Rendering interface...', progress: 35 });
+      lastStatusUpdateTime = Date.now();
+    } catch (err) {
+      console.warn('[main] Failed to send rendering message', err);
+    }
+    
     tryCloseSplashScreen();
   });
 
@@ -1494,9 +1794,9 @@ async function createWindow() {
   const { ipcMain } = require('electron');
   ipcMain.handle('is-splash-closed', () => splashClosed);
 
-  // Fallback close in case dependencies aren't met within 10 seconds
+  // Fallback close in case dependencies aren't met within 15 seconds
   setTimeout(() => { 
-    console.log('[main] 10-second fallback timeout firing');
+    console.log('[main] 15-second fallback timeout firing');
     if (splashWindow) { 
       console.log('[main] Force closing splash due to timeout');
       splashClosed = true;
@@ -1504,7 +1804,7 @@ async function createWindow() {
       try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){};
       try { if (mainWindow) { console.log('[main] Showing main window from fallback'); mainWindow.show(); mainWindow.focus(); } } catch(e){ console.error('[main] Error showing main from fallback:', e); }
     }
-  }, 10000);
+  }, 15000);
 
   // Save window state on move/resize/maximize/unmaximize/fullscreen changes
   mainWindow.on('resize', saveWindowStateDebounced);

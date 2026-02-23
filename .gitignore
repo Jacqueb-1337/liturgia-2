@@ -14,6 +14,7 @@ SongWords.db
 /remote-client-test.html
 test-*
 inspect-*
+build.log
 
 # Copilot instructions
 .github/copilot-instructions.md
