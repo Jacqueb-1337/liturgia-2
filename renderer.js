@@ -3595,10 +3595,9 @@ function renderSchedule() {
     
     // Click handlers for header
     header.onclick = (e) => {
-      if (e.target === header || e.target === text) {
-        focusedScheduleItem = { type: 'header', itemIndex: itemIndex };
-        handleScheduleItemClick(itemIndex, e);
-      }
+      if (e.target.closest('.delete-btn')) return; // Ignore clicks on delete button
+      focusedScheduleItem = { type: 'header', itemIndex: itemIndex };
+      handleScheduleItemClick(itemIndex, e);
     };
     header.ondblclick = (e) => {
       // Don't trigger double-click if user clicked delete button
@@ -3653,10 +3652,8 @@ function renderSchedule() {
               
               const currentVerseIndex = verseIndex;
               verseItem.onclick = (e) => {
-                if (e.target === verseItem) {
-                  focusedScheduleItem = { type: 'song-verse', itemIndex: itemIndex, verseIndex: currentVerseIndex };
-                  handleScheduleSongVerseClick(itemIndex, currentVerseIndex, e);
-                }
+                focusedScheduleItem = { type: 'song-verse', itemIndex: itemIndex, verseIndex: currentVerseIndex };
+                handleScheduleSongVerseClick(itemIndex, currentVerseIndex, e);
               };
               verseItem.ondblclick = () => handleScheduleSongVerseDoubleClick(itemIndex, currentVerseIndex);
               verseItem.addEventListener('keydown', (e) => {
@@ -3958,10 +3955,15 @@ function handleScheduleVerseClick(itemIndex, verseIndexInGroup, event) {
   
   renderSchedule();
   
-  // Preview the selected verses
-  const selectedIndices = item.selectedVerses.map(i => item.indices[i]);
-  if (selectedIndices.length > 0) {
-    updatePreview(selectedIndices);
+  // Switch to Bible tab and sync selection with the tab
+  switchTab('verses');
+  const selectedVerseIndices = item.selectedVerses.map(i => item.indices[i]);
+  selectedIndices = selectedVerseIndices;
+  
+  // Display the selected verses in the Bible tab
+  if (selectedVerseIndices.length > 0) {
+    updateVerseDisplay();
+    updatePreview(selectedVerseIndices);
   }
 }
 
@@ -3981,13 +3983,6 @@ function handleScheduleVerseDoubleClick(itemIndex, verseIndexInGroup) {
 
 function handleScheduleSongVerseClick(itemIndex, verseIndex, event) {
   const item = scheduleItems[itemIndex];
-  
-  // Switch to songs tab and select the song
-  switchTab('songs');
-  selectedSongIndices = [item.songIndex];
-  selectedSongVerseIndex = verseIndex;
-  renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
-  displaySelectedSong();
   
   // Handle multi-selection
   if (event.shiftKey && item.selectedVerses.length > 0) {
@@ -4009,6 +4004,13 @@ function handleScheduleSongVerseClick(itemIndex, verseIndex, event) {
   } else {
     item.selectedVerses = [verseIndex];
   }
+  
+  // Switch to songs tab and sync selection with the tab
+  switchTab('songs');
+  selectedSongIndices = [item.songIndex];
+  selectedSongVerseIndex = verseIndex; // Use the first selected verse for display
+  renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+  displaySelectedSong();
   
   renderSchedule();
   
