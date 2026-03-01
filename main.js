@@ -151,7 +151,7 @@ let sidecarInitialized = false;
 let initialWindowX = 100;
 let initialWindowY = 100;
 let defaultBible = 'en_kjv.json'; // Default Bible
-let liveWindow = null;
+const liveWindows = new Map(); // keyed by display id
 let speechWindow = null;
 let aiSpeechWorkerWindow = null;
 let aiWorkerSuppressed = false;
@@ -1380,7 +1380,7 @@ let _lastLicenseStatus = null;
 ipcMain.on('license-status-update', (event, status) => {
   try {
     _lastLicenseStatus = status || null;
-    if (liveWindow && liveWindow.webContents) liveWindow.webContents.send('license-status', status);
+    for (const win of liveWindows.values()) { if (!win.isDestroyed()) win.webContents.send('license-status', status); }
     if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('license-status', status);
   } catch (e) {
     console.error('license-status-update forward error', e);
@@ -1446,8 +1446,9 @@ async function startSaveReport() {
   // Capture live window snapshot if available
   let liveScreenshotBase64 = null;
   try {
-    if (liveWindow && liveWindow.webContents && !liveWindow.isDestroyed()) {
-      const image = await liveWindow.webContents.capturePage();
+    const firstWin = [...liveWindows.values()].find(w => !w.isDestroyed());
+    if (firstWin) {
+      const image = await firstWin.webContents.capturePage();
       const png = image.toPNG();
       liveScreenshotBase64 = 'data:image/png;base64,' + png.toString('base64');
     }
@@ -1815,12 +1816,12 @@ async function createWindow() {
   mainWindow.on('leave-full-screen', () => { applySettingsPatch({ window: { fullscreen: false } }); saveWindowStateDebounced(); });
   mainWindow.on('close', saveWindowState);
 
-  // Close live window when main window closes
+  // Close live windows when main window closes
   mainWindow.on('closed', () => {
-    if (liveWindow) {
-      liveWindow.close();
-      liveWindow = null;
+    for (const win of liveWindows.values()) {
+      if (!win.isDestroyed()) win.close();
     }
+    liveWindows.clear();
     if (aiSpeechWorkerWindow) {
       aiSpeechWorkerWindow.destroy();
       aiSpeechWorkerWindow = null;
@@ -2416,12 +2417,43 @@ ipcMain.handle('load-all-verses', async (event, baseDir) => {
   return await loadAllVersesFromDiskMain(baseDir);
 });
 
-ipcMain.handle('create-live-window', async () => {
-  if (liveWindow) {
-    liveWindow.show();
-    liveWindow.focus();
-    return;
+function createLiveWindowForDisplay(display) {
+  if (liveWindows.has(display.id)) {
+    const existing = liveWindows.get(display.id);
+    if (!existing.isDestroyed()) {
+      existing.show();
+      existing.focus();
+      return;
+    }
   }
+  const win = new BrowserWindow({
+    parent: null,
+    title: 'Liturgia Live',
+    icon: getIconPath(),
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    fullscreen: true,
+    frame: false,
+    show: false,
+    skipTaskbar: false,
+    alwaysOnTop: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+  if (process.platform === 'win32') {
+    win.setAppDetails({ appId: 'com.liturgia.live' });
+  }
+  liveWindows.set(display.id, win);
+  win.loadFile('live.html');
+  win.once('ready-to-show', () => { win.show(); });
+  win.on('closed', () => { liveWindows.delete(display.id); });
+}
+
+ipcMain.handle('create-live-window', async () => {
   const settingsPath = path.join(getUserDataDir(app), 'settings.json');
   let settings = {};
   try {
@@ -2429,74 +2461,72 @@ ipcMain.handle('create-live-window', async () => {
     settings = JSON.parse(data);
   } catch {}
   const displays = screen.getAllDisplays();
-  const defaultDisplayId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
-  const display = displays.find(d => d.id == defaultDisplayId) || displays[0];
-  if (display) {
-    liveWindow = new BrowserWindow({
-      parent: null,
-      title: 'Liturgia Live',
-      icon: getIconPath(),
-      x: display.bounds.x,
-      y: display.bounds.y,
-      width: display.bounds.width,
-      height: display.bounds.height,
-      fullscreen: true,
-      frame: false,
-      show: false,
-      skipTaskbar: false,
-      alwaysOnTop: false,
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false
-      }
-    });
-    
-    // Set a different app user model ID for Windows to force separate taskbar icon
-    if (process.platform === 'win32') {
-      liveWindow.setAppDetails({
-        appId: 'com.liturgia.live'
-      });
-    }
-    
-    liveWindow.loadFile('live.html');
-    liveWindow.once('ready-to-show', () => {
-      liveWindow.show();
-    });
-    liveWindow.on('closed', () => {
-      liveWindow = null;
-    });
+  // Support liveDisplays array; fall back to defaultDisplay or first display
+  let targetIds = settings.liveDisplays;
+  if (!Array.isArray(targetIds) || targetIds.length === 0) {
+    const fallbackId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
+    targetIds = fallbackId ? [fallbackId] : [];
+  }
+  for (const id of targetIds) {
+    const display = displays.find(d => d.id == id) || displays[0];
+    if (display) createLiveWindowForDisplay(display);
   }
 });
 
+ipcMain.handle('open-live-window-on-display', async (event, displayId) => {
+  const displays = screen.getAllDisplays();
+  const display = displays.find(d => d.id == displayId);
+  if (display) createLiveWindowForDisplay(display);
+});
+
+ipcMain.handle('close-live-window-on-display', async (event, displayId) => {
+  const win = liveWindows.get(displayId);
+  if (win && !win.isDestroyed()) win.close();
+});
+
+ipcMain.handle('get-live-window-display-ids', () => {
+  return [...liveWindows.keys()];
+});
+
 ipcMain.handle('close-live-window', () => {
-  if (liveWindow && !liveWindow.isDestroyed()) {
-    liveWindow.close();
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.close();
   }
 });
 
 ipcMain.on('update-live-window', (event, data) => {
-  if (liveWindow) {
-    liveWindow.webContents.send('update-content', data);
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('update-content', data);
   }
 });
 
 ipcMain.on('clear-live-text', () => {
-  if (liveWindow) liveWindow.webContents.send('clear-live-text');
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('clear-live-text');
+  }
 });
 
 ipcMain.on('show-live-text', () => {
-  if (liveWindow) liveWindow.webContents.send('show-live-text');
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('show-live-text');
+  }
 });
 
 ipcMain.on('set-live-black', () => {
-  if (liveWindow) liveWindow.webContents.send('set-live-black');
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('set-live-black');
+  }
 });
 
 ipcMain.on('reset-live-canvas', () => {
-  if (liveWindow) liveWindow.webContents.send('reset-live-canvas');
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('reset-live-canvas');
+  }
 });
 
 // Forward unified mode messages to live window
 ipcMain.on('set-live-mode', (event, mode) => {
-  if (liveWindow) liveWindow.webContents.send('set-live-mode', mode);
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('set-live-mode', mode);
+  }
 });

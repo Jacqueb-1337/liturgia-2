@@ -403,13 +403,18 @@
           </label>
         </div>
         <div class="form-row">
-          <label for="default-display">Default Display for Live Content</label>
-          <select id="default-display"></select>
-          <button id="reload-displays" class="btn">Reload Displays</button>
+          <label>Live Windows</label>
+          <div class="display-manager">
+            <div id="display-list" class="display-list"></div>
+            <div class="display-manager-footer">
+              <button id="add-display-entry" class="btn display-add-btn">+ Add Window</button>
+              <button id="reload-displays" class="btn">Reload Displays</button>
+            </div>
+          </div>
         </div>
-        <div class="form-row">
-          <button id="open-live-window" class="btn">Open Live Window</button>
-          <button id="close-live-window" class="btn">Close Live Window</button>
+        <div class="form-row display-global-actions">
+          <button id="open-live-window" class="btn primary">Open Live Windows</button>
+          <button id="close-live-window" class="btn">Close All Live Windows</button>
         </div>
         <button class="save-settings btn" data-panel="display">Save</button>
         <span class="save-status" data-panel="display"></span>

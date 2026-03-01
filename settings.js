@@ -193,14 +193,6 @@ window.addEventListener('DOMContentLoaded', () => {
       
       // Load displays in background - don't block UI
       loadDisplays().catch((e) => console.error('Failed to load displays:', e));
-
-      // Set default display selection
-      const defaultDisplaySelect = document.getElementById('default-display');
-      if (settings && settings.defaultDisplay) {
-        defaultDisplaySelect.value = settings.defaultDisplay;
-      } else {
-        defaultDisplaySelect.selectedIndex = 0; // Select first option if none saved
-      }
     } catch (err) {
       console.error('Error in deferred settings initialization:', err);
     }
@@ -524,9 +516,6 @@ function setupAtomicSaving() {
       applyDarkTheme(!!darkEl.checked);
     }
     
-    const defaultDisplayEl = document.getElementById('default-display');
-    if (defaultDisplayEl) patch.defaultDisplay = defaultDisplayEl.value;
-    
     const auEl = document.getElementById('auto-update-startup');
     if (auEl) patch.autoCheckUpdates = !!auEl.checked;
     
@@ -562,15 +551,6 @@ function setupAtomicSaving() {
   const darkEl = document.getElementById('dark-theme');
   if (darkEl) {
     darkEl.addEventListener('change', () => {
-      clearTimeout(savingTimeout);
-      savingTimeout = setTimeout(saveCurrentSettings, 500);
-    });
-  }
-  
-  // Setup listeners for default display dropdown
-  const defaultDisplayEl = document.getElementById('default-display');
-  if (defaultDisplayEl) {
-    defaultDisplayEl.addEventListener('change', () => {
       clearTimeout(savingTimeout);
       savingTimeout = setTimeout(saveCurrentSettings, 500);
     });
@@ -1554,12 +1534,22 @@ document.getElementById('dark-theme').addEventListener('change', (e) => {
 
 document.getElementById('reload-displays').addEventListener('click', loadDisplays);
 
+document.getElementById('add-display-entry').addEventListener('click', async () => {
+  const ids = readCurrentIds();
+  const defaultId = _allDisplays.length > 0 ? _allDisplays[0].id : 1;
+  ids.push(defaultId);
+  await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
+  renderDisplayEntries(ids);
+});
+
 document.getElementById('open-live-window').addEventListener('click', async () => {
   await ipcRenderer.invoke('create-live-window');
+  setTimeout(loadDisplays, 400);
 });
 
 document.getElementById('close-live-window').addEventListener('click', async () => {
   await ipcRenderer.invoke('close-live-window');
+  setTimeout(loadDisplays, 400);
 });
 
   // Sign-in / Sign-out buttons
@@ -1834,15 +1824,68 @@ async function selectBible(bible) {
   }, 2000);
 }
 
+let _allDisplays = [];
+
 async function loadDisplays() {
-  const displays = await ipcRenderer.invoke('get-displays');
-  const select = document.getElementById('default-display');
-  select.innerHTML = '';
-  displays.forEach((display, i) => {
-    const index = i + 1;
-    const option = document.createElement('option');
-    option.value = display.id;
-    option.textContent = `Display ${index} (${display.bounds.width}x${display.bounds.height})`;
-    select.appendChild(option);
+  _allDisplays = await ipcRenderer.invoke('get-displays');
+  const settings = await ipcRenderer.invoke('load-settings');
+  const savedIds = (settings && Array.isArray(settings.liveDisplays)) ? settings.liveDisplays : [];
+  renderDisplayEntries(savedIds);
+}
+
+function renderDisplayEntries(ids) {
+  const container = document.getElementById('display-list');
+  container.innerHTML = '';
+  ids.forEach((displayId, index) => {
+    container.appendChild(buildDisplayEntry(displayId, index, ids.length));
   });
+}
+
+function buildDisplayEntry(displayId, index, total) {
+  const row = document.createElement('div');
+  row.className = 'display-row';
+
+  const numLabel = document.createElement('span');
+  numLabel.className = 'display-row-num';
+  numLabel.textContent = index + 1;
+  row.appendChild(numLabel);
+
+  const select = document.createElement('select');
+  select.className = 'display-row-select';
+  _allDisplays.forEach((d, i) => {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = `Display ${i + 1}  (${d.bounds.width}\u00d7${d.bounds.height})`;
+    if (d.id == displayId) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.addEventListener('change', async () => {
+    const ids = readCurrentIds();
+    ids[index] = parseInt(select.value, 10);
+    await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
+    renderDisplayEntries(ids);
+  });
+  row.appendChild(select);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'btn display-row-remove';
+  removeBtn.textContent = '\u2212'; // minus sign
+  removeBtn.title = 'Remove this window';
+  removeBtn.addEventListener('click', async () => {
+    const ids = readCurrentIds();
+    ids.splice(index, 1);
+    await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
+    renderDisplayEntries(ids);
+  });
+  row.appendChild(removeBtn);
+
+  return row;
+}
+
+function readCurrentIds() {
+  const rows = document.querySelectorAll('#display-list .display-row');
+  return [...rows].map(row => {
+    const sel = row.querySelector('.display-row-select');
+    return sel ? parseInt(sel.value, 10) : null;
+  }).filter(id => id !== null);
 }
