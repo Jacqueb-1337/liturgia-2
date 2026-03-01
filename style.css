@@ -892,6 +892,18 @@ body.dark-theme .media-item div[style*="color: #666"] {
   color: #999 !important;
 }
 
+#media-display.drag-over {
+  outline: 2px dashed #0078d4;
+  outline-offset: -4px;
+  background: rgba(0, 120, 212, 0.06);
+  border-radius: 4px;
+}
+
+body.dark-theme #media-display.drag-over {
+  outline-color: #4da6ff;
+  background: rgba(77, 166, 255, 0.08);
+}
+
 /* Media thumbnail helpers */
 .media-thumb { position: relative; }
 .media-thumb .fa-badge { position: absolute; width: 18px; height: 18px; padding: 2px; border-radius: 50%; display: inline-flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.55); }
@@ -961,6 +973,8 @@ body.dark-theme #media-context-menu .context-menu-item:hover {
   padding: 20px;
   width: 500px;
   max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
@@ -1895,4 +1909,263 @@ body.dark-theme .display-row-remove:hover {
 
 .display-global-actions {
   margin-top: 6px;
+}
+
+/* ===== Website Panel Styles ===== */
+.website-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;           /* keep flex so children lay out even when hidden */
+  flex-direction: column;
+  background: #fff;
+  overflow: hidden;        /* clip webview/nav overflow to panel bounds */
+  visibility: hidden;      /* hides visually but keeps webview process alive */
+  pointer-events: none;
+}
+
+.website-panel.visible {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.website-webview-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+/* In fullscreen mode the panel stays in position:absolute within #slide-live.
+   Just hide the nav bar so the webview fills all available space. */
+.website-panel.fullscreen .website-nav-bar {
+  display: none;
+}
+
+/* Video picker button in nav bar */
+.website-vid-picker-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.website-vid-fullscreen-btn {
+  white-space: nowrap;
+  position: relative;
+  padding-right: 18px !important; /* room for badge */
+}
+.website-vid-fullscreen-btn.active {
+  background: #b42828;
+  border-color: #e07070;
+  color: #fff;
+}
+body.dark-theme .website-vid-fullscreen-btn.active {
+  background: #a02020;
+  border-color: #d06060;
+}
+/* Count badge — bottom-right corner of button */
+.website-vid-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-weight: bold;
+  line-height: 1;
+  color: #0078d4;
+  pointer-events: none;
+}
+.website-vid-fullscreen-btn.active .website-vid-badge {
+  color: #ffcccc;
+}
+/* Video picker dropdown — fixed-position so it escapes panel overflow:hidden */
+.website-vid-dropdown {
+  position: fixed;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  z-index: 9999;
+  overflow: hidden;
+}
+body.dark-theme .website-vid-dropdown {
+  background: #2a2a2a;
+  border-color: #444;
+}
+.website-vid-dropdown-item {
+  display: flex;
+  flex-direction: column;
+  padding: 7px 11px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  color: #222;
+  gap: 2px;
+}
+body.dark-theme .website-vid-dropdown-item {
+  border-bottom-color: #3a3a3a;
+  color: #ddd;
+}
+.website-vid-dropdown-item:last-child { border-bottom: none; }
+.website-vid-dropdown-item:hover { background: #f0f5ff; }
+body.dark-theme .website-vid-dropdown-item:hover { background: #333; }
+.website-vid-dropdown-item .vid-label {
+  font-weight: bold;
+  color: #0078d4;
+}
+body.dark-theme .website-vid-dropdown-item .vid-label { color: #5ab0ff; }
+.website-vid-dropdown-item .vid-meta {
+  color: #666;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+body.dark-theme .website-vid-dropdown-item .vid-meta { color: #999; }
+.website-vid-dropdown .exit-row {
+  padding: 7px 11px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: bold;
+  color: #b42828;
+  background: #fff5f5;
+  text-align: center;
+}
+body.dark-theme .website-vid-dropdown .exit-row {
+  background: #2e1a1a;
+  color: #e07070;
+}
+.website-vid-dropdown .exit-row:hover { background: #ffe0e0; }
+body.dark-theme .website-vid-dropdown .exit-row:hover { background: #3a1e1e; }
+
+/* Actions (three-dot) button wrapper */
+.website-actions-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+.website-actions-btn {
+  font-size: 18px;
+  line-height: 1;
+}
+.website-actions-dropdown {
+  position: fixed;
+  min-width: 175px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  z-index: 9999;
+  overflow: hidden;
+}
+body.dark-theme .website-actions-dropdown {
+  background: #2a2a2a;
+  border-color: #444;
+}
+.website-actions-item {
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #222;
+  border-bottom: 1px solid #eee;
+}
+.website-actions-item:last-child { border-bottom: none; }
+.website-actions-item:hover { background: #f0f5ff; }
+body.dark-theme .website-actions-item { color: #ddd; border-bottom-color: #3a3a3a; }
+body.dark-theme .website-actions-item:hover { background: #333; }
+
+.website-nav-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #ccc;
+  flex-shrink: 0;
+}
+
+.website-nav-btn {
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: bold;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #333;
+  flex-shrink: 0;
+}
+
+.website-nav-btn:hover {
+  background: #e0e0e0;
+}
+
+.website-url-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  min-width: 0;
+}
+
+.website-preset-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #e8f0fe;
+  border: 1px solid #b0c4e8;
+  border-radius: 12px;
+  cursor: pointer;
+  color: #333;
+  white-space: nowrap;
+}
+
+.website-preset-btn:hover {
+  background: #ccdafb;
+}
+
+/* Dark theme - website panels */
+body.dark-theme .website-panel {
+  background: #1e1e1e;
+}
+
+body.dark-theme .website-nav-bar {
+  background: #2a2a2a;
+  border-bottom-color: #444;
+}
+
+body.dark-theme .website-nav-btn {
+  background: #333;
+  border-color: #555;
+  color: #eee;
+}
+
+body.dark-theme .website-nav-btn:hover {
+  background: #444;
+}
+
+body.dark-theme .website-url-input {
+  background: #333;
+  border-color: #555;
+  color: #eee;
+}
+
+body.dark-theme .website-preset-btn {
+  background: #2c3a55;
+  border-color: #445577;
+  color: #ccd;
+}
+
+body.dark-theme .website-preset-btn:hover {
+  background: #3a4f74;
+}
+
+/* Dark theme - website modal preset buttons */
+body.dark-theme #website-modal .website-preset-btn {
+  background: #2c3a55;
+  border-color: #445577;
+  color: #ccd;
+}
+
+body.dark-theme #website-modal .website-preset-btn:hover {
+  background: #3a4f74;
 }

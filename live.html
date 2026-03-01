@@ -64,8 +64,11 @@
   </style>
 </head>
 <body>
-  <canvas id="live-canvas" style="width: 100vw; height: 100vh; display: block;"></canvas>
-  <canvas id="live-text-canvas" style="position:absolute;left:0;top:0;width:100vw;height:100vh;pointer-events:none;display:block;"></canvas>
+  <img id="live-gif-bg" style="position:absolute;top:0;left:0;width:100vw;height:100vh;object-fit:cover;display:none;z-index:0;" alt="">
+  <canvas id="live-canvas" style="position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:1;will-change:transform;"></canvas>
+  <canvas id="live-text-canvas" style="position:absolute;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2;display:block;will-change:transform;"></canvas>
+  <img id="live-mirror-img" alt=""
+       style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:100;display:none;">
   <script>
     const { ipcRenderer } = require('electron');
     
@@ -76,7 +79,44 @@
     // Backwards-compatible aliases for older code that references `canvas`/`ctx`
     const canvas = bgCanvas;
     const ctx = bgCtx;
-    
+
+    // Website mirror — receives JPEG frames from preview webview via IPC
+    const mirrorImg = document.getElementById('live-mirror-img');
+    let _mirrorBlobUrl = null;
+
+    function showMirrorVideo() { // keep old name so all call sites work
+      mirrorImg.style.display = 'block';
+    }
+    function hideMirrorVideo() {
+      mirrorImg.style.display = 'none';
+      mirrorImg.src = '';
+      if (_mirrorBlobUrl) { URL.revokeObjectURL(_mirrorBlobUrl); _mirrorBlobUrl = null; }
+    }
+
+    // GIF background element — sits behind canvases so animated GIFs play natively
+    const gifBg = document.getElementById('live-gif-bg');
+    function setGifBg(path, media) {
+      const size = (media && media.bgSize) || 'cover';
+      gifBg.style.objectFit = size === 'contain' ? 'contain' : (size === 'fill' ? 'fill' : 'cover');
+      gifBg.style.objectPosition = (media && media.bgPosition) || 'center';
+      // Only reassign src when the path actually changes — setting .src always
+      // resets browser GIF animation back to frame 0, even if the URL is identical.
+      const fileUrl = _fileUrlFor ? _fileUrlFor(path) : ('file:///' + (path || '').replace(/\\/g, '/'));
+      if (gifBg.dataset.liveSrc !== fileUrl) {
+        gifBg.src = fileUrl;
+        gifBg.dataset.liveSrc = fileUrl;
+      }
+      gifBg.style.display = 'block';
+    }
+    function clearGifBg() {
+      gifBg.style.display = 'none';
+      gifBg.src = '';
+      gifBg.dataset.liveSrc = '';
+    }
+    function isStaticImageType(type) {
+      return ['JPG','JPEG','PNG','WEBP','BMP'].includes(type);
+    }
+
     // License watermark state (updated from main via ipc)
     let licenseStatus = { active: true };
     ipcRenderer.on('license-status', (event, status) => {
@@ -427,6 +467,7 @@
     let currentRenderContent = null;
     let currentRenderWidth = 0;
     let currentRenderHeight = 0;
+    let currentAnimationFrameId = null;
     
     /**
      * Apply fade-out animation to remove current text
@@ -441,16 +482,19 @@
       const startTime = Date.now();
       const width = currentRenderWidth;
       const height = currentRenderHeight;
-      
-      // Capture the current BACKGROUND only (we'll fade out text separately)
-      const backgroundImageData = ctx.getImageData(0, 0, width, height);
-      
+
+      // If a video loop is actively drawing to bgCtx (ctx), DO NOT touch bgCtx at all —
+      // any putImageData/fillRect here will overwrite the video frame just painted and
+      // produce a visible freeze.  Animate text-only on textCtx instead, mirroring the
+      // approach used by applyTextFadeInAnimation.
+      const _liveVidRunning = !!(window._liveBgVideo && !window._liveBgVideo.paused);
+
       // Pre-render the OLD text to an off-screen canvas (use same logic as fade-in)
       const textCanvas = document.createElement('canvas');
       textCanvas.width = width;
       textCanvas.height = height;
-      const textCtx = textCanvas.getContext('2d');
-      textCtx.clearRect(0, 0, width, height);
+      const textCtxOff = textCanvas.getContext('2d');
+      textCtxOff.clearRect(0, 0, width, height);
       
       // Render OLD text to off-screen canvas using proper wrapping
       const styles = oldContent && oldContent.styles ? oldContent.styles : {};
@@ -458,8 +502,8 @@
       const numberStyle = styles.number || styles.title || {};
       const referenceStyle = styles.reference || {};
 
-      textCtx.textAlign = 'center';
-      textCtx.textBaseline = 'middle';
+      textCtxOff.textAlign = 'center';
+      textCtxOff.textBaseline = 'middle';
       
       const padding = width * 0.02;
       const availableWidth = width - (padding * 2);
@@ -468,15 +512,15 @@
       
       // Render verse number (top left)
       if (oldContent.number) {
-        textCtx.font = `${baseFontSize * 0.6}px Arial`;
-        textCtx.textAlign = 'left';
-        textCtx.fillStyle = numberStyle.color || '#fff';
-        textCtx.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
+        textCtxOff.font = `${baseFontSize * 0.6}px Arial`;
+        textCtxOff.textAlign = 'left';
+        textCtxOff.fillStyle = numberStyle.color || '#fff';
+        textCtxOff.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
       }
       
       // Render verse text (center) - use proper wrapping logic
       if (oldContent.text) {
-        textCtx.textAlign = 'center';
+        textCtxOff.textAlign = 'center';
         const textY = height / 2;
         const textLines = oldContent.text.split('\n');
         const allLines = [];
@@ -484,8 +528,8 @@
         textLines.forEach(textLine => {
           const segments = parseVerseSegments(textLine);
           segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          textCtx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+          textCtxOff.font = `${baseFontSize}px Arial`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtxOff);
           allLines.push(...wrappedLines);
         });
         
@@ -494,12 +538,12 @@
         // Size adjustment - grow font if space allows
         while (true) {
           const testSize = baseFontSize + 4;
-          textCtx.font = `${testSize}px Arial`;
+          textCtxOff.font = `${testSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
             segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtxOff);
             testLines.push(...wrappedLines);
           });
           if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
@@ -513,13 +557,12 @@
         // Shrink font if needed
         while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
           baseFontSize -= 2;
-          textCtx.font = `${baseFontSize}px Arial`;
+          textCtxOff.font = `${baseFontSize}px Arial`;
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
-            // Ensure inline markdown is parsed for measurement
             segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtxOff);
             testLines.push(...wrappedLines);
           });
           lines = testLines;
@@ -531,16 +574,19 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtxOff, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
         });
       }
       
       // Render reference (bottom right)
       if (oldContent.reference) {
-        textCtx.font = `${baseFontSize * 0.7}px Arial`;
-        textCtx.textAlign = 'right';
-        textCtx.fillText(oldContent.reference, width - padding, height - padding - baseFontSize * 0.3);
+        textCtxOff.font = `${baseFontSize * 0.7}px Arial`;
+        textCtxOff.textAlign = 'right';
+        textCtxOff.fillText(oldContent.reference, width - padding, height - padding - baseFontSize * 0.3);
       }
+
+      // Capture background snapshot only when no video loop owns bgCtx.
+      const backgroundImageData = _liveVidRunning ? null : ctx.getImageData(0, 0, width, height);
 
       // Easing helper (smooth acceleration/deceleration)
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
@@ -549,33 +595,41 @@
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / (duration * 1000), 1);
         const eased = easeInOutCubic(progress);
-        const reverseEased = 1 - eased; // For fade-out easing
+        const reverseEased = 1 - eased;
 
-        // Restore background first
-        ctx.putImageData(backgroundImageData, 0, 0);
-
-        // Draw watermark on top of background (so text fades out over it)
-        drawLicenseWatermark();
-
-        // Apply fade-out effect to TEXT ONLY (use eased values)
-        if (animationType === 'fade') {
-          ctx.globalAlpha = reverseEased;
-          ctx.drawImage(textCanvas, 0, 0);
-          ctx.globalAlpha = 1;
-        } else if (animationType === 'slide-left') {
-          // Slide out to left using fractional offset
-          const offset = eased * width;
-          ctx.drawImage(textCanvas, -offset, 0);
-        } else if (animationType === 'slide-right') {
-          // Slide out to right using fractional offset
-          const offset = eased * width;
-          ctx.drawImage(textCanvas, offset, 0);
-        } else if (animationType === 'slide-up') {
-          const offset = eased * height;
-          ctx.drawImage(textCanvas, 0, -offset);
-        } else if (animationType === 'slide-down') {
-          const offset = eased * height;
-          ctx.drawImage(textCanvas, 0, offset);
+        if (_liveVidRunning) {
+          // Video loop owns bgCtx — animate text fade-out on textCtx only.
+          textCtx.clearRect(0, 0, width, height);
+          if (animationType === 'fade') {
+            textCtx.globalAlpha = reverseEased;
+            textCtx.drawImage(textCanvas, 0, 0);
+            textCtx.globalAlpha = 1;
+          } else if (animationType === 'slide-left') {
+            textCtx.drawImage(textCanvas, -(eased * width), 0);
+          } else if (animationType === 'slide-right') {
+            textCtx.drawImage(textCanvas, eased * width, 0);
+          } else if (animationType === 'slide-up') {
+            textCtx.drawImage(textCanvas, 0, -(eased * height));
+          } else if (animationType === 'slide-down') {
+            textCtx.drawImage(textCanvas, 0, eased * height);
+          }
+        } else {
+          // Static/image/color background — composite on bgCtx as before.
+          ctx.putImageData(backgroundImageData, 0, 0);
+          drawLicenseWatermark();
+          if (animationType === 'fade') {
+            ctx.globalAlpha = reverseEased;
+            ctx.drawImage(textCanvas, 0, 0);
+            ctx.globalAlpha = 1;
+          } else if (animationType === 'slide-left') {
+            ctx.drawImage(textCanvas, -(eased * width), 0);
+          } else if (animationType === 'slide-right') {
+            ctx.drawImage(textCanvas, eased * width, 0);
+          } else if (animationType === 'slide-up') {
+            ctx.drawImage(textCanvas, 0, -(eased * height));
+          } else if (animationType === 'slide-down') {
+            ctx.drawImage(textCanvas, 0, eased * height);
+          }
         }
 
         if (progress < 1) {
@@ -583,6 +637,7 @@
         } else {
           // Animation complete
           currentAnimationFrameId = null;
+          if (_liveVidRunning) textCtx.clearRect(0, 0, width, height);
           if (callback) callback();
         }
       };
@@ -1029,6 +1084,28 @@
      */
     function renderContent(renderContent_content) {
       window.currentContent = renderContent_content;
+
+      // Kill any background video loop that was started by a previous renderContent call.
+      // EXCEPTION: if the new content reuses the exact same video path, keep the token and
+      // the element untouched so the existing rAF loop continues drawing without any gap
+      // (prevents the one-frame black flash between "old loop stopped" and "new loop first draw").
+      {
+        const _newBg = renderContent_content.backgroundMedia;
+        const _newBgIsVideo = _newBg && ['MP4','WEBM','OGG','MOV','AVI'].includes(_newBg.type);
+        const _newBgUrl = _newBgIsVideo ? _fileUrlFor(_newBg.path) : null;
+        const _sameBgVideo = _newBgIsVideo && window._liveBgVideo && window._liveBgVideo.dataset.bgSrc === _newBgUrl;
+        if (!_sameBgVideo) {
+          // Different background (or no bg video) — stop any running loop.
+          window._liveBgToken = (window._liveBgToken || 0) + 1;
+          if (window._liveBgVideo && (!_newBgIsVideo || !_sameBgVideo)) {
+            window._liveBgVideo.pause();
+            if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
+            window._liveBgVideo = null;
+          }
+        }
+        // Expose for use below (avoids re-computing).
+        renderContent._sameBgVideo = _sameBgVideo;
+      }
       
       console.log('Live window renderContent called with:', renderContent_content);
       
@@ -1043,19 +1120,63 @@
       currentRenderWidth = width;
       currentRenderHeight = height;
       
-      // If only the background changed, perform a background-only crossfade and keep text
+      // Helper: extract bg media type from a content object
+      function getBgMediaType(c) {
+        if (!c) return null;
+        if (c.backgroundMedia) return c.backgroundMedia.type;
+        if (c.isMedia) return c.mediaType;
+        return null;
+      }
+
+      // If only the background changed, perform a background-only crossfade and keep text.
+      // Exception: GIF backgrounds cannot be crossfaded through canvas drawImage (kills animation),
+      // so skip the crossfade and let normal rendering call setGifBg instead.
       if (oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
-        const dur = (renderContent_content && renderContent_content.transitionIn && renderContent_content.transitionIn.duration) ? renderContent_content.transitionIn.duration : 0.4;
-        applyBackgroundCrossfade(oldContent, renderContent_content, dur);
-        // Don't continue with normal rendering (crossfade draws the backgrounds and text)
-        // Store previous content for future out transitions
-        window.previousContent = renderContent_content;
-        return;
+        const newBgType = getBgMediaType(renderContent_content);
+        const oldBgType = getBgMediaType(oldContent);
+        if (newBgType === 'GIF') {
+          // Fall through to normal rendering path which calls setGifBg.
+          // (crossfade via canvas drawImage resets GIF animation)
+          if (currentAnimationFrameId) {
+            cancelAnimationFrame(currentAnimationFrameId);
+            currentAnimationFrameId = null;
+          }
+          if (oldBgType !== 'GIF') clearGifBg();
+        } else if (['MP4','WEBM','OGG','MOV','AVI'].includes(newBgType)) {
+          // Fall through to normal rendering path which starts the video rAF loop.
+          // applyBackgroundCrossfade would capture only a single static frame via
+          // renderBackgroundToCanvas and return early, leaving the canvas frozen.
+          if (currentAnimationFrameId) {
+            cancelAnimationFrame(currentAnimationFrameId);
+            currentAnimationFrameId = null;
+          }
+          if (oldBgType === 'GIF') clearGifBg();
+        } else {
+          // Crossfade is safe; clear the GIF img overlay if old background was a GIF
+          if (oldBgType === 'GIF') clearGifBg();
+          const dur = (renderContent_content && renderContent_content.transitionIn && renderContent_content.transitionIn.duration) ? renderContent_content.transitionIn.duration : 0.4;
+          applyBackgroundCrossfade(oldContent, renderContent_content, dur);
+          // Don't continue with normal rendering (crossfade draws the backgrounds and text)
+          // Store previous content for future out transitions
+          window.previousContent = renderContent_content;
+          return;
+        }
       }
       
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-      
+      // GIF backgrounds need clearRect so the img element beneath the canvas is visible.
+      // Video backgrounds: the rAF loop owns bgCtx every frame — writing black here would
+      // flash before the first loop iteration fires, so skip the fill entirely.
+      const _hasGifBg = (renderContent_content.backgroundMedia && renderContent_content.backgroundMedia.type === 'GIF')
+                     || (renderContent_content.isMedia && renderContent_content.mediaType === 'GIF');
+      const _hasVideoBg = !!(renderContent_content.backgroundMedia &&
+                             ['MP4','WEBM','OGG','MOV','AVI'].includes(renderContent_content.backgroundMedia.type));
+      if (_hasGifBg) {
+        ctx.clearRect(0, 0, width, height);
+      } else if (!_hasVideoBg) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+      }
+
       // Handle media content
       if (renderContent_content.isMedia) {
         console.log('Rendering media - type:', renderContent_content.mediaType);
@@ -1066,37 +1187,47 @@
         console.log('Media flags - isImage:', isImage, 'isVideo:', isVideo, 'isColor:', isColor);
         
         if (isColor) {
+          clearGifBg();
           console.log('Applying color:', renderContent_content.mediaColor);
-          // Apply color or gradient
           applyColorToCanvas(ctx, renderContent_content.mediaColor, width, height);
-          // Ensure watermark is drawn onto the background for unlicensed state
           drawLicenseWatermark(ctx, canvas);
-          // Media content appears instantly, no text fade needed
         } else if (isImage) {
-          console.log('Loading image with settings:', {
-            bgSize: renderContent_content.bgSize,
-            bgRepeat: renderContent_content.bgRepeat,
-            bgPosition: renderContent_content.bgPosition
-          });
-          const img = new Image();
-          img.onload = () => {
-            // Black is fallback - render first
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, width, height);
-            
-            drawImageWithSettings(ctx, img, width, height, {
+          if (renderContent_content.mediaType === 'GIF') {
+            // Animated GIF standalone media — show via img element, canvas stays transparent.
+            // Cancel any lingering rAF loop so it can't overwrite the clearRect below.
+            if (currentAnimationFrameId) {
+              cancelAnimationFrame(currentAnimationFrameId);
+              currentAnimationFrameId = null;
+            }
+            setGifBg(renderContent_content.mediaPath, {
+              bgSize: renderContent_content.bgSize,
+              bgPosition: renderContent_content.bgPosition
+            });
+            ctx.clearRect(0, 0, width, height);
+            drawLicenseWatermark(ctx, canvas);
+          } else {
+            clearGifBg();
+            console.log('Loading image with settings:', {
               bgSize: renderContent_content.bgSize,
               bgRepeat: renderContent_content.bgRepeat,
               bgPosition: renderContent_content.bgPosition
             });
-            // Draw watermark after rendering the image background
-            drawLicenseWatermark(ctx, canvas);
-            // Media content appears instantly, no text fade needed
-          };
-          img.onerror = (e) => console.error('Failed to load image:', content.mediaPath, e);
-          const fileURL = renderContent_content.mediaPath;
-          img.src = _fileUrlFor(fileURL);
+            const img = new Image();
+            img.onload = () => {
+              ctx.fillStyle = '#000';
+              ctx.fillRect(0, 0, width, height);
+              drawImageWithSettings(ctx, img, width, height, {
+                bgSize: renderContent_content.bgSize,
+                bgRepeat: renderContent_content.bgRepeat,
+                bgPosition: renderContent_content.bgPosition
+              });
+              drawLicenseWatermark(ctx, canvas);
+            };
+            img.onerror = (e) => console.error('Failed to load image:', renderContent_content.mediaPath, e);
+            img.src = _fileUrlFor(renderContent_content.mediaPath);
+          }
         } else if (isVideo) {
+          clearGifBg();
           // Stop any existing video first
           if (window.currentVideo) {
             window.currentVideo.pause();
@@ -1106,13 +1237,39 @@
           const video = document.createElement('video');
           const fileURL = renderContent_content.mediaPath;
           video.src = _fileUrlFor(fileURL);
-          video.loop = renderContent_content.loop !== false; // default true
           video.muted = renderContent_content.muted !== false; // default true
+          video.playbackRate = renderContent_content.playbackSpeed || 1;
+
+          // Repeat count: 0 = infinite, >0 = play N times then stop
+          const repeatCount = (renderContent_content.videoRepeat !== undefined && renderContent_content.videoRepeat > 0)
+            ? renderContent_content.videoRepeat : 0;
+          if (repeatCount === 0) {
+            video.loop = true;
+          } else {
+            video.loop = false;
+            let loopsDone = 0;
+            video.addEventListener('ended', function onVideoEnded() {
+              if (window.currentVideo !== video) { video.removeEventListener('ended', onVideoEnded); return; }
+              loopsDone++;
+              if (loopsDone < repeatCount) {
+                video.currentTime = 0;
+                video.play();
+              } else {
+                // Finished all repeats — stay on last frame
+                window.currentVideo = null;
+              }
+            });
+          }
+
           video.play();
           window.currentVideo = video;
           
           const objectFit = renderContent_content.objectFit || 'contain';
           
+          // Use requestVideoFrameCallback when available: only draws when the video has a
+          // new decoded frame (typically 24-30 fps) instead of a blind 60 fps rAF loop.
+          const _useRVFC = typeof video.requestVideoFrameCallback === 'function';
+
           const drawFrame = () => {
             if (window.currentVideo !== video) return; // Stop if video changed
             if (video.readyState >= 2) {
@@ -1148,9 +1305,18 @@
               // Draw watermark on each video frame so transitions capture it
               drawLicenseWatermark();
             }
-            requestAnimationFrame(drawFrame);
+            if (_useRVFC) {
+              video.requestVideoFrameCallback(drawFrame);
+            } else {
+              currentAnimationFrameId = requestAnimationFrame(drawFrame);
+            }
           };
-          drawFrame();
+
+          if (_useRVFC) {
+            video.requestVideoFrameCallback(drawFrame);
+          } else {
+            drawFrame();
+          }
         }
         return;
       }
@@ -1178,7 +1344,24 @@
             transitionOut.duration,
             transitionOut.type || 'fade',
             () => {
-              // After fade-out completes, re-render the background before fade-in
+              // After fade-out completes, re-render the background before fade-in.
+              // EXCEPTION: if a video loop is already running on bgCtx, do NOT touch
+              // bgCtx at all — the loop is already painting every frame and a single
+              // synchronous fillRect here would produce a visible freeze/black flash.
+              const _bgM = renderContent_content.backgroundMedia;
+              const _bgIsLiveVideo = _bgM &&
+                ['MP4','WEBM','OGG','MOV','AVI'].includes(_bgM.type) &&
+                window._liveBgVideo && window._liveBgVideo.dataset.bgSrc === _fileUrlFor(_bgM.path);
+
+              if (_bgIsLiveVideo) {
+                // Video loop handles bgCtx — just trigger the text fade-in.
+                if (renderContent_content.transitionIn) {
+                  applyTextFadeInAnimation(renderContent_content.transitionIn.duration, renderContent_content.transitionIn.type || 'fade');
+                }
+                return;
+              }
+
+              // Non-video backgrounds: repaint bgCtx before the text fade-in.
               // Black background is the fallback - render it first
               ctx.fillStyle = '#000';
               ctx.fillRect(0, 0, width, height);
@@ -1189,7 +1372,18 @@
                   applyColorToCanvas(ctx, media.color, width, height);
                   // Reapply watermark after redrawing the background color
                   drawLicenseWatermark(ctx, canvas);
-                } else if (media.type === 'JPG' || media.type === 'PNG') {
+                } else if (media.type === 'GIF') {
+                  setGifBg(media.path, media);
+                  ctx.clearRect(0, 0, width, height);
+                  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                  ctx.fillRect(0, 0, width, height);
+                  drawLicenseWatermark(ctx, canvas);
+                  if (renderContent_content.transitionIn) {
+                    applyTextFadeInAnimation(renderContent_content.transitionIn.duration, renderContent_content.transitionIn.type || 'fade');
+                  }
+                  return;
+                } else if (isStaticImageType(media.type)) {
+                  clearGifBg();
                   // Image background - redraw it
                   const bgImg = new Image();
                   bgImg.onload = () => {
@@ -1198,10 +1392,7 @@
                       bgRepeat: media.bgRepeat || 'no-repeat',
                       bgPosition: media.bgPosition || 'center'
                     });
-                    // Reapply watermark after redrawing the background image
                     drawLicenseWatermark(ctx, canvas);
-                    
-                    // Now start fade-in with background in place
                     if (renderContent_content.transitionIn) {
                       applyTextFadeInAnimation(
                         renderContent_content.transitionIn.duration,
@@ -1209,8 +1400,7 @@
                       );
                     }
                   };
-                  const fileURL = media.path;
-                  bgImg.src = _fileUrlFor(fileURL);
+                  bgImg.src = _fileUrlFor(media.path);
                   return; // Don't call fade-in below
                 }
               }
@@ -1241,39 +1431,107 @@
         const media = renderContent_content.backgroundMedia;
         
         if (media.type === 'COLOR') {
-          // Black is fallback - render first
+          clearGifBg();
           ctx.fillStyle = '#000';
           ctx.fillRect(0, 0, width, height);
-          
           applyColorToCanvas(ctx, media.color, width, height);
-          // Draw watermark between background and text
           drawLicenseWatermark();
           showTextWithAnimation();
-        } else if (media.type === 'JPG' || media.type === 'PNG') {
+        } else if (media.type === 'GIF') {
+          // Stop any background video loop before showing GIF
+          window._liveBgToken = (window._liveBgToken || 0) + 1;
+          if (window._liveBgVideo) { window._liveBgVideo.pause(); window._liveBgVideo = null; }
+          setGifBg(media.path, media);
+          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = 'rgba(0,0,0,0.4)';
+          ctx.fillRect(0, 0, width, height);
+          drawLicenseWatermark();
+          showTextWithAnimation();
+        } else if (isStaticImageType(media.type)) {
+          // Stop any background video loop before showing static image
+          window._liveBgToken = (window._liveBgToken || 0) + 1;
+          if (window._liveBgVideo) { window._liveBgVideo.pause(); window._liveBgVideo = null; }
+          clearGifBg();
           console.log('Live window: Loading image background with settings:', media);
           const bgImg = new Image();
           bgImg.onload = () => {
-            // Black is fallback - render first
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
-            
             drawImageWithSettings(ctx, bgImg, width, height, {
               bgSize: media.bgSize || 'cover',
               bgRepeat: media.bgRepeat || 'no-repeat',
               bgPosition: media.bgPosition || 'center'
             });
-            // Draw watermark between background and text
             drawLicenseWatermark();
-            
             showTextWithAnimation();
           };
           bgImg.onerror = (e) => {
             console.error('Live window failed to load background:', media.path, e);
             showTextWithAnimation();
           };
-          const fileURL = media.path;
-          bgImg.src = _fileUrlFor(fileURL);
+          bgImg.src = _fileUrlFor(media.path);
+        } else if (['MP4','WEBM','OGG','MOV','AVI'].includes(media.type)) {
+          // Video background: run a per-frame draw loop on bgCanvas so the video
+          // plays continuously under the text layer.
+          clearGifBg();
+
+          // If the same video is already running (verse change, not a new background),
+          // the rAF loop is still alive — just update the text layer and return.
+          if (renderContent._sameBgVideo) {
+            showTextWithAnimation();
+          } else {
+            // New video — build a fresh element and start the loop.
+            const videoUrl = _fileUrlFor(media.path);
+            let bgVideo = document.createElement('video');
+            bgVideo.dataset.bgSrc = videoUrl;
+            bgVideo.src = videoUrl;
+            bgVideo.muted = true;
+            bgVideo.loop = true;
+            // Attach to DOM so Chromium doesn't suspend it as an off-screen media element.
+            bgVideo.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;visibility:hidden;';
+            document.body.appendChild(bgVideo);
+            bgVideo.play().catch(err => { if (err.name !== 'AbortError') console.warn('[live] bgVideo play error:', err); });
+            window._liveBgVideo = bgVideo;
+
+            // Bump token now that the element exists — the closure captures this value.
+            window._liveBgToken = (window._liveBgToken || 0) + 1;
+            const _myLiveBgToken = window._liveBgToken;
+
+            const bgSize = media.bgSize || 'contain';
+            const _useRVFC = typeof bgVideo.requestVideoFrameCallback === 'function';
+            const drawVideoBgFrame = () => {
+              if (window._liveBgToken !== _myLiveBgToken) {
+                if (window._liveBgVideo !== bgVideo) {
+                  bgVideo.pause();
+                  if (bgVideo.parentNode) bgVideo.parentNode.removeChild(bgVideo);
+                }
+                return;
+              }
+              bgCtx.fillStyle = '#000';
+              bgCtx.fillRect(0, 0, width, height);
+              if (bgVideo.readyState >= 2) {
+                let scale, w, h, x, y;
+                if (bgSize === 'cover') {
+                  scale = Math.max(width / bgVideo.videoWidth, height / bgVideo.videoHeight);
+                } else {
+                  scale = Math.min(width / bgVideo.videoWidth, height / bgVideo.videoHeight);
+                }
+                w = bgVideo.videoWidth * scale; h = bgVideo.videoHeight * scale;
+                x = (width - w) / 2; y = (height - h) / 2;
+                bgCtx.drawImage(bgVideo, x, y, w, h);
+                bgCtx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                bgCtx.fillRect(0, 0, width, height);
+                drawLicenseWatermark();
+              }
+              if (_useRVFC) { bgVideo.requestVideoFrameCallback(drawVideoBgFrame); }
+              else { requestAnimationFrame(drawVideoBgFrame); }
+            };
+            if (_useRVFC) { bgVideo.requestVideoFrameCallback(drawVideoBgFrame); }
+            else { drawVideoBgFrame(); }
+            showTextWithAnimation();
+          }
         } else {
+          clearGifBg();
           // Video or unknown type - just show text with animation
           showTextWithAnimation();
         }
@@ -1632,11 +1890,16 @@
         currentAnimationFrameId = null;
       }
 
+      // Hide website mirror whenever a mode switch happens and restore canvases
+      hideMirrorVideo();
+      bgCanvas.style.display = '';
+      textCanvas.style.display = '';
+
       if (mode === 'black') {
         console.debug('[live] entering black mode');
         isClearMode = false;
         isBlackMode = true;
-        // Fill background black and clear the text layer so no text remains visible
+        clearGifBg();
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore if textCtx unavailable */ }
@@ -1657,18 +1920,28 @@
         const transitionSettings = window.currentContent && window.currentContent.transitionIn ? window.currentContent.transitionIn : { duration: 0.4, type: 'fade' };
 
         const renderBackground = () => {
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, width, height);
-          if (window.currentContent && window.currentContent.backgroundMedia) {
-            const media = window.currentContent.backgroundMedia;
-            if (media.type === 'COLOR') {
-              applyColorToCanvas(ctx, media.color, width, height);
-            } else if (media.type === 'JPG' || media.type === 'PNG') {
-              const bgImg = new Image();
-              bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: media.bgSize || 'cover', bgRepeat: media.bgRepeat || 'no-repeat', bgPosition: media.bgPosition || 'center' });
-              const fileURL = media.path;
-              bgImg.src = _fileUrlFor(fileURL);
-            }
+          const _rbMedia = window.currentContent && window.currentContent.backgroundMedia ? window.currentContent.backgroundMedia : null;
+          if (_rbMedia && _rbMedia.type === 'COLOR') {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            applyColorToCanvas(ctx, _rbMedia.color, width, height);
+          } else if (_rbMedia && _rbMedia.type === 'GIF') {
+            setGifBg(_rbMedia.path, _rbMedia);
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(0, 0, width, height);
+          } else if (_rbMedia && isStaticImageType(_rbMedia.type)) {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            const bgImg = new Image();
+            bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: _rbMedia.bgSize || 'cover', bgRepeat: _rbMedia.bgRepeat || 'no-repeat', bgPosition: _rbMedia.bgPosition || 'center' });
+            bgImg.src = _fileUrlFor(_rbMedia.path);
+          } else {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
           }
         };
 
@@ -1704,6 +1977,23 @@
       // Update underlying content data
       window.currentContent = data;
 
+      // WEBSITE: hand off entirely to the WebRTC mirror video
+      if (data && data.isWebsite) {
+        // Hide canvases — their will-change compositing layers can overlay the video
+        bgCanvas.style.display = 'none';
+        textCanvas.style.display = 'none';
+        gifBg.style.display = 'none';
+        // Clear any text that was painted
+        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (_) {}
+        showMirrorVideo(); // video becomes active once WebRTC stream arrives
+        return;
+      }
+
+      // For non-website content, hide mirror video and restore canvases
+      hideMirrorVideo();
+      bgCanvas.style.display = '';
+      textCanvas.style.display = '';
+
       // Respect current mode: keep screen black or cleared if those modes are active
       if (isBlackMode) {
         // Keep black screen; currentRenderContent should reflect no text
@@ -1726,23 +2016,35 @@
         // Keep background visible but no text
         const width = canvas.width;
         const height = canvas.height;
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        if (window.currentContent && window.currentContent.backgroundMedia) {
-          const media = window.currentContent.backgroundMedia;
-          if (media.type === 'COLOR') {
-            applyColorToCanvas(ctx, media.color, width, height);
-          } else if (media.type === 'JPG' || media.type === 'PNG') {
+        {
+          const _cmMedia = window.currentContent && window.currentContent.backgroundMedia ? window.currentContent.backgroundMedia : null;
+          if (_cmMedia && _cmMedia.type === 'COLOR') {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
+            applyColorToCanvas(ctx, _cmMedia.color, width, height);
+          } else if (_cmMedia && _cmMedia.type === 'GIF') {
+            setGifBg(_cmMedia.path, _cmMedia);
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.fillRect(0, 0, width, height);
+          } else if (_cmMedia && isStaticImageType(_cmMedia.type)) {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
             const bgImg = new Image();
             bgImg.onload = () => {
               drawImageWithSettings(ctx, bgImg, width, height, {
-                bgSize: media.bgSize || 'cover',
-                bgRepeat: media.bgRepeat || 'no-repeat',
-                bgPosition: media.bgPosition || 'center'
+                bgSize: _cmMedia.bgSize || 'cover',
+                bgRepeat: _cmMedia.bgRepeat || 'no-repeat',
+                bgPosition: _cmMedia.bgPosition || 'center'
               });
             };
-            const fileURL = media.path;
-            bgImg.src = _fileUrlFor(fileURL);
+            bgImg.src = _fileUrlFor(_cmMedia.path);
+          } else {
+            clearGifBg();
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, width, height);
           }
         }
         currentRenderContent = {
@@ -1769,6 +2071,23 @@
 
     // New unified mode handler
     ipcRenderer.on('set-live-mode', (event, mode) => setLiveMode(mode));
+
+    // Mirror: receive JPEG frames from the preview webview (sent via capturePage polling)
+    ipcRenderer.on('mirror-frame', (event, jpegBuffer) => {
+      const prev = _mirrorBlobUrl;
+      _mirrorBlobUrl = URL.createObjectURL(new Blob([jpegBuffer], { type: 'image/jpeg' }));
+      mirrorImg.src = _mirrorBlobUrl;
+      if (prev) URL.revokeObjectURL(prev);
+      // Ensure visible (update-content sets display:block, but make sure)
+      if (mirrorImg.style.display === 'none') showMirrorVideo();
+    });
+
+    // Mirror stopped (e.g. switched to different content)
+    ipcRenderer.on('website-mirror-stop', () => {
+      hideMirrorVideo();
+      bgCanvas.style.display = '';
+      textCanvas.style.display = '';
+    });
     
     ipcRenderer.on('show-live-text', () => {
       // Cancel any ongoing animations
@@ -1790,53 +2109,45 @@
         currentRenderWidth = width;
         currentRenderHeight = height;
         
-        // Render background first
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, width, height);
-        
-        if (window.currentContent.backgroundMedia) {
-          const media = window.currentContent.backgroundMedia;
-          if (media.type === 'COLOR') {
-            applyColorToCanvas(ctx, media.color, width, height);
-            // Draw watermark between background and text
-            drawLicenseWatermark();
-            // Then fade in text
-            if (window.currentContent.transitionIn) {
-              applyTextFadeInAnimation(
-                window.currentContent.transitionIn.duration,
-                window.currentContent.transitionIn.type || 'fade'
-              );
-            }
-          } else if (media.type === 'JPG' || media.type === 'PNG') {
-            const bgImg = new Image();
-            bgImg.onload = () => {
-              drawImageWithSettings(ctx, bgImg, width, height, {
-                bgSize: media.bgSize || 'cover',
-                bgRepeat: media.bgRepeat || 'no-repeat',
-                bgPosition: media.bgPosition || 'center'
-              });
-              // Draw watermark between background and text
-              drawLicenseWatermark();
-              // Then fade in text
-              if (window.currentContent.transitionIn) {
-                applyTextFadeInAnimation(
-                  window.currentContent.transitionIn.duration,
-                  window.currentContent.transitionIn.type || 'fade'
-                );
-              }
-            };
-            const fileURL = media.path;
-            bgImg.src = _fileUrlFor(fileURL);
-          }
-        } else {
-          // No background media, draw watermark then fade in text
+        // Render background first, then fade in text
+        const _sltMedia = window.currentContent.backgroundMedia || null;
+        const _doFadeIn = () => {
           drawLicenseWatermark();
           if (window.currentContent.transitionIn) {
-            applyTextFadeInAnimation(
-              window.currentContent.transitionIn.duration,
-              window.currentContent.transitionIn.type || 'fade'
-            );
+            applyTextFadeInAnimation(window.currentContent.transitionIn.duration, window.currentContent.transitionIn.type || 'fade');
           }
+        };
+        if (_sltMedia && _sltMedia.type === 'COLOR') {
+          clearGifBg();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          applyColorToCanvas(ctx, _sltMedia.color, width, height);
+          _doFadeIn();
+        } else if (_sltMedia && _sltMedia.type === 'GIF') {
+          setGifBg(_sltMedia.path, _sltMedia);
+          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = 'rgba(0,0,0,0.4)';
+          ctx.fillRect(0, 0, width, height);
+          _doFadeIn();
+        } else if (_sltMedia && isStaticImageType(_sltMedia.type)) {
+          clearGifBg();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          const bgImg = new Image();
+          bgImg.onload = () => {
+            drawImageWithSettings(ctx, bgImg, width, height, {
+              bgSize: _sltMedia.bgSize || 'cover',
+              bgRepeat: _sltMedia.bgRepeat || 'no-repeat',
+              bgPosition: _sltMedia.bgPosition || 'center'
+            });
+            _doFadeIn();
+          };
+          bgImg.src = _fileUrlFor(_sltMedia.path);
+        } else {
+          clearGifBg();
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, width, height);
+          _doFadeIn();
         }
       }
     });
@@ -1873,6 +2184,9 @@
         drawLicenseWatermark();
       }
     });
+
+    // Signal to main process that all IPC listeners are registered and ready to receive content
+    ipcRenderer.send('live-window-ready');
   </script>
 </body>
 </html>

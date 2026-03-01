@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.0.0 - 2026-03-01
+
+- feat: live window video background plays continuously without restarting between verse changes
+- feat: live window GIF background no longer restarts animation on verse change
+- fix: video background loop skips crossfade path (was freezing on first frame)
+- fix: black flash eliminated when changing verses with a video background
+- fix: text fade-out animation no longer stomps on bgCtx during video background playback
+- fix: fade-out loop now animates on textCtx when video loop owns bgCtx
+
 ## 3.0.19 - 2026-02-22
 
 - fix: improve python discovery in packaged app for sidecar spawning

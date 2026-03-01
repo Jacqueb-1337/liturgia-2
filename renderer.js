@@ -1325,6 +1325,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   initColorEditor();
   initImageEditor();
   initVideoEditor();
+  initGifEditor();
+  initWebsiteModal();
+  initWebsitePanels();
   initTabs();
   setupPopover(); // Enabled: required so style buttons and menus can open the CSS popover
   initSchedule();
@@ -1372,8 +1375,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         changed = true;
       }
       if (clampedPreview !== previewPercent) {
-        slidePreview.style.flex = `0 0 ${clampedPreview}%`;
-        document.getElementById('slide-live').style.flex = `0 0 ${100 - clampedPreview}%`;
+        slidePreview.style.flex = `${clampedPreview} 1 0%`;
+        document.getElementById('slide-live').style.flex = `${100 - clampedPreview} 1 0%`;
         changed = true;
       }
       if (clampedVerse !== verseHeightPx) {
@@ -1825,6 +1828,16 @@ function applyFadeOutAnimation(canvas, duration = 1.0, callback = null) {
  * @param {Function} onRenderComplete - Callback when rendering is complete
  */
 function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 1080, onRenderComplete = null) {
+  // Stop any running video draw-loop that was previously assigned to this canvas.
+  // Without this, a video loop started by displayMediaOnLive keeps overwriting the canvas
+  // even after renderToCanvas draws new verse/song content on top.
+  canvas._currentPreviewVideo = null;
+
+  // Bump the background-animation token so any previous GIF/video background
+  // loop for this canvas self-terminates on its next tick.
+  canvas._bgToken = (canvas._bgToken || 0) + 1;
+  const _myBgToken = canvas._bgToken;
+
   canvas.width = displayWidth;
   canvas.height = displayHeight;
   
@@ -1838,6 +1851,11 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   const numberStyle = styles && (styles.number || styles.title) ? (styles.number || styles.title) : null;
   const referenceStyle = styles && styles.reference ? styles.reference : null;
 
+  // Cache for <img> elements used as animated GIF backgrounds.
+  // Reusing the same element lets the browser keep the animation running
+  // across successive renderToCanvas calls rather than restarting at frame 0.
+  if (!renderToCanvas._gifCache) renderToCanvas._gifCache = new Map();
+
   // Handle background media (object with type, path, color, and settings)
   if (content.backgroundMedia) {
     const media = content.backgroundMedia;
@@ -1850,10 +1868,37 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       ctx.fillRect(0, 0, displayWidth, displayHeight);
       renderTextContent();
       if (onRenderComplete) onRenderComplete();
-    } else if (media.type === 'JPG' || media.type === 'PNG') {
-      // Apply image background with settings
+    } else if (media.type === 'GIF') {
+      // Animated GIF: reuse cached <img> so animation continues from current frame.
+      // We then re-draw it every animation frame so the canvas shows each new frame.
+      let bgImg = renderToCanvas._gifCache.get(media.path);
+      if (!bgImg) {
+        bgImg = new Image();
+        bgImg.src = pathToFileURL(media.path);
+        renderToCanvas._gifCache.set(media.path, bgImg);
+      }
+      const drawGifFrame = () => {
+        if (canvas._bgToken !== _myBgToken) return; // newer content replaced us
+        if (bgImg.complete && bgImg.naturalWidth > 0) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, displayWidth, displayHeight);
+          drawImageWithSettings(ctx, bgImg, displayWidth, displayHeight, {
+            bgSize: media.bgSize || 'cover',
+            bgRepeat: media.bgRepeat || 'no-repeat',
+            bgPosition: media.bgPosition || 'center'
+          });
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.fillRect(0, 0, displayWidth, displayHeight);
+          renderTextContent();
+        }
+        requestAnimationFrame(drawGifFrame);
+      };
+      drawGifFrame();
+    } else if (['JPG','JPEG','PNG','WEBP','BMP'].includes(media.type)) {
+      // Static image background – draw once
       const bgImg = new Image();
       bgImg.onload = () => {
+        if (canvas._bgToken !== _myBgToken) return; // superseded before load finished
         drawImageWithSettings(ctx, bgImg, displayWidth, displayHeight, {
           bgSize: media.bgSize || 'cover',
           bgRepeat: media.bgRepeat || 'no-repeat',
@@ -1871,8 +1916,48 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
         renderTextContent();
       };
       bgImg.src = pathToFileURL(media.path);
+    } else if (['MP4','WEBM','OGG','MOV','AVI'].includes(media.type)) {
+      // Video background: create a video element and run an rAF loop that
+      // renders each frame with the text overlay on top.
+      const bgVideo = document.createElement('video');
+      bgVideo.src = pathToFileURL(media.path);
+      bgVideo.muted = true;
+      bgVideo.loop = true;
+      safePlay(bgVideo);
+
+      const _useRVFC = typeof bgVideo.requestVideoFrameCallback === 'function';
+      const drawVideoFrame = () => {
+        if (canvas._bgToken !== _myBgToken) {
+          bgVideo.pause();
+          if (bgVideo.parentNode) bgVideo.parentNode.removeChild(bgVideo);
+          return;
+        }
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, displayWidth, displayHeight);
+        if (bgVideo.readyState >= 2) {
+          const scale = Math.min(displayWidth / bgVideo.videoWidth, displayHeight / bgVideo.videoHeight);
+          const w = bgVideo.videoWidth * scale;
+          const h = bgVideo.videoHeight * scale;
+          const x = (displayWidth - w) / 2;
+          const y = (displayHeight - h) / 2;
+          ctx.drawImage(bgVideo, x, y, w, h);
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.fillRect(0, 0, displayWidth, displayHeight);
+          renderTextContent();
+        }
+        if (_useRVFC) {
+          bgVideo.requestVideoFrameCallback(drawVideoFrame);
+        } else {
+          requestAnimationFrame(drawVideoFrame);
+        }
+      };
+      if (_useRVFC) {
+        bgVideo.requestVideoFrameCallback(drawVideoFrame);
+      } else {
+        drawVideoFrame();
+      }
     } else {
-      // Video or unknown type - just render text
+      // Unknown background type — just render text
       renderTextContent();
     }
   } else if (content.backgroundPath) {
@@ -2442,7 +2527,7 @@ async function updateLive(verseOrIndices) {
       },
       allScheduleItems: scheduleItems.map((item, idx) => ({
         index: idx,
-        label: getScheduleItemLabel(item.indices),
+        label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
         type: item.type
       })),
       allSongs: allSongs.map((song, idx) => ({
@@ -2598,6 +2683,17 @@ function getFittableIndices(indices, maxChars = 800) {
   return fittable;
 }
 
+// Update only the .selected class on currently-rendered verse items.
+// This avoids destroying+recreating DOM nodes (which breaks browser dblclick detection).
+function updateSelectionClasses(selectedIndices) {
+  const wrapper = document.getElementById('virtual-list');
+  if (!wrapper) return;
+  wrapper.querySelectorAll('.verse-item').forEach(el => {
+    const idx = parseInt(el.getAttribute('data-index'), 10);
+    el.classList.toggle('selected', selectedIndices.includes(idx));
+  });
+}
+
 async function handleVerseClick(i, e) {
   // Support shift-range selection
   if (e && e.shiftKey) {
@@ -2622,9 +2718,10 @@ async function handleVerseClick(i, e) {
   if (currentTab === 'verses') {
     await updatePreview(selectedIndices);
   }
-  const listContainer = document.getElementById('verse-list');
-  const scrollTop = listContainer ? listContainer.scrollTop : 0;
-  renderWindow(allVerses, scrollTop, selectedIndices, handleVerseClick);
+  // Update selection highlight in-place without rebuilding DOM nodes.
+  // A full renderWindow call here destroys every <div> and creates new ones,
+  // which prevents the browser from firing dblclick (the element instance changes).
+  updateSelectionClasses(selectedIndices);
 
   // Focus the clicked item after re-render so Enter will work
   const el = document.querySelector(`.verse-item[data-index="${i}"]`);
@@ -2639,17 +2736,22 @@ async function handleVerseClick(i, e) {
 }
 
 async function handleVerseDoubleClick(i) {
+  // Media tab: go live with the selected media item
+  if (currentTab === 'media') {
+    if (selectedMediaIndex !== null && allMedia[selectedMediaIndex]) {
+      await displayMediaOnLive(allMedia[selectedMediaIndex]);
+    }
+    return;
+  }
+
   // Check if we're in songs tab
   if (currentTab === 'songs') {
     if (selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
-      // Respect current clear/black mode when going live from songs - do not force exit here
-      // (mode stays as user set it)
-      
-      await updateLiveFromSongVerse(selectedSongVerseIndex);
-      
-      // Turn on the live display when going live
       if (!liveMode) {
-        toggleLive(true);
+        // Create the window first, then push content once it is ready
+        await toggleLive(true);
+      } else {
+        await updateLiveFromSongVerse(selectedSongVerseIndex);
       }
       return;
     } else {
@@ -2674,11 +2776,13 @@ async function handleVerseDoubleClick(i) {
 
   // Do not change clear/black mode here - respect user's current display mode
 
-  await updateLive(indicesToGo);
-  
-  // Turn on the live display when going live
   if (!liveMode) {
-    toggleLive(true);
+    // Create the window first; toggleLive awaits creation before pushing selectedIndices
+    // (single-click already set selectedIndices to the target verse before dblclick fires)
+    await toggleLive(true);
+  } else {
+    // Window already open — push content directly
+    await updateLive(indicesToGo);
   }
 
   // Persist live selection as the last selected verse (single or array)
@@ -2827,10 +2931,11 @@ function selectPrevScheduleItem() {
   handleVerseDoubleClick(prevItem.indices);
 }
 
-function toggleLive(isActive) {
+async function toggleLive(isActive) {
   liveMode = !!isActive;
   if (isActive) {
-    ipcRenderer.invoke('create-live-window');
+    // Await window creation so IPC messages sent immediately after are received
+    await ipcRenderer.invoke('create-live-window');
     
     // Display based on current tab and selection
     if (currentTab === 'media' && selectedMediaIndex !== null) {
@@ -3776,6 +3881,7 @@ function getSongVerseCount(songIndex) {
 }
 
 function getScheduleItemLabel(indices) {
+  if (!indices) return 'Unknown';
   if (!allVerses || allVerses.length === 0) {
     return 'Loading...';
   }
@@ -4248,8 +4354,8 @@ function initResizers() {
       const percentage = (offsetX / containerRect.width) * 100;
       
       if (percentage > 10 && percentage < 90) {
-        slidePreview.style.flex = `0 0 ${percentage}%`;
-        slideLive.style.flex = `0 0 ${100 - percentage}%`;
+        slidePreview.style.flex = `${percentage} 1 0%`;
+        slideLive.style.flex = `${100 - percentage} 1 0%`;
       }
     } else if (isResizingVerse) {
       const newHeight = window.innerHeight - e.clientY;
@@ -4359,8 +4465,8 @@ async function restoreDividerPositions() {
 
   // Apply computed layout
   scheduleSidebar.style.width = scheduleWidthPx + 'px';
-  slidePreview.style.flex = `0 0 ${previewPercent}%`;
-  slideLive.style.flex = `0 0 ${100 - previewPercent}%`;
+  slidePreview.style.flex = `${previewPercent} 1 0%`;
+  slideLive.style.flex = `${100 - previewPercent} 1 0%`;
 
   versePanel.style.flex = `0 0 ${verseHeightPx}px`;
   const topHeight = Math.max(50, window.innerHeight - verseHeightPx - 16);
@@ -5680,10 +5786,48 @@ function initMediaHandlers() {
   if (addBtn) {
     addBtn.addEventListener('click', importMediaFiles);
   }
+
+  const addWebsiteBtn = document.getElementById('media-add-website-btn');
+  if (addWebsiteBtn) {
+    addWebsiteBtn.addEventListener('click', () => openWebsiteModal());
+  }
   
   const searchInput = document.getElementById('media-search-input');
   if (searchInput) {
     searchInput.addEventListener('input', renderMediaGrid);
+  }
+
+  // OS drag-and-drop onto the media grid
+  const mediaDisplay = document.getElementById('media-display');
+  if (mediaDisplay) {
+    mediaDisplay.addEventListener('dragenter', (e) => {
+      // Only react to OS file drags, not internal item reorders
+      if (e.dataTransfer.types.includes('Files')) {
+        e.preventDefault();
+        mediaDisplay.classList.add('drag-over');
+      }
+    });
+    mediaDisplay.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    mediaDisplay.addEventListener('dragleave', (e) => {
+      // Only remove highlight when leaving the container itself, not a child
+      if (!mediaDisplay.contains(e.relatedTarget)) {
+        mediaDisplay.classList.remove('drag-over');
+      }
+    });
+    mediaDisplay.addEventListener('drop', async (e) => {
+      if (!e.dataTransfer.types.includes('Files')) return;
+      e.preventDefault();
+      mediaDisplay.classList.remove('drag-over');
+      const files = Array.from(e.dataTransfer.files).filter(f =>
+        /\.(jpe?g|png|gif|webp|bmp|mp4|webm|ogg|mov|avi)$/i.test(f.name)
+      );
+      if (files.length > 0) await importFileObjects(files);
+    });
   }
   
   // Context menu
@@ -5693,55 +5837,63 @@ function initMediaHandlers() {
   });
 }
 
+// Shared pipeline: copy an array of File objects into the media library
+async function importFileObjects(files) {
+  if (!files || files.length === 0) return;
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const mediaDir = path.join(userData, 'media');
+
+    if (!fs.existsSync(mediaDir)) {
+      fs.mkdirSync(mediaDir, { recursive: true });
+    }
+
+    for (const file of files) {
+      // Handle duplicate filenames by appending a counter
+      let fileName = file.name;
+      let destPath = path.join(mediaDir, fileName);
+      if (fs.existsSync(destPath)) {
+        const ext = path.extname(fileName);
+        const base = path.basename(fileName, ext);
+        let counter = 1;
+        while (fs.existsSync(destPath)) {
+          destPath = path.join(mediaDir, `${base}_${counter}${ext}`);
+          counter++;
+        }
+        fileName = path.basename(destPath);
+      }
+
+      const buffer = await file.arrayBuffer();
+      fs.writeFileSync(destPath, Buffer.from(buffer));
+
+      const stats = fs.statSync(destPath);
+      const fileType = path.extname(fileName).substring(1).toUpperCase();
+      allMedia.push({
+        name: fileName,
+        path: destPath,
+        type: fileType,
+        size: formatFileSize(stats.size),
+        addedDate: new Date().toISOString()
+      });
+    }
+
+    await saveMedia();
+    renderMediaGrid();
+  } catch (err) {
+    console.error('Failed to import media:', err);
+    alert('Failed to import media files');
+  }
+}
+
 async function importMediaFiles() {
   const input = document.createElement('input');
   input.type = 'file';
   input.multiple = true;
   input.accept = 'image/*,video/*';
-  
   input.onchange = async (e) => {
     const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-    
-    try {
-      const userData = await ipcRenderer.invoke('get-user-data-path');
-      const mediaDir = path.join(userData, 'media');
-      
-      // Create media directory if it doesn't exist
-      if (!fs.existsSync(mediaDir)) {
-        fs.mkdirSync(mediaDir, { recursive: true });
-      }
-      
-      for (const file of files) {
-        const fileName = file.name;
-        const destPath = path.join(mediaDir, fileName);
-        
-        // Copy file
-        const buffer = await file.arrayBuffer();
-        fs.writeFileSync(destPath, Buffer.from(buffer));
-        
-        // Add to media list
-        const stats = fs.statSync(destPath);
-        const fileType = path.extname(fileName).substring(1).toUpperCase();
-        const fileSize = formatFileSize(stats.size);
-        
-        allMedia.push({
-          name: fileName,
-          path: destPath,
-          type: fileType,
-          size: fileSize,
-          addedDate: new Date().toISOString()
-        });
-      }
-      
-      await saveMedia();
-      renderMediaGrid();
-    } catch (err) {
-      console.error('Failed to import media:', err);
-      alert('Failed to import media files');
-    }
+    await importFileObjects(files);
   };
-  
   input.click();
 }
 
@@ -5758,6 +5910,34 @@ function pathToFileURL(filePath) {
   }
   const normalized = filePath.replace(/\\/g, '/');
   return 'file:///' + normalized;
+}
+
+// ---------------------------------------------------------------------------
+// safePlay(video) — plays a <video> element without triggering Chromium's
+// "paused to save power" abort.  Chromium refuses to play detached video
+// elements (not in the DOM) when they are "video-only" background media.
+// We attach the element to an invisible off-screen container so Chromium
+// considers it a real document element, then catch any remaining rejections.
+// ---------------------------------------------------------------------------
+let _hiddenVideoContainer = null;
+function _getHiddenVideoContainer() {
+  if (!_hiddenVideoContainer) {
+    _hiddenVideoContainer = document.createElement('div');
+    _hiddenVideoContainer.style.cssText =
+      'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;' +
+      'overflow:hidden;pointer-events:none;visibility:hidden;';
+    document.body.appendChild(_hiddenVideoContainer);
+  }
+  return _hiddenVideoContainer;
+}
+function safePlay(video) {
+  // Attach to DOM if not already — prevents the "video-only background media
+  // paused to save power" DOMException from Chromium's power-saving heuristic.
+  if (!video.parentNode) _getHiddenVideoContainer().appendChild(video);
+  return video.play().catch(err => {
+    // AbortError from power-saving or rapid stop is expected; everything else log.
+    if (err.name !== 'AbortError') console.warn('safePlay error:', err);
+  });
 }
 
 function renderMediaGrid() {
@@ -5791,9 +5971,10 @@ function renderMediaGrid() {
   
   filteredMedia.forEach((media, index) => {
     const actualIndex = allMedia.indexOf(media);
-    const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
-    const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
-    const isColor = media.type === 'COLOR';
+    const isImage   = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
+    const isVideo   = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
+    const isColor   = media.type === 'COLOR';
+    const isWebsite = media.type === 'WEBSITE';
     
     const displayName = media.name.length > 20 ? media.name.substring(0, 17) + '...' : media.name;
     const isSelected = selectedMediaIndex === actualIndex;
@@ -5803,7 +5984,17 @@ function renderMediaGrid() {
     // Thumbnail (wrap in media-thumb container to allow badge overlays)
     // Thumbnail (wrap in media-thumb container to allow badge overlays)
     let thumbHtml = '';
-    if (isColor) {
+    if (isWebsite) {
+      if (media.thumbnail) {
+        thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: #000; border-radius: 3px; overflow: hidden; margin-bottom: 6px; display: flex; align-items: center; justify-content: center;">
+          <img src="${media.thumbnail}" style="max-width: 100%; max-height: 100%; object-fit: cover;" />
+        </div>`;
+      } else {
+        thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: #e8f4fd; border-radius: 3px; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 2px;">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0078d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>`;
+      }
+    } else if (isColor) {
       thumbHtml = `<div class="media-thumb" style="width: 100%; height: 60px; background: ${media.color}; border-radius: 3px; margin-bottom: 6px;"></div>`;
     } else {
       const fileURL = media.path ? media.path : ''; // will be converted to file URL by pathToFileURL() when used
@@ -5838,7 +6029,7 @@ function renderMediaGrid() {
     
     // Labels
     html += `<div style="font-size: 10px; font-weight: 500; margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${media.name}">${displayName}</div>`;
-    html += `<div style="font-size: 8px; color: #666;">${media.type} • ${media.size}</div>`;
+    html += `<div style="font-size: 8px; color: #666;">${isWebsite ? (media.url || 'No URL') : `${media.type} \u2022 ${media.size}`}</div>`;
     html += `</div>`;
   });
   
@@ -5930,14 +6121,21 @@ function showMediaContextMenu(x, y) {
         const media = allMedia[selectedMediaIndex];
         const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
         const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
-        const isColor = media.type === 'COLOR';
+        const isColor   = media.type === 'COLOR';
+        const isWebsite = media.type === 'WEBSITE';
         
         if (isImage) {
-          openImageEditor(selectedMediaIndex);
+          if (media.type === 'GIF') {
+            openGifEditor(selectedMediaIndex);
+          } else {
+            openImageEditor(selectedMediaIndex);
+          }
         } else if (isVideo) {
           openVideoEditor(selectedMediaIndex);
         } else if (isColor) {
           openColorEditor(selectedMediaIndex);
+        } else if (isWebsite) {
+          openWebsiteModal(selectedMediaIndex);
         }
         menu.style.display = 'none';
       }
@@ -5982,13 +6180,15 @@ function showMediaContextMenu(x, y) {
       if (selectedMediaIndex !== null) {
         const media = allMedia[selectedMediaIndex];
         if (confirm(`Delete "${media.name}"?`)) {
-          // Delete file
-          try {
-            if (fs.existsSync(media.path)) {
-              fs.unlinkSync(media.path);
+          // Delete file (skip for virtual types like WEBSITE / COLOR that have no path)
+          if (media.path) {
+            try {
+              if (fs.existsSync(media.path)) {
+                fs.unlinkSync(media.path);
+              }
+            } catch (err) {
+              console.error('Failed to delete file:', err);
             }
-          } catch (err) {
-            console.error('Failed to delete file:', err);
           }
           
           // Remove from list
@@ -6005,6 +6205,13 @@ function showMediaContextMenu(x, y) {
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   menu.style.display = 'block';
+
+  // Hide bg-setting items for WEBSITE media (cannot be used as slide background)
+  const isWebsiteSelected = selectedMediaIndex !== null && allMedia[selectedMediaIndex] && allMedia[selectedMediaIndex].type === 'WEBSITE';
+  ['media-context-bg-songs', 'media-context-bg-verses', 'media-context-reset-songs', 'media-context-reset-verses'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = isWebsiteSelected ? 'none' : '';
+  });
   
   // Adjust if off-screen
   setTimeout(() => {
@@ -6389,55 +6596,58 @@ function updateVideoPreview() {
   if (!canvas) return;
   
   const ctx = canvas.getContext('2d');
-  const objectFit = document.getElementById('video-object-fit').value;
-  
+
+  // Cancel previous animation if any
+  if (videoPreviewAnimationId) {
+    cancelAnimationFrame(videoPreviewAnimationId);
+    videoPreviewAnimationId = null;
+  }
+
+  const _useRVFC = typeof videoPreviewElement.requestVideoFrameCallback === 'function';
+
   const drawFrame = () => {
     if (!videoPreviewElement || videoPreviewElement.readyState < 2) {
-      videoPreviewAnimationId = requestAnimationFrame(drawFrame);
+      if (!_useRVFC) videoPreviewAnimationId = requestAnimationFrame(drawFrame);
       return;
     }
-    
+    const objectFit = document.getElementById('video-object-fit') ? document.getElementById('video-object-fit').value : 'contain';
     const width = canvas.width;
     const height = canvas.height;
     let scale, w, h, x, y;
     
     if (objectFit === 'fill') {
-      w = width;
-      h = height;
-      x = 0;
-      y = 0;
+      w = width; h = height; x = 0; y = 0;
     } else if (objectFit === 'cover') {
       scale = Math.max(width / videoPreviewElement.videoWidth, height / videoPreviewElement.videoHeight);
       w = videoPreviewElement.videoWidth * scale;
       h = videoPreviewElement.videoHeight * scale;
-      x = (width - w) / 2;
-      y = (height - h) / 2;
+      x = (width - w) / 2; y = (height - h) / 2;
     } else if (objectFit === 'none') {
-      w = videoPreviewElement.videoWidth;
-      h = videoPreviewElement.videoHeight;
-      x = (width - w) / 2;
-      y = (height - h) / 2;
-    } else { // contain (default)
+      w = videoPreviewElement.videoWidth; h = videoPreviewElement.videoHeight;
+      x = (width - w) / 2; y = (height - h) / 2;
+    } else {
       scale = Math.min(width / videoPreviewElement.videoWidth, height / videoPreviewElement.videoHeight);
       w = videoPreviewElement.videoWidth * scale;
       h = videoPreviewElement.videoHeight * scale;
-      x = (width - w) / 2;
-      y = (height - h) / 2;
+      x = (width - w) / 2; y = (height - h) / 2;
     }
     
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
     ctx.drawImage(videoPreviewElement, x, y, w, h);
-    
-    videoPreviewAnimationId = requestAnimationFrame(drawFrame);
+
+    if (_useRVFC) {
+      videoPreviewElement.requestVideoFrameCallback(drawFrame);
+    } else {
+      videoPreviewAnimationId = requestAnimationFrame(drawFrame);
+    }
   };
   
-  // Cancel previous animation if any
-  if (videoPreviewAnimationId) {
-    cancelAnimationFrame(videoPreviewAnimationId);
+  if (_useRVFC) {
+    videoPreviewElement.requestVideoFrameCallback(drawFrame);
+  } else {
+    drawFrame();
   }
-  
-  drawFrame();
   imagePreviewImg = null;
 }
 
@@ -6466,7 +6676,8 @@ function openVideoEditor(mediaIndex) {
   
   // Load existing settings or defaults
   document.getElementById('video-object-fit').value = media.objectFit || 'contain';
-  document.getElementById('video-loop').checked = media.loop !== false; // default true
+  document.getElementById('video-repeat-count').value = media.videoRepeat !== undefined ? media.videoRepeat : 0;
+  document.getElementById('video-playback-speed').value = media.playbackSpeed !== undefined ? String(media.playbackSpeed) : '1';
   document.getElementById('video-muted').checked = media.muted !== false; // default true
   
   // Load video for preview
@@ -6474,7 +6685,7 @@ function openVideoEditor(mediaIndex) {
   videoPreviewElement.src = pathToFileURL(media.path);
   videoPreviewElement.loop = true;
   videoPreviewElement.muted = true;
-  videoPreviewElement.play();
+  safePlay(videoPreviewElement);
   
   // Start preview rendering
   updateVideoPreview();
@@ -6506,8 +6717,11 @@ function saveVideoSettings() {
   
   const media = allMedia[editingMediaIndex];
   media.objectFit = document.getElementById('video-object-fit').value;
-  media.loop = document.getElementById('video-loop').checked;
+  media.videoRepeat = parseInt(document.getElementById('video-repeat-count').value, 10) || 0;
+  media.playbackSpeed = parseFloat(document.getElementById('video-playback-speed').value) || 1;
   media.muted = document.getElementById('video-muted').checked;
+  // Derive loop from repeat: 0 = infinite loop, >0 = finite
+  media.loop = media.videoRepeat === 0;
   
   saveMedia();
   closeVideoEditor();
@@ -6556,8 +6770,583 @@ function initVideoEditor() {
   });
 }
 
+// --- GIF Editor ---
+
+function openGifEditor(mediaIndex) {
+  editingMediaIndex = mediaIndex;
+  const media = allMedia[mediaIndex];
+  const modal = document.getElementById('gif-editor-modal');
+  if (!modal) return;
+
+  document.getElementById('gif-bg-size').value = media.bgSize || 'cover';
+  document.getElementById('gif-bg-position').value = media.bgPosition || 'center';
+  document.getElementById('gif-repeat-count').value = media.gifRepeat !== undefined ? media.gifRepeat : 0;
+
+  const preview = document.getElementById('gif-preview-img');
+  if (preview) preview.src = pathToFileURL(media.path);
+
+  modal.classList.add('active');
+}
+
+function closeGifEditor() {
+  const modal = document.getElementById('gif-editor-modal');
+  if (modal) modal.classList.remove('active');
+  const preview = document.getElementById('gif-preview-img');
+  if (preview) preview.src = '';
+  editingMediaIndex = null;
+}
+
+function saveGifSettings() {
+  if (editingMediaIndex === null) return;
+  const savedIndex = editingMediaIndex;
+  const media = allMedia[savedIndex];
+  media.bgSize = document.getElementById('gif-bg-size').value;
+  media.bgPosition = document.getElementById('gif-bg-position').value;
+  media.gifRepeat = parseInt(document.getElementById('gif-repeat-count').value, 10) || 0;
+
+  saveMedia();
+  closeGifEditor();
+
+  if (selectedMediaIndex === savedIndex) {
+    displayMediaOnPreview(media);
+    displayMediaOnLive(media);
+  }
+}
+
+function initGifEditor() {
+  const modal = document.getElementById('gif-editor-modal');
+  if (!modal) return;
+  document.getElementById('gif-editor-close').addEventListener('click', closeGifEditor);
+  document.getElementById('gif-editor-cancel').addEventListener('click', closeGifEditor);
+  document.getElementById('gif-editor-save').addEventListener('click', saveGifSettings);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeGifEditor(); });
+}
+
+// ========== WEBSITE MEDIA TYPE ==========
+
+function openWebsiteModal(mediaIndex = null) {
+  editingMediaIndex = mediaIndex;
+  const modal = document.getElementById('website-modal');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('website-modal-title');
+  if (mediaIndex !== null) {
+    const media = allMedia[mediaIndex];
+    document.getElementById('website-name-input').value = media.name || '';
+    document.getElementById('website-url-input').value = media.url || '';
+    if (titleEl) titleEl.textContent = 'Edit Website';
+  } else {
+    document.getElementById('website-name-input').value = '';
+    document.getElementById('website-url-input').value = '';
+    if (titleEl) titleEl.textContent = 'Add Website';
+  }
+
+  modal.classList.add('active');
+  document.getElementById('website-url-input').focus();
+}
+
+function closeWebsiteModal() {
+  const modal = document.getElementById('website-modal');
+  if (modal) modal.classList.remove('active');
+  editingMediaIndex = null;
+}
+
+async function saveWebsiteItem() {
+  let name = (document.getElementById('website-name-input').value || '').trim();
+  let url  = (document.getElementById('website-url-input').value || '').trim();
+
+  if (!url) {
+    alert('Please enter a URL.');
+    return;
+  }
+
+  // Auto-prepend https:// if missing
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  if (!name) name = url;
+
+  if (editingMediaIndex !== null) {
+    const media = allMedia[editingMediaIndex];
+    media.name = name;
+    media.url  = url;
+  } else {
+    allMedia.push({ name, url, type: 'WEBSITE', size: '-', addedDate: new Date().toISOString() });
+  }
+
+  await saveMedia();
+  renderMediaGrid();
+  closeWebsiteModal();
+}
+
+function initWebsiteModal() {
+  const modal = document.getElementById('website-modal');
+  if (!modal) return;
+
+  document.getElementById('website-modal-close').addEventListener('click', closeWebsiteModal);
+  document.getElementById('website-modal-cancel').addEventListener('click', closeWebsiteModal);
+  document.getElementById('website-modal-save').addEventListener('click', saveWebsiteItem);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeWebsiteModal(); });
+
+  document.querySelectorAll('.website-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('website-url-input').value = btn.dataset.url;
+      document.getElementById('website-name-input').value = btn.dataset.name;
+    });
+  });
+
+  document.getElementById('website-url-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveWebsiteItem();
+  });
+}
+
+// Draw a placeholder on the preview canvas showing the website name/URL
+function drawWebsitePlaceholder(media) {
+  const canvas = document.getElementById('preview-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  // Globe icon (simple circle + lines)
+  const cx = w / 2, cy = h / 2 - 40;
+  const r = Math.min(w, h) * 0.12;
+  ctx.strokeStyle = '#0078d4';
+  ctx.lineWidth = r * 0.12;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.5, r, 0, 0, Math.PI * 2); ctx.stroke();
+
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(r * 0.55)}px Arial`;
+  ctx.fillText(media.name || 'Website', cx, cy + r + r * 0.7);
+
+  ctx.fillStyle = '#aaa';
+  ctx.font = `${Math.round(r * 0.38)}px Arial`;
+  const url = media.url || '';
+  const shortUrl = url.length > 40 ? url.substring(0, 37) + '...' : url;
+  ctx.fillText(shortUrl, cx, cy + r + r * 1.35);
+
+  ctx.fillStyle = '#555';
+  ctx.font = `${Math.round(r * 0.32)}px Arial`;
+  ctx.fillText('Double-click to go live', cx, cy + r + r * 1.85);
+}
+
+// Website mirror — capturePage polling state
+let _mirrorActive = false;
+let _mirrorTimer = null;
+
+// Preview webview dom-ready tracking (for loading URL into interactive preview)
+let _websiteWvReady = false;
+let _websiteWvPendingUrl = null;
+let _websiteActiveMediaIndex = null; // which allMedia[] index is currently open in the webview
+
+function showWebsiteLivePanel(url) {
+  _websiteActiveMediaIndex = selectedMediaIndex; // capture before anything can change it
+  const panel = document.getElementById('website-live-panel');
+  const wv    = document.getElementById('website-live-webview');  
+  if (!panel || !wv) return;
+
+  const urlBar = document.getElementById('website-url-bar');
+  if (urlBar) urlBar.value = url;
+
+  // Use visibility toggle — keeps the webview render process alive at all times
+  // so loadURL never hits ERR_ABORTED from a suspended renderer
+  panel.classList.add('visible');
+  scaleWebviewToContainer();
+
+  if (_websiteWvReady) {
+    wv.loadURL(url).catch(() => { try { wv.src = url; } catch (_) {} });
+  } else {
+    _websiteWvPendingUrl = url;
+  }
+}
+
+function scaleWebviewToContainer() {
+  const wv      = document.getElementById('website-live-webview');
+  const wrapper = document.querySelector('.website-webview-wrapper');
+  if (!wv || !wrapper) return;
+  const W = wrapper.clientWidth;
+  const H = wrapper.clientHeight;
+  if (!W || !H) return;
+  const scale  = Math.min(W / 1920, H / 1080);
+  const tx     = (W - 1920 * scale) / 2;
+  const ty     = (H - 1080 * scale) / 2;
+  wv.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+}
+
+function hideWebsiteLivePanel(stopMirror = false) {
+  const panel = document.getElementById('website-live-panel');
+  if (panel) panel.classList.remove('visible');
+  if (stopMirror) stopWebsiteMirror();
+}
+
+// ─── Website mirror — webview.capturePage() polling ──────────────────────────────────────
+
+// Start mirror after page has loaded so first frame has content
+function startMirrorAfterLoad() {
+  const wv = document.getElementById('website-live-webview');
+  if (!wv) return;
+
+  let started = false;
+  const go = () => { if (started) return; started = true; startWebsiteMirror(); };
+
+  const onLoad = () => { wv.removeEventListener('did-finish-load', onLoad); wv.removeEventListener('did-fail-load', onErr); go(); };
+  const onErr  = () => { wv.removeEventListener('did-finish-load', onLoad); wv.removeEventListener('did-fail-load', onErr); go(); };
+  wv.addEventListener('did-finish-load', onLoad);
+  wv.addEventListener('did-fail-load', onErr);
+  setTimeout(go, 8000); // safety fallback
+}
+
+// Capture frames directly from the webview's render buffer and send to live windows.
+// No desktopCapturer, no WebRTC, no source matching — just asks the webview itself.
+function startWebsiteMirror() {
+  stopWebsiteMirror();
+  const wv = document.getElementById('website-live-webview');
+  if (!wv) return;
+  _mirrorActive = true;
+  const capture = async () => {
+    if (!_mirrorActive) return;
+    try {
+      const img = await wv.capturePage();
+      if (_mirrorActive && img && img.getSize().width > 0) {
+        ipcRenderer.send('mirror-frame', img.toJPEG(75));
+      }
+    } catch (_) {}
+    if (_mirrorActive) _mirrorTimer = setTimeout(capture, 66); // ~15 fps
+  };
+  _mirrorTimer = setTimeout(capture, 0);
+}
+
+function stopWebsiteMirror() {
+  _mirrorActive = false;
+  if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+  ipcRenderer.send('website-mirror-stop');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function initWebsitePanels() {
+  const wv = document.getElementById('website-live-webview');
+  if (!wv) return;
+
+  // Flush any queued navigation URL; safe to call multiple times (idempotent)
+  const _flushPendingUrl = () => {
+    _websiteWvReady = true;
+    if (_websiteWvPendingUrl) {
+      const url = _websiteWvPendingUrl;
+      _websiteWvPendingUrl = null;
+      wv.loadURL(url).catch(() => { try { wv.src = url; } catch (_) {} });
+    }
+  };
+  wv.addEventListener('dom-ready', _flushPendingUrl);
+  // dom-ready fires for about:blank at startup. If initWebsitePanels() ran after that
+  // event, _websiteWvReady stays false. Detect readiness by probing getURL().
+  try { if (typeof wv.getURL() === 'string') _flushPendingUrl(); } catch (_) {}
+
+  document.getElementById('website-back-btn').addEventListener('click', () => {
+    try { if (wv.canGoBack()) wv.goBack(); } catch (_) {}
+  });
+  document.getElementById('website-forward-btn').addEventListener('click', () => {
+    try { if (wv.canGoForward()) wv.goForward(); } catch (_) {}
+  });
+  document.getElementById('website-reload-btn').addEventListener('click', () => {
+    try { wv.reload(); } catch (_) {}
+  });
+
+  const urlBar = document.getElementById('website-url-bar');
+  const goBtn  = document.getElementById('website-go-btn');
+
+  const navigateTo = () => {
+    let url = urlBar.value.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    urlBar.value = url;
+    wv.loadURL(url).catch(() => { try { wv.src = url; } catch (_) {} });
+  };
+
+  goBtn.addEventListener('click', navigateTo);
+  urlBar.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigateTo(); });
+
+  // Sync URL bar when webview navigates internally
+  // capturePage polling picks up page changes automatically — no restart needed
+  const onNavigate = (e) => {
+    const url = e.url || wv.src;
+    if (urlBar && url && url !== 'about:blank') urlBar.value = url;
+  };
+
+  try {
+    wv.addEventListener('did-navigate', onNavigate);
+    wv.addEventListener('did-navigate-in-page', onNavigate);
+  } catch (_) {}
+
+  // Set the preload script so requestFullscreen() is blocked inside the webview.
+  // This prevents YouTube/other sites from triggering OS-level fullscreen.
+  // Our custom button below handles filling the canvas with the page's video.
+  try {
+    const path = require('path');
+    const { pathToFileURL } = require('url');
+    wv.setAttribute('preload', pathToFileURL(path.join(__dirname, 'webview-preload.js')).toString());
+  } catch (_) {}
+
+  // ── Actions dropdown (Update Thumbnail / Update URL) ──────────────────────────
+  const actionsBtn  = document.getElementById('website-actions-btn');
+  const actionsDrop = document.getElementById('website-actions-dropdown');
+
+  document.addEventListener('click', (e) => {
+    if (actionsDrop && !actionsDrop.contains(e.target) && e.target !== actionsBtn) {
+      actionsDrop.style.display = 'none';
+    }
+  });
+
+  if (actionsBtn) {
+    actionsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!actionsDrop) return;
+      if (actionsDrop.style.display === 'none') {
+        actionsDrop.style.display = '';
+        positionDropdown(actionsBtn, actionsDrop);
+      } else {
+        actionsDrop.style.display = 'none';
+      }
+    });
+  }
+
+  const actionThumb = document.getElementById('website-action-thumb');
+  if (actionThumb) {
+    actionThumb.addEventListener('click', async () => {
+      if (actionsDrop) actionsDrop.style.display = 'none';
+      const idx = _websiteActiveMediaIndex;
+      if (idx === null || !allMedia[idx]) { alert('No website item is currently open.'); return; }
+      try {
+        const img = await wv.capturePage();
+        const jpegBuf = img.toJPEG(80);
+        allMedia[idx].thumbnail = 'data:image/jpeg;base64,' + Buffer.from(jpegBuf).toString('base64');
+        await saveMedia();
+        renderMediaGrid();
+      } catch (err) {
+        console.error('[actions] capturePage failed', err);
+        alert('Could not capture thumbnail: ' + err.message);
+      }
+    });
+  }
+
+  const actionUrl = document.getElementById('website-action-url');
+  if (actionUrl) {
+    actionUrl.addEventListener('click', async () => {
+      if (actionsDrop) actionsDrop.style.display = 'none';
+      const idx = _websiteActiveMediaIndex;
+      if (idx === null || !allMedia[idx]) { alert('No website item is currently open.'); return; }
+      let currentUrl;
+      try { currentUrl = wv.getURL(); } catch (_) { currentUrl = ''; }
+      if (!currentUrl || currentUrl === 'about:blank') { alert('No URL loaded in the webview yet.'); return; }
+      allMedia[idx].url = currentUrl;
+      await saveMedia();
+      renderMediaGrid();
+      // Also update the nav bar display
+      const urlBar = document.getElementById('website-url-bar');
+      if (urlBar) urlBar.value = currentUrl;
+    });
+  }
+  // Detects video elements on the loaded page and shows a floating button.
+  // Clicking it injects a fixed overlay into the webview that moves the active
+  // video to fill 100vw×100vh (= 1920×1080 in webview-space, scaled to canvas).
+  let _vidFillActive = false;
+  let _vidList = []; // [{index, w, h, src, paused}]
+
+  const vidWrap  = document.getElementById('website-vid-picker-wrap');
+  const vidBtn   = document.getElementById('website-vid-fullscreen-btn');
+  const vidBadge = document.getElementById('website-vid-badge');
+  const vidDrop  = document.getElementById('website-vid-dropdown');
+
+  // Helper: position a fixed dropdown below its trigger button
+  const positionDropdown = (btn, drop) => {
+    const r = btn.getBoundingClientRect();
+    drop.style.top  = (r.bottom + 4) + 'px';
+    // Prefer right-aligned; clamp so it doesn't go off-screen
+    const w = drop.offsetWidth || 220;
+    let left = r.right - w;
+    if (left < 4) left = 4;
+    drop.style.left = left + 'px';
+    drop.style.right = '';
+  };
+
+  document.addEventListener('click', (e) => {
+    if (vidDrop && !vidDrop.contains(e.target) && e.target !== vidBtn) {
+      vidDrop.style.display = 'none';
+    }
+  });
+
+  const checkForVideo = () => {
+    wv.executeJavaScript(`
+      JSON.stringify([...document.querySelectorAll('video')].map((v, i) => ({
+        index: i,
+        w: v.videoWidth,
+        h: v.videoHeight,
+        paused: v.paused,
+        src: (v.src || v.currentSrc || '').replace(/^blob:.*/, '[blob]').slice(0, 80)
+      })))
+    `).then(json => {
+      const vids = JSON.parse(json).filter(v => v.w > 0 || v.h > 0);
+      _vidList = vids;
+      if (!vidWrap) return;
+      if (vids.length === 0) {
+        vidWrap.style.display = 'none';
+        return;
+      }
+      vidWrap.style.display = '';
+      if (vidBadge) vidBadge.textContent = vids.length;
+    }).catch(() => {
+      _vidList = [];
+      if (vidWrap) vidWrap.style.display = 'none';
+    });
+  };
+
+  const buildDropdown = () => {
+    if (!vidDrop) return;
+    vidDrop.innerHTML = '';
+    if (_vidFillActive) {
+      const exit = document.createElement('div');
+      exit.className = 'exit-row';
+      exit.textContent = 'X  Exit video fill';
+      exit.addEventListener('click', () => { vidDrop.style.display = 'none'; exitVidFill(); });
+      vidDrop.appendChild(exit);
+    }
+    _vidList.forEach(v => {
+      const item = document.createElement('div');
+      item.className = 'website-vid-dropdown-item';
+      const label = document.createElement('span');
+      label.className = 'vid-label';
+      label.textContent = `Video ${v.index + 1}  ${v.w}\u00d7${v.h}${v.paused ? '' : '  ▶'}`;
+      const meta = document.createElement('span');
+      meta.className = 'vid-meta';
+      meta.textContent = v.src || '(no src)';
+      item.appendChild(label);
+      item.appendChild(meta);
+      item.addEventListener('click', () => {
+        vidDrop.style.display = 'none';
+        if (_vidFillActive) exitVidFill(() => enterVidFill(v.index));
+        else enterVidFill(v.index);
+      });
+      vidDrop.appendChild(item);
+    });
+  };
+
+  const enterVidFill = (vidIndex) => {
+    _vidFillActive = true;
+    if (vidBtn) vidBtn.classList.add('active');
+    wv.executeJavaScript(`
+      (function(idx) {
+        if (document.getElementById('_liturgia_vid_overlay')) return;
+        const all = [...document.querySelectorAll('video')];
+        const vid = all[idx] || all.find(v => !v.paused) || all[0];
+        if (!vid) return;
+        const overlay = document.createElement('div');
+        overlay.id = '_liturgia_vid_overlay';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:2147483647;display:flex;align-items:center;justify-content:center;';
+        const placeholder = document.createElement('span');
+        placeholder.id = '_liturgia_vid_placeholder';
+        placeholder.style.display = 'none';
+        vid.parentNode.insertBefore(placeholder, vid);
+        overlay._vidOrigStyle = vid.getAttribute('style') || '';
+        vid.style.cssText = 'width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;display:block;background:#000;';
+        overlay.appendChild(vid);
+        document.documentElement.appendChild(overlay);
+      })(${vidIndex})
+    `).catch(() => {});
+  };
+
+  const exitVidFill = (callback) => {
+    _vidFillActive = false;
+    if (vidBtn) vidBtn.classList.remove('active');
+    wv.executeJavaScript(`
+      (function() {
+        const overlay = document.getElementById('_liturgia_vid_overlay');
+        if (!overlay) return;
+        const vid = overlay.querySelector('video');
+        const placeholder = document.getElementById('_liturgia_vid_placeholder');
+        if (vid) {
+          vid.setAttribute('style', overlay._vidOrigStyle || '');
+          if (placeholder && placeholder.parentNode) placeholder.parentNode.insertBefore(vid, placeholder);
+          else document.body.appendChild(vid);
+        }
+        if (placeholder) placeholder.remove();
+        overlay.remove();
+      })()
+    `).then(() => { if (callback) callback(); }).catch(() => { if (callback) callback(); });
+  };
+
+  if (vidBtn) {
+    vidBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!vidDrop) return;
+      if (vidDrop.style.display === 'none') {
+        buildDropdown();
+        vidDrop.style.display = '';
+        positionDropdown(vidBtn, vidDrop);
+      } else {
+        vidDrop.style.display = 'none';
+      }
+    });
+  }
+
+  // Check for video after each page load; reset fill state on navigation
+  wv.addEventListener('did-finish-load', () => {
+    if (_vidFillActive) { _vidFillActive = false; if (vidBtn) vidBtn.classList.remove('active'); }
+    checkForVideo();
+  });
+  wv.addEventListener('did-fail-load', checkForVideo);
+
+  // YouTube and other SPAs create <video> elements after page load via JS.
+  // Poll every 2 s so the badge updates once the player initialises.
+  let _vidPollTimer = null;
+  const startVidPoll = () => {
+    if (_vidPollTimer) clearInterval(_vidPollTimer);
+    _vidPollTimer = setInterval(checkForVideo, 2000);
+  };
+  wv.addEventListener('did-finish-load', startVidPoll);
+  wv.addEventListener('did-navigate', () => {
+    if (_vidFillActive) exitVidFill();
+    startVidPoll();
+  });
+
+  // Scale webview to container whenever its wrapper resizes
+  const wrapper = document.querySelector('.website-webview-wrapper');
+  if (wrapper && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => scaleWebviewToContainer()).observe(wrapper);
+  }
+}
+
+// ===================================
+
 function displayMediaOnPreview(media) {
   console.log('displayMediaOnPreview called with:', media);
+
+  // Kill any running video draw-loop from a previous video preview.
+  // Without this, switching from a video to any other type leaves the rAF loop
+  // running and it keeps overwriting the newly-drawn content every frame.
+  const _previewCanvas = document.getElementById('preview-canvas');
+  if (_previewCanvas) {
+    _previewCanvas._currentPreviewVideo = null;
+    // Also stop any animated background loop on this canvas
+    _previewCanvas._bgToken = (_previewCanvas._bgToken || 0) + 1;
+  }
+
+  // WEBSITE: draw placeholder on the LEFT preview canvas only.
+  // Never touch the right canvas or the website panel — single-click must never
+  // interrupt whatever is currently live.
+  if (media.type === 'WEBSITE') {
+    drawWebsitePlaceholder(media);
+    return;
+  }
+
+  // For all non-website types: draw to the preview (left) canvas only.
+  // Do NOT call hideWebsiteLivePanel here — that hides the overlay on the RIGHT
+  // side, revealing the bare live-canvas which was never updated during website
+  // mode, making the right canvas appear to clear on every single-click.
+
   const canvas = document.getElementById('preview-canvas');
   console.log('Preview canvas element:', canvas);
   if (!canvas) {
@@ -6600,9 +7389,18 @@ function displayMediaOnPreview(media) {
     video.src = pathToFileURL(media.path);
     video.muted = true;
     video.loop = true;
-    video.play();
+    safePlay(video);
+
+    // Stop guard — prevents ghost loops when clicking multiple video items
+    canvas._currentPreviewVideo = video;
+    const _useRVFC = typeof video.requestVideoFrameCallback === 'function';
     
     const drawFrame = () => {
+      if (canvas._currentPreviewVideo !== video) {
+        video.pause();
+        if (video.parentNode) video.parentNode.removeChild(video);
+        return;
+      }
       if (video.readyState >= 2) {
         const scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
         const w = video.videoWidth * scale;
@@ -6613,14 +7411,47 @@ function displayMediaOnPreview(media) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, x, y, w, h);
       }
-      requestAnimationFrame(drawFrame);
+      if (_useRVFC) {
+        video.requestVideoFrameCallback(drawFrame);
+      } else {
+        requestAnimationFrame(drawFrame);
+      }
     };
-    drawFrame();
+    if (_useRVFC) {
+      video.requestVideoFrameCallback(drawFrame);
+    } else {
+      drawFrame();
+    }
   }
 }
 
 async function displayMediaOnLive(media) {
-  // Get external display dimensions
+  // Ensure the live window exists and liveMode is active — same as handleVerseDoubleClick
+  if (!liveMode) {
+    liveMode = true;
+    await ipcRenderer.invoke('create-live-window');
+    updateLiveButtonState(true);
+  }
+
+  // WEBSITE: show interactive preview webview in right panel + mirror to live window(s)
+  if (media.type === 'WEBSITE') {
+    showWebsiteLivePanel(media.url);
+    // Tell live windows to prepare mirror mode (hide canvases, show video element)
+    ipcRenderer.send('update-live-window', { isWebsite: true });
+    // Wait for the page to actually render before starting the WebRTC mirror
+    startMirrorAfterLoad();
+    return;
+  }
+
+  // Stop animated background loops on both canvases before starting new media loops
+  const _pc = document.getElementById('preview-canvas');
+  const _lc = document.getElementById('live-canvas');
+  if (_pc) { _pc._currentPreviewVideo = null; _pc._bgToken = (_pc._bgToken || 0) + 1; }
+  if (_lc) { _lc._currentPreviewVideo = null; _lc._bgToken = (_lc._bgToken || 0) + 1; }
+
+  // For all non-website types: hide website panel and stop mirror
+  // because something non-website is now going live.
+  hideWebsiteLivePanel(true);
   const settings = await ipcRenderer.invoke('load-settings');
   const displays = await ipcRenderer.invoke('get-displays');
   const defaultDisplayId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
@@ -6649,6 +7480,9 @@ async function displayMediaOnLive(media) {
     objectFit: media.objectFit,
     loop: media.loop,
     muted: media.muted,
+    videoRepeat: media.videoRepeat !== undefined ? media.videoRepeat : 0,
+    playbackSpeed: media.playbackSpeed || 1,
+    gifRepeat: media.gifRepeat !== undefined ? media.gifRepeat : 0,
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out'],
     isMedia: true
@@ -6687,11 +7521,20 @@ async function displayMediaOnLive(media) {
       video.src = pathToFileURL(media.path);
       video.muted = media.muted !== false; // default true
       video.loop = media.loop !== false; // default true
-      video.play();
+      safePlay(video);
+
+      // Stop guard: tag the canvas with the current video so stale loops self-terminate
+      canvas._currentPreviewVideo = video;
       
       const objectFit = media.objectFit || 'contain';
+      const _useRVFC = typeof video.requestVideoFrameCallback === 'function';
       
       const drawFrame = () => {
+        if (canvas._currentPreviewVideo !== video) {
+          video.pause();
+          if (video.parentNode) video.parentNode.removeChild(video);
+          return;
+        }
         if (video.readyState >= 2) {
           let scale, w, h, x, y;
           
@@ -6723,9 +7566,17 @@ async function displayMediaOnLive(media) {
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(video, x, y, w, h);
         }
-        requestAnimationFrame(drawFrame);
+        if (_useRVFC) {
+          video.requestVideoFrameCallback(drawFrame);
+        } else {
+          requestAnimationFrame(drawFrame);
+        }
       };
-      drawFrame();
+      if (_useRVFC) {
+        video.requestVideoFrameCallback(drawFrame);
+      } else {
+        drawFrame();
+      }
     }
   });
 }

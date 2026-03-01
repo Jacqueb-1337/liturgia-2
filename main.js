@@ -1617,7 +1617,8 @@ async function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
-      contextIsolation: false   // keep legacy behavior (renderer scripts rely on require/module)
+      contextIsolation: false,   // keep legacy behavior (renderer scripts rely on require/module)
+      webviewTag: true
     }
   };
   
@@ -2441,17 +2442,31 @@ function createLiveWindowForDisplay(display) {
     alwaysOnTop: false,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      webviewTag: true
     }
   });
-  if (process.platform === 'win32') {
-    win.setAppDetails({ appId: 'com.liturgia.live' });
-  }
+  win._liveReady = false;
+  win._livePending = null; // buffers the last update-content payload before ready
   liveWindows.set(display.id, win);
   win.loadFile('live.html');
   win.once('ready-to-show', () => { win.show(); });
   win.on('closed', () => { liveWindows.delete(display.id); });
 }
+
+// When live.html has finished registering all its IPC listeners, flush any buffered content
+ipcMain.on('live-window-ready', (event) => {
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed() && win.webContents === event.sender) {
+      win._liveReady = true;
+      if (win._livePending) {
+        win.webContents.send('update-content', win._livePending);
+        win._livePending = null;
+      }
+      break;
+    }
+  }
+});
 
 ipcMain.handle('create-live-window', async () => {
   const settingsPath = path.join(getUserDataDir(app), 'settings.json');
@@ -2496,7 +2511,13 @@ ipcMain.handle('close-live-window', () => {
 
 ipcMain.on('update-live-window', (event, data) => {
   for (const win of liveWindows.values()) {
-    if (!win.isDestroyed()) win.webContents.send('update-content', data);
+    if (win.isDestroyed()) continue;
+    if (win._liveReady) {
+      win.webContents.send('update-content', data);
+    } else {
+      // Window is still loading — buffer so it gets the content the moment it's ready
+      win._livePending = data;
+    }
   }
 });
 
@@ -2530,3 +2551,21 @@ ipcMain.on('set-live-mode', (event, mode) => {
     if (!win.isDestroyed()) win.webContents.send('set-live-mode', mode);
   }
 });
+
+// Forward captured JPEG frames from preview webview to all live windows
+ipcMain.on('mirror-frame', (event, jpegBuffer) => {
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('mirror-frame', jpegBuffer);
+  }
+});
+
+// Tell all live windows to hide the mirror (e.g. switching to another item)
+ipcMain.on('website-mirror-stop', () => {
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('website-mirror-stop');
+  }
+});
+
+// Legacy — no-ops so no errors if old sends arrive
+ipcMain.on('website-navigate', () => {});
+ipcMain.on('website-clear', () => {});
