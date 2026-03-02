@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load the Bibles list when the Bibles tab is clicked
   document.getElementById('bibles-tab-button').addEventListener('click', loadBiblesList);
+
+  // Import Bible from local file
+  document.getElementById('bible-import-btn').addEventListener('click', handleBibleImport);
   
   // Refresh relay UI when the Cloud Relay tab is clicked (don't load on init to avoid freeze)
   const relayTabButton = document.querySelector('button[data-panel="relay"]');
@@ -1675,8 +1678,118 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       if (purchaseBtn) purchaseBtn.style.display = '';
     }
   });
+// Load list of available local (imported) Bibles from userData
+async function loadLocalBibles() {
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  const biblesBase = path.join(userData, 'bibles');
+  if (!fs.existsSync(biblesBase)) return [];
+  const entries = fs.readdirSync(biblesBase, { withFileTypes: true });
+  const local = [];
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      const bibleFile = path.join(biblesBase, entry.name, 'bible.json');
+      if (fs.existsSync(bibleFile)) {
+        local.push(entry.name); // e.g. 'en_kjv', 'my_bible'
+      }
+    }
+  }
+  return local;
+}
+
+async function renderLocalBiblesList(localIds) {
+  const section = document.getElementById('bibles-local-section');
+  const container = document.getElementById('bibles-local-list');
+  if (!localIds || localIds.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  container.innerHTML = '';
+
+  const currentBible = await ipcRenderer.invoke('get-default-bible');
+
+  for (const versionId of localIds) {
+    const isSelected = `${versionId}.json` === currentBible || versionId === currentBible;
+    const displayName = versionId.replace(/_/g, ' ').toUpperCase();
+
+    const item = document.createElement('div');
+    item.className = 'bible-item' + (isSelected ? ' selected' : '');
+    item.innerHTML = `
+      <div class="bible-item-header">
+        <span class="bible-name">${displayName}<span class="bible-local-tag">local</span></span>
+        <span class="bible-status downloaded">Downloaded</span>
+      </div>
+      <button class="bible-action ${isSelected ? 'selected' : 'select'}" data-version="${versionId}"
+              ${isSelected ? 'disabled' : ''}>
+        ${isSelected ? 'Currently Active' : 'Select'}
+      </button>
+    `;
+
+    const btn = item.querySelector('.bible-action');
+    btn.addEventListener('click', async () => {
+      const fileName = `${versionId}.json`;
+      await selectBible(fileName);
+      // Re-render both sections
+      const localIds2 = await loadLocalBibles();
+      await renderLocalBiblesList(localIds2);
+      if (allBibleFiles && allBibleFiles.length > 0) renderBiblesList(allBibleFiles);
+    });
+
+    container.appendChild(item);
+  }
+}
+
+async function handleBibleImport() {
+  const statusEl = document.getElementById('bible-import-status');
+  statusEl.textContent = '';
+
+  // Open file dialog
+  const filePath = await ipcRenderer.invoke('show-bible-import-dialog');
+  if (!filePath) return;
+
+  // Derive a default version ID from the filename
+  const baseName = path.basename(filePath, path.extname(filePath))
+    .replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').toLowerCase();
+
+  // Ask user for a version identifier
+  const versionId = window.prompt(
+    'Enter a short version ID for this Bible (used as folder name):\nExample: en_nasb, fr_ls, pt_acf',
+    baseName
+  );
+  if (!versionId || !versionId.trim()) return;
+  const cleanId = versionId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  const btn = document.getElementById('bible-import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  statusEl.textContent = '';
+
+  try {
+    await ipcRenderer.invoke('import-bible-file', filePath, cleanId);
+
+    statusEl.style.color = '';
+    statusEl.textContent = `Imported as "${cleanId}" successfully.`;
+    setTimeout(() => { statusEl.textContent = ''; }, 4000);
+
+    // Refresh local list
+    const localIds = await loadLocalBibles();
+    await renderLocalBiblesList(localIds);
+  } catch (err) {
+    statusEl.style.color = '#f44336';
+    statusEl.textContent = `Import failed: ${err.message}`;
+    console.error('Bible import failed:', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Import from file...';
+  }
+}
+
 // Load list of available Bibles from GitHub
 async function loadBiblesList() {
+  // Always show locally imported Bibles first
+  const localIds = await loadLocalBibles();
+  await renderLocalBiblesList(localIds);
+
   const apiUrl = 'https://api.github.com/repos/thiagobodruk/bible/contents/json';
   const biblesContainer = document.getElementById('bibles-list');
   try {

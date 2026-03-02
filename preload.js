@@ -65,7 +65,9 @@ const desktopRuntimeBridge = {
   getAiEnabled: () => ipcRenderer.invoke('ai:get-enabled'),
   setAiEnabled: (enabled) => ipcRenderer.invoke('ai:set-enabled', !!enabled),
   onAiEnabledChanged: (handler) => subscribeToChannel('ai:enabled-changed', handler),
-  getCachedAiEnabled: () => cachedAiEnabled
+  getCachedAiEnabled: () => cachedAiEnabled,
+  // Notifies listeners when the active Bible's book list changes (bible switch, initial load).
+  onBibleBooksUpdated: (handler) => subscribeToChannel('bible-books-updated', handler)
 };
 
 ipcRenderer.on('sidecar:status', (_event, payload) => {

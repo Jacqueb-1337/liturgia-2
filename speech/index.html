@@ -1691,6 +1691,17 @@
 
     const ALIAS_FLAT = BOOKS.flatMap(b => b.aliases.map(a => ({ key: b.key, alias: a }))).sort((a, b) => b.alias.length - a.alias.length);
 
+    // Book names from the currently loaded Bible (populated at runtime via IPC).
+    // For English Bibles these will match the alias table above; for other languages they
+    // provide the actual foreign-language names that the speech recogniser must detect.
+    let dynamicBookNames = [];
+
+    if (window.desktopRuntime && typeof window.desktopRuntime.onBibleBooksUpdated === 'function') {
+      window.desktopRuntime.onBibleBooksUpdated((names) => {
+        if (Array.isArray(names) && names.length) dynamicBookNames = names;
+      });
+    }
+
     const NUM_WORDS = new Map([
       ["zero",0],["one",1],["two",2],["three",3],["four",4],["five",5],["six",6],["seven",7],["eight",8],["nine",9],
       ["ten",10],["eleven",11],["twelve",12],["thirteen",13],["fourteen",14],["fifteen",15],["sixteen",16],["seventeen",17],["eighteen",18],["nineteen",19],
@@ -1878,7 +1889,10 @@
 
     function bookDisplay(key) {
       const b = BOOKS.find(x => x.key === key);
-      if (!b) return key;
+      if (!b) {
+        // Dynamic book: key is the actual book name — capitalise each word for display.
+        return key ? key.replace(/\b\w/g, c => c.toUpperCase()) : key;
+      }
       return b.aliases[0].replace(/\b\w/g, c => c.toUpperCase());
     }
 
@@ -1886,6 +1900,19 @@
       const t = normalize(text);
       const found = [];
 
+      // Check dynamic book names (from the currently loaded Bible) first.
+      // For non-English Bibles this is how we detect the actual translated book names.
+      // For English Bibles these mostly overlap with ALIAS_FLAT so duplicates are deduped below.
+      if (dynamicBookNames.length) {
+        for (const name of dynamicBookNames) {
+          const alias = normalize(name);
+          if (!alias) continue;
+          const idx = t.lastIndexOf(alias);
+          if (idx !== -1) found.push({ bookKey: name, match: "exact", alias, pos: idx, sim: 1 });
+        }
+      }
+
+      // Standard English phonetic alias matching.
       for (const item of ALIAS_FLAT) {
         const idx = t.lastIndexOf(item.alias);
         if (idx !== -1) found.push({ bookKey: item.key, match: "exact", alias: item.alias, pos: idx, sim: 1 });
@@ -1893,6 +1920,17 @@
 
       if (!found.length) {
         const tail = t.split(" ").slice(-6).join(" ");
+        // Fuzzy match against dynamic book names.
+        if (dynamicBookNames.length) {
+          for (const name of dynamicBookNames) {
+            const alias = normalize(name);
+            if (!alias) continue;
+            const dist = levenshtein(tail, alias);
+            const sim = 1 - dist / Math.max(1, Math.max(tail.length, alias.length));
+            if (sim >= 0.72) found.push({ bookKey: name, match: "fuzzy", alias, sim, pos: -1 });
+          }
+        }
+        // Fuzzy match against standard English aliases.
         for (const item of ALIAS_FLAT) {
           const dist = levenshtein(tail, item.alias);
           const sim = 1 - dist / Math.max(1, Math.max(tail.length, item.alias.length));

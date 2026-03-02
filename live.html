@@ -83,6 +83,7 @@
     // Website mirror — receives JPEG frames from preview webview via IPC
     const mirrorImg = document.getElementById('live-mirror-img');
     let _mirrorBlobUrl = null;
+    let _mirrorEnabled = false; // true only while website mirror mode is active
 
     function showMirrorVideo() { // keep old name so all call sites work
       mirrorImg.style.display = 'block';
@@ -1744,28 +1745,81 @@
      */
     
     // Unified mode setter for clear/black/normal; centralizes transitions and avoids IPC races
+    // Fade the mirror image out over `duration` seconds, then fully hide it.
+    function _fadeMirrorOut(duration) {
+      const fadeDurationMs = Math.max(50, (duration || 0.4) * 1000);
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / fadeDurationMs);
+        mirrorImg.style.opacity = String(1 - t);
+        if (t < 1) {
+          requestAnimationFrame(step);
+        } else {
+          hideMirrorVideo();
+          mirrorImg.style.opacity = '1';
+        }
+      };
+      requestAnimationFrame(step);
+    }
+
+    // Fade the mirror image in over `duration` seconds.
+    function _fadeMirrorIn(duration) {
+      const fadeDurationMs = Math.max(50, (duration || 0.4) * 1000);
+      mirrorImg.style.opacity = '0';
+      showMirrorVideo();
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / fadeDurationMs);
+        mirrorImg.style.opacity = String(t);
+        if (t < 1) {
+          requestAnimationFrame(step);
+        } else {
+          mirrorImg.style.opacity = '1';
+        }
+      };
+      requestAnimationFrame(step);
+    }
+
     function setLiveMode(mode) {
       console.debug('[live] setLiveMode ->', mode);
-      // Cancel any ongoing animations
+      // Cancel any ongoing canvas animations
       if (currentAnimationFrameId) {
         cancelAnimationFrame(currentAnimationFrameId);
         currentAnimationFrameId = null;
       }
+      // Stop any video draw loop. The RVFC-driven loop checks window.currentVideo !== video,
+      // so nulling it is the only reliable way to stop it (cancelAnimationFrame won't work).
+      if (window.currentVideo) { window.currentVideo = null; }
+      if (window._liveBgVideo) {
+        try { window._liveBgVideo.pause(); } catch (_) {}
+        if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
+        window._liveBgVideo = null;
+      }
+      window._liveBgToken = (window._liveBgToken || 0) + 1;
 
-      // Hide website mirror whenever a mode switch happens and restore canvases
-      hideMirrorVideo();
+      // Capture whether the website mirror overlay was visible before we do anything.
+      // If it was, we fade it out instead of hiding immediately so the transition looks smooth.
+      const _mirrorWasVisible = (mirrorImg.style.display !== 'none');
+      _mirrorEnabled = false; // stop accepting new mirror frames immediately
+
+      // Always make canvases visible — they may have been obscured by the mirror
       bgCanvas.style.display = '';
       textCanvas.style.display = '';
 
       if (mode === 'black') {
-        console.debug('[live] entering black mode');
         isClearMode = false;
         isBlackMode = true;
         clearGifBg();
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore if textCtx unavailable */ }
+        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
         currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+        if (_mirrorWasVisible) {
+          const _dur = (window.currentContent && window.currentContent.transitionIn) ? window.currentContent.transitionIn.duration : 0.4;
+          _fadeMirrorOut(_dur);
+        } else {
+          hideMirrorVideo();
+        }
         return;
       }
 
@@ -1775,8 +1829,6 @@
         isClearMode = true;
         isBlackMode = false;
 
-        // If there's visible text on screen, fade it out; otherwise just show background
-        const hasVisibleText = currentRenderContent && currentRenderContent.text;
         const width = canvas.width;
         const height = canvas.height;
         const transitionSettings = window.currentContent && window.currentContent.transitionIn ? window.currentContent.transitionIn : { duration: 0.4, type: 'fade' };
@@ -1807,54 +1859,60 @@
           }
         };
 
-        if (hasVisibleText) {
-          const oldContent = { ...currentRenderContent };
+        if (_mirrorWasVisible) {
+          // Website mirror was on top — text was never visible to the audience.
+          // Render the background on the canvas, clear text immediately, then fade the mirror
+          // out so it dissolves smoothly into the background instead of snapping away.
           renderBackground();
-          // Ensure watermark is drawn into the captured background for the fade-out
           drawLicenseWatermark();
-          applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
-            // After fade-out finishes, clear the text layer to ensure no residual remains
-            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore */ }
-            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-          });
-        } else {
-          renderBackground();
-          // Draw watermark for clear-mode background
-          drawLicenseWatermark();
-          // Ensure text layer is cleared immediately
-          try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) { /* ignore */ }
+          try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
           currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+          _fadeMirrorOut(transitionSettings.duration);
+        } else {
+          hideMirrorVideo();
+          // If there's visible text on screen, fade it out; otherwise just show background
+          const hasVisibleText = currentRenderContent && currentRenderContent.text;
+          if (hasVisibleText) {
+            const oldContent = { ...currentRenderContent };
+            renderBackground();
+            drawLicenseWatermark();
+            applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
+              try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
+              currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+            });
+          } else {
+            renderBackground();
+            drawLicenseWatermark();
+            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
+            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
+          }
         }
 
         return;
       }
 
       // mode === 'normal'
+      hideMirrorVideo();
       isClearMode = false;
       isBlackMode = false;
       if (window.currentContent) renderContent(window.currentContent);
     }
 
     ipcRenderer.on('update-content', (event, data) => {
-      // Update underlying content data
-      window.currentContent = data;
-
-      // WEBSITE: hand off entirely to the WebRTC mirror video
+      // WEBSITE: mirror overlays on top of canvases — don't wipe window.currentContent
+      // so clear/black modes can fall back to the last verse/song content underneath.
       if (data && data.isWebsite) {
-        // Hide canvases — their will-change compositing layers can overlay the video
-        bgCanvas.style.display = 'none';
-        textCanvas.style.display = 'none';
-        gifBg.style.display = 'none';
-        // Clear any text that was painted
-        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (_) {}
-        showMirrorVideo(); // video becomes active once WebRTC stream arrives
+        isClearMode = false; isBlackMode = false;
+        _mirrorEnabled = true;
+        const _fadeDur = (window.currentContent && window.currentContent.transitionIn) ? window.currentContent.transitionIn.duration : 0.4;
+        _fadeMirrorIn(_fadeDur);
         return;
       }
 
-      // For non-website content, hide mirror video and restore canvases
+      // Non-website: update content and disable mirror
+      window.currentContent = data;
+      _mirrorEnabled = false;
       hideMirrorVideo();
-      bgCanvas.style.display = '';
-      textCanvas.style.display = '';
 
       // Respect current mode: keep screen black or cleared if those modes are active
       if (isBlackMode) {
@@ -1936,6 +1994,9 @@
 
     // Mirror: receive JPEG frames from the preview webview (sent via capturePage polling)
     ipcRenderer.on('mirror-frame', (event, jpegBuffer) => {
+      // Discard frames if mirror mode is no longer active (prevents website overlay
+      // from re-appearing after switching to verse/song/media content)
+      if (!_mirrorEnabled) return;
       const prev = _mirrorBlobUrl;
       _mirrorBlobUrl = URL.createObjectURL(new Blob([jpegBuffer], { type: 'image/jpeg' }));
       mirrorImg.src = _mirrorBlobUrl;
@@ -1946,9 +2007,8 @@
 
     // Mirror stopped (e.g. switched to different content)
     ipcRenderer.on('website-mirror-stop', () => {
+      _mirrorEnabled = false;
       hideMirrorVideo();
-      bgCanvas.style.display = '';
-      textCanvas.style.display = '';
     });
     
     ipcRenderer.on('show-live-text', () => {

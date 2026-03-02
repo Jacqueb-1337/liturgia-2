@@ -196,6 +196,47 @@
       color: #999;
     }
 
+    .bible-import-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .bible-local-section {
+      margin-bottom: 16px;
+    }
+
+    .bible-local-heading {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #888;
+      margin-bottom: 8px;
+    }
+
+    .bible-local-tag {
+      display: inline-block;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: #e3f2fd;
+      color: #1565c0;
+      margin-left: 6px;
+      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    #bible-import-status {
+      font-size: 12px;
+      color: #4caf50;
+    }
+
+    body.dark-theme .bible-local-heading { color: #777; }
+    body.dark-theme .bible-local-tag { background: #1e3a5f; color: #90caf9; }
+    body.dark-theme #bible-import-status { color: #81c784; }
+
     .muted-text { color: #666; font-size: 0.95em; }
     body.dark-theme .muted-text { color: #aaa; }
 
@@ -574,6 +615,14 @@
       </div>
       <div class="settings-panel" id="panel-bibles">
         <h2>Manage Bibles</h2>
+        <div class="bible-import-bar">
+          <button class="btn" id="bible-import-btn">Import from file...</button>
+          <span id="bible-import-status"></span>
+        </div>
+        <div id="bibles-local-section" class="bible-local-section" style="display:none;">
+          <div class="bible-local-heading">Locally imported</div>
+          <div id="bibles-local-list"></div>
+        </div>
         <input type="text" id="bible-search" placeholder="Search for a Bible version..." />
         <div id="bibles-list">
           <div class="bible-loading">Loading Bible versions...</div>

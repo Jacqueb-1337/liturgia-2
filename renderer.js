@@ -48,6 +48,53 @@ const {
   VERSION, CDN_BASE, ITEM_HEIGHT, WINDOW_SIZE, BUFFER, BOOKS, CHAPTER_COUNTS, VERSE_COUNTS, BIBLE_STORAGE_DIR
 } = require('./constants');
 
+// Dynamic metadata derived from the currently loaded Bible.
+// Updated every time allVerses changes (init + bible switch).
+let dynamicBibleMeta = { bookNames: [], chapterCounts: {}, verseCounts: {} };
+
+// Saved search-box config so we can re-apply it with updated book names.
+let searchBoxConfig = null;
+
+/**
+ * Derive book names, chapter counts, and verse counts directly from the
+ * allVerses array.  Keys are formatted "BookName chapter:verse" so all
+ * metadata we need is already encoded in the key strings.
+ */
+function extractBibleMetadata(verses) {
+  const bookOrder = [];
+  const chapterCounts = {};
+  const verseCounts = {};
+  if (!Array.isArray(verses)) return { bookNames: [], chapterCounts: {}, verseCounts: {} };
+  for (const v of verses) {
+    const key = v && v.key ? v.key : '';
+    const m = key.match(/^(.+?) (\d+):(\d+)$/);
+    if (!m) continue;
+    const book = m[1];
+    const chap = parseInt(m[2], 10);
+    const verse = parseInt(m[3], 10);
+    if (bookOrder.indexOf(book) === -1) bookOrder.push(book);
+    if (!chapterCounts[book] || chapterCounts[book] < chap) chapterCounts[book] = chap;
+    const vk = `${book} ${chap}`;
+    if (!verseCounts[vk] || verseCounts[vk] < verse) verseCounts[vk] = verse;
+  }
+  return { bookNames: bookOrder, chapterCounts, verseCounts };
+}
+
+/**
+ * Recompute dynamicBibleMeta from allVerses, update the search box books list,
+ * and notify the main process (which forwards to the speech worker window).
+ */
+function applyDynamicBibleMeta() {
+  if (!allVerses || !allVerses.length) return;
+  dynamicBibleMeta = extractBibleMetadata(allVerses);
+  // Re-wire the search box with the real book names from the loaded Bible.
+  if (searchBoxConfig && typeof updateSearchBox === 'function') {
+    try { updateSearchBox({ ...searchBoxConfig, books: dynamicBibleMeta.bookNames }); } catch (e) {}
+  }
+  // Inform the speech worker (via main process broadcast) of the new book list.
+  try { ipcRenderer.send('bible-books-updated', dynamicBibleMeta.bookNames); } catch (e) {}
+}
+
 const desktopRuntime = (typeof window !== 'undefined') ? window.desktopRuntime : null;
 const AI_HINT_MESSAGE = 'Live suggestions will appear once Liturgia hears you.';
 const aiSuggestionState = { 
@@ -129,8 +176,9 @@ function createSuggestionEmptyRow(message) {
 
 function parseSuggestionReference(text) {
   if (!text) return null;
+  const activeBooks = dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.bookNames : BOOKS;
   if (typeof window !== 'undefined' && typeof window.parseReference === 'function') {
-    const parsed = window.parseReference(text, BOOKS);
+    const parsed = window.parseReference(text, activeBooks);
     if (parsed) {
       return {
         book: parsed.book,
@@ -143,7 +191,7 @@ function parseSuggestionReference(text) {
   const match = text.trim().match(/^([1-3]?\s*[A-Za-z ]+)\s*(\d+)(?::(\d+))?(?:\s*-\s*(\d+))?/);
   if (!match) return null;
   const bookName = match[1].trim().toLowerCase();
-  const resolvedBook = BOOKS.find((b) => b.toLowerCase().startsWith(bookName)) || match[1].trim();
+  const resolvedBook = activeBooks.find((b) => b.toLowerCase().startsWith(bookName)) || match[1].trim();
   return {
     book: resolvedBook,
     chapter: parseInt(match[2], 10) || 1,
@@ -205,19 +253,25 @@ async function handleSuggestionCardClick(item) {
 function isReferenceValid(ref) {
   if (!ref || !ref.book) return false;
   const book = ref.book.toLowerCase();
-  const normalizedBook = BOOKS.find((b) => b.toLowerCase() === book);
+
+  // Prefer dynamic metadata derived from the currently loaded Bible.
+  // Fall back to the hardcoded KJV constants only when no Bible has been loaded yet.
+  const activeBookNames = dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.bookNames : BOOKS;
+  const activeChapterCounts = dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.chapterCounts : CHAPTER_COUNTS;
+  const activeVerseCounts   = dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.verseCounts   : VERSE_COUNTS;
+
+  const normalizedBook = activeBookNames.find((b) => b.toLowerCase() === book);
   if (!normalizedBook) return false;
-  const maxChapter = CHAPTER_COUNTS[normalizedBook] || 0;
+  const maxChapter = activeChapterCounts[normalizedBook] || 0;
   if (!maxChapter || ref.chapter < 1 || ref.chapter > maxChapter) return false;
-  
-  // Only validate verse counts if VERSE_COUNTS is available
-  if (typeof VERSE_COUNTS === 'object' && VERSE_COUNTS) {
+
+  if (typeof activeVerseCounts === 'object' && activeVerseCounts) {
     const verseCountsKey = `${normalizedBook} ${ref.chapter}`;
-    const maxVerse = VERSE_COUNTS[verseCountsKey] || 0;
+    const maxVerse = activeVerseCounts[verseCountsKey] || 0;
     if (maxVerse && (ref.verse < 1 || ref.verse > maxVerse)) return false;
     if (ref.verseEnd && maxVerse && ref.verseEnd > maxVerse) return false;
   }
-  
+
   return true;
 }
 
@@ -675,6 +729,7 @@ let previewStyles = { verseNumber: '', verseText: '', verseReference: '', verseS
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
+let _websiteIsLive = false; // true while a website is the active live source
 let keybinds = {}; // Loaded from settings
 
 // Listen for import notifications from main process
@@ -1101,6 +1156,27 @@ function validateCSS(css) {
 }
 
 function toggleClear() {
+  if (_websiteIsLive) {
+    if (clearMode) {
+      // Un-clear while website is source: restore mirror
+      clearMode = false;
+      if (window.clearButton) window.clearButton.classList.remove('active');
+      ipcRenderer.send('update-live-window', { isWebsite: true });
+      startWebsiteMirror();
+      return;
+    }
+    if (blackMode) {
+      // Black → Clear: live window already has BG content, just switch mode
+      blackMode = false; clearMode = true;
+      if (window.blackButton) window.blackButton.classList.remove('active');
+      if (window.clearButton) window.clearButton.classList.add('active');
+      ipcRenderer.send('set-live-mode', 'clear');
+      return;
+    }
+    // Entering clear from website: stop mirror polling (keeps audio), fall through to normal
+    _mirrorActive = false;
+    if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+  }
   // If black mode is active, switch directly to clear on the live window (avoid flashing normal)
   if (blackMode) {
     blackMode = false;
@@ -1426,6 +1502,9 @@ ipcRenderer.on('default-bible-changed', async (event, bible) => {
       console.error('Failed to load selected bible:', err);
       return;
     }
+
+    // Update dynamic metadata (book names, chapter/verse counts) from the new Bible.
+    applyDynamicBibleMeta();
 
     document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
     renderWindow(allVerses, 0, selectedIndices, handleVerseClick);
@@ -1783,6 +1862,9 @@ async function initScripture() {
 
   allVerses = await loadAllVersesFromDisk(baseDir);
 
+  // Update dynamic metadata (book names, chapter/verse counts) from the loaded Bible.
+  applyDynamicBibleMeta();
+
   document.getElementById('virtual-list').style.height = `${allVerses.length * ITEM_HEIGHT}px`;
   // Ensure left column is wide enough to show the longest verse reference (clamped to a sane maximum)
   try { adjustVerseListWidth(allVerses); } catch(e) { console.warn('adjustVerseListWidth failed', e); }
@@ -1868,8 +1950,9 @@ async function initScripture() {
     }
   }
 
-  // Setup the EasyWorship-style search box
-  setupSearchBox({
+  // Setup the EasyWorship-style search box.
+  // Save config so applyDynamicBibleMeta() can re-call updateSearchBox with new book names.
+  searchBoxConfig = {
     containerId: 'search-box-container',
     onReferenceSelected: async (ref) => {
       await selectReferenceRange(ref);
@@ -1886,8 +1969,10 @@ async function initScripture() {
     onToggleLive: toggleLive,
     onToggleClear: toggleClear,
     onToggleBlack: toggleBlack,
-    books: BOOKS
-  });
+    // Use dynamic book names when available; fall back to hardcoded KJV list until Bible loads.
+    books: dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.bookNames : BOOKS
+  };
+  setupSearchBox(searchBoxConfig);
 }
 
 // Jump to verse (e.g. after search)
@@ -2628,6 +2713,9 @@ async function updatePreview(verseOrIndices) {
 }
 
 async function updateLive(verseOrIndices) {
+  // Stop website mirror if it was active before pushing verse content
+  hideWebsiteLivePanel(true);
+
   // Accept a single index, array of indices, or a verse object
   let indices = [];
   if (Array.isArray(verseOrIndices)) indices = verseOrIndices.slice();
@@ -3667,6 +3755,27 @@ async function saveLastSelectionToSettings() {
 }
 
 function toggleBlack() {
+  if (_websiteIsLive) {
+    if (blackMode) {
+      // Un-black while website is source: restore mirror
+      blackMode = false;
+      if (window.blackButton) window.blackButton.classList.remove('active');
+      ipcRenderer.send('update-live-window', { isWebsite: true });
+      startWebsiteMirror();
+      return;
+    }
+    if (clearMode) {
+      // Clear → Black: live window already has BG content, just switch mode
+      clearMode = false; blackMode = true;
+      if (window.clearButton) window.clearButton.classList.remove('active');
+      if (window.blackButton) window.blackButton.classList.add('active');
+      ipcRenderer.send('set-live-mode', 'black');
+      return;
+    }
+    // Entering black from website: stop mirror polling (keeps audio), fall through to normal
+    _mirrorActive = false;
+    if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+  }
   // If clear mode is active, switch directly to black on the live window (avoid flashing normal)
   if (clearMode) {
     clearMode = false;
@@ -5086,6 +5195,9 @@ async function updatePreviewFromSongVerse(verseIndex) {
 }
 
 async function updateLiveFromSongVerse(verseIndex) {
+  // Stop website mirror if it was active before pushing song content
+  hideWebsiteLivePanel(true);
+
   const verseData = getSongVerseText(verseIndex);
   if (!verseData) return;
   
@@ -7475,7 +7587,17 @@ function scaleWebviewToContainer() {
 
 function hideWebsiteLivePanel(stopMirror = false) {
   const panel = document.getElementById('website-live-panel');
+  const wv    = document.getElementById('website-live-webview');
   if (panel) panel.classList.remove('visible');
+  _websiteActiveMediaIndex = null;
+  _websiteIsLive = false;
+  // Destroy the page — navigate to blank so video/audio stops completely,
+  // just like any other content type when it goes offline.
+  if (wv) {
+    try { wv.loadURL('about:blank'); } catch (_) { try { wv.src = 'about:blank'; } catch (_2) {} }
+    const urlBar = document.getElementById('website-url-bar');
+    if (urlBar) urlBar.value = '';
+  }
   if (stopMirror) stopWebsiteMirror();
 }
 
@@ -7499,7 +7621,13 @@ function startMirrorAfterLoad() {
 // Capture frames directly from the webview's render buffer and send to live windows.
 // No desktopCapturer, no WebRTC, no source matching — just asks the webview itself.
 function startWebsiteMirror() {
-  stopWebsiteMirror();
+  // Stop the previous polling loop locally without sending website-mirror-stop to the
+  // live window — sending stop would flip _mirrorEnabled=false in live.html and block
+  // all frames from this new session (since update-content {isWebsite:true} was already
+  // processed before this function runs).
+  _mirrorActive = false;
+  if (_mirrorTimer) { clearTimeout(_mirrorTimer); _mirrorTimer = null; }
+
   const wv = document.getElementById('website-live-webview');
   if (!wv) return;
   _mirrorActive = true;
@@ -7931,6 +8059,11 @@ async function displayMediaOnLive(media) {
 
   // WEBSITE: show interactive preview webview in right panel + mirror to live window(s)
   if (media.type === 'WEBSITE') {
+    _websiteIsLive = true;
+    // Exiting clear/black if they were active
+    clearMode = false; blackMode = false;
+    if (window.clearButton) window.clearButton.classList.remove('active');
+    if (window.blackButton) window.blackButton.classList.remove('active');
     showWebsiteLivePanel(media.url);
     // Tell live windows to prepare mirror mode (hide canvases, show video element)
     ipcRenderer.send('update-live-window', { isWebsite: true });

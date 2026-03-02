@@ -161,6 +161,7 @@ let speechSidecarManager = null;
 let speechSidecarWatchdog = null;
 let latestSidecarStatus = null;
 let latestAiSuggestions = null;
+let currentDynamicBibleBooks = null;
 let cachedAiSettings = { modelSize: 'small' };
 
 
@@ -973,6 +974,10 @@ function sendLatestAiSuggestionsToWindow(win) {
 function hydrateWindowWithAiRuntime(win) {
   sendLatestSidecarStatusToWindow(win);
   sendLatestAiSuggestionsToWindow(win);
+  // Send the current Bible book list to newly opened windows (e.g. speech worker).
+  if (currentDynamicBibleBooks) {
+    try { win.webContents.send('bible-books-updated', currentDynamicBibleBooks); } catch (err) {}
+  }
 }
 
 
@@ -1139,6 +1144,13 @@ ipcMain.handle('sidecar:open-model-folder', async () => {
 ipcMain.on('ai:suggestions-from-renderer', (event, payload) => {
   latestAiSuggestions = payload;
   broadcastToAllWindows('ai:suggestions', payload, { skipWebContentsId: event && event.sender ? event.sender.id : undefined });
+});
+
+// Renderer sends updated book list whenever the active Bible changes.
+// Broadcast to all other windows so the speech worker stays in sync.
+ipcMain.on('bible-books-updated', (event, bookNames) => {
+  currentDynamicBibleBooks = Array.isArray(bookNames) ? bookNames : null;
+  broadcastToAllWindows('bible-books-updated', currentDynamicBibleBooks, { skipWebContentsId: event && event.sender ? event.sender.id : undefined });
 });
 
 ipcMain.handle('ai:get-latest-suggestions', async () => {
@@ -1450,6 +1462,25 @@ ipcMain.on('set-default-bible', (event, bible) => {
 });
 
 ipcMain.handle('get-default-bible', () => defaultBible);
+
+ipcMain.handle('show-bible-import-dialog', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Import Bible',
+    filters: [
+      { name: 'Bible Files', extensions: ['json', 'xml', 'txt', 'tsv'] },
+      { name: 'All Files', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('import-bible-file', async (event, filePath, versionId) => {
+  const { importBibleFile } = require('./scriptureData');
+  const storageDir = path.join(app.getPath('userData'), 'bibles');
+  return await importBibleFile(filePath, versionId, storageDir);
+});
 
 ipcMain.handle('download-python', async (event) => {
   try {

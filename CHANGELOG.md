@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.1.0 - 2026-03-02
+
+- feat: multi-format Bible importer — supports Zefania XML, verse-per-line TXT, and JSON formats
+- feat: settings UI for Bible import with drag-and-drop file picker
+- feat: dynamic Bible metadata — book names, chapter/verse counts update live when a new Bible is loaded
+- feat: speech recognition and reference validation use dynamic book names from the loaded Bible
+- feat: website media clear/black now fades mirror out and back in (respects transition duration setting)
+- feat: website mirror uses z-index overlay so clear/black falls back cleanly to last verse/song background
+- fix: website item going live no longer leaves mirror overlaying subsequent verse, song, or photo content
+- fix: switching away from a website item destroys the webview (stops audio/video playback)
+- fix: black button now correctly stops video background draw loop (was only clearing text)
+- fix: clear while website is active shows background underneath without flashing text
+
+## 4.0.1 - 2026-03-01
+
+- fix: book.name fallback to book.book for alternative Bible JSON formats
+
 ## 4.0.0 - 2026-03-01
 
 - feat: live window video background plays continuously without restarting between verse changes
