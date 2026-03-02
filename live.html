@@ -533,6 +533,15 @@
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
       const animate = () => {
+        // If clear or black mode became active while this animation was in-flight,
+        // stop drawing immediately and ensure textCtx is clean.
+        if (isClearMode || isBlackMode) {
+          currentAnimationFrameId = null;
+          try { textCtx.clearRect(0, 0, width, height); } catch (e) {}
+          if (callback) callback();
+          return;
+        }
+
         const elapsed = (Date.now() - startTime) / 1000;
         const progress = Math.min(elapsed / duration, 1);
         const eased = easeInOutCubic(progress);
@@ -1876,6 +1885,12 @@
             const oldContent = { ...currentRenderContent };
             renderBackground();
             drawLicenseWatermark();
+            // Clear textCtx IMMEDIATELY so the audience sees no text from this instant.
+            // applyTextFadeOutAnimation below runs on bgCtx as a subtle background-only
+            // transition; textCtx is already blank so text cannot linger even if the
+            // callback is delayed or the animation is cancelled mid-way.
+            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
+            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
             applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
               try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
               currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
