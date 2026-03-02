@@ -135,127 +135,85 @@
 
     // Render text content to an offscreen canvas and return it
     function renderTextToCanvas(content, width, height) {
-      const textCanvas = document.createElement('canvas');
-      textCanvas.width = width;
-      textCanvas.height = height;
-      const textCtx = textCanvas.getContext('2d');
-      textCtx.clearRect(0, 0, width, height);
-      const styles = content && content.styles ? content.styles : {};
-      const textStyle = styles.text || {};
-      const numberStyle = styles.number || styles.title || {};
-      const referenceStyle = styles.reference || {};
-
-      textCtx.textAlign = 'center';
-      textCtx.textBaseline = 'middle';
-
-      const padding = width * 0.02;
-      const availableWidth = width - (padding * 2);
-      const availableHeight = height - (padding * 2);
-      let baseFontSize = height * 0.08;
-
-      // Render verse number (top left)
-      if (content.number) {
-        textCtx.font = `${baseFontSize * 0.6}px Arial`;
-        textCtx.textAlign = 'left';
-        textCtx.fillStyle = numberStyle.color || '#fff';
-        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
-      }
-
-      // Render verse text (center)
-      if (content.text) {
-        textCtx.textAlign = 'center';
-        const textY = height / 2;
-        const textLines = content.text.split('\n');
-        const allLines = [];
-
-        textLines.forEach(textLine => {
-          const segments = parseVerseSegments(textLine);
-          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          textCtx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
-          allLines.push(...wrappedLines);
-        });
-
-        let lines = allLines;
-
-        // Size adjustment (grow if space allows)
-        while (true) {
-          const testSize = baseFontSize + 4;
-          textCtx.font = `${testSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
-            testLines.push(...wrappedLines);
-          });
-          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
-            baseFontSize = testSize;
-            lines = testLines;
-          } else break;
-        }
-
-        // Shrink if needed
-        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
-          baseFontSize -= 2;
-          textCtx.font = `${baseFontSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            // Ensure inline markdown is parsed for measurement
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
-            testLines.push(...wrappedLines);
-          });
-          lines = testLines;
-        }
-
-        // Render lines
-        const lineHeight = baseFontSize * 1.2;
-        const totalHeight = lines.length * lineHeight;
-        const startY = textY - (totalHeight / 2);
-
-        lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
-        });
-      }
-
-      // Render reference (bottom right)
-      if (content.reference) {
-        textCtx.font = `${baseFontSize * 0.7}px Arial`;
-        textCtx.textAlign = 'right';
-        textCtx.fillStyle = referenceStyle.color || '#fff';
-        textCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
-      }
-
-      return textCanvas;
+      // Delegate to buildTextCanvas which supports all style properties.
+      // Falls back to currentRenderWidth/Height if width/height not supplied.
+      const W = (typeof width  === 'number' && width  > 0) ? width  : (currentRenderWidth  || window.innerWidth);
+      const H = (typeof height === 'number' && height > 0) ? height : (currentRenderHeight || window.innerHeight);
+      return buildTextCanvas(content, W, H);
     }
-
     // Refresh the visible canvas so watermark is placed between background and text
     async function refreshContentWithWatermark() {
       if (!canvas || !ctx) return;
+
+      // Respect current display mode — do not break black/clear state
+      if (isBlackMode) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawLicenseWatermark();
+        return;
+      }
+
       if (!window.currentContent) {
-        // Nothing to do but draw watermark over black
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         drawLicenseWatermark();
         return;
       }
-      // Cancel any running animations
-      if (currentAnimationFrameId) { cancelAnimationFrame(currentAnimationFrameId); currentAnimationFrameId = null; }
-      const width = canvas.width;
-      const height = canvas.height;
 
-      // Render background to offscreen canvas
+      const width  = canvas.width;
+      const height = canvas.height;
+      const _bg     = window.currentContent.backgroundMedia || null;
+      const _bgType = _bg ? _bg.type : null;
+      const _bgIsVideo = _bgType && ['MP4','WEBM','OGG','MOV','AVI'].includes(_bgType);
+      const _bgIsGif   = _bgType === 'GIF';
+      const _rwGlobal  = (window.currentContent.styles && window.currentContent.styles.global) || {};
+      const _rwOverlay = _rwGlobal.overlayOpacity !== undefined ? _rwGlobal.overlayOpacity : 0.4;
+      const _rwBlur    = parseFloat(_rwGlobal.bgBlur) || 0;
+
+      // VIDEO: the rAF draw-loop owns bgCtx every frame — do NOT cancel it or write to
+      // bgCtx, or the text will be erased on the very next frame.  Just restore textCtx.
+      if (_bgIsVideo && window._liveBgVideo) {
+        if (isClearMode) {
+          textCtx.clearRect(0, 0, width, height);
+        } else if (window.currentContent.text) {
+          const txt = renderTextToCanvas(window.currentContent, width, height);
+          textCtx.clearRect(0, 0, width, height);
+          textCtx.drawImage(txt, 0, 0);
+        }
+        return;
+      }
+
+      // GIF: the animated <img> element is the real background — drawing a static image
+      // frame onto bgCtx with renderBackgroundToCanvas would freeze the animation.
+      // Instead, just re-assert the semi-transparent overlay on bgCtx and restore textCtx.
+      if (_bgIsGif) {
+        if (_bg && _bg.path) setGifBg(_bg.path, _bg);
+        gifBg.style.filter = _rwBlur > 0 ? `blur(${_rwBlur * height / 1080}px)` : '';
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = `rgba(0,0,0,${_rwOverlay})`;
+        ctx.fillRect(0, 0, width, height);
+        drawLicenseWatermark();
+        if (isClearMode) {
+          textCtx.clearRect(0, 0, width, height);
+        } else if (window.currentContent.text) {
+          const txt = renderTextToCanvas(window.currentContent, width, height);
+          textCtx.clearRect(0, 0, width, height);
+          textCtx.drawImage(txt, 0, 0);
+        }
+        return;
+      }
+
+      // Static backgrounds: cancel any leftover animation, render to offscreen, restore both layers
+      if (currentAnimationFrameId) { cancelAnimationFrame(currentAnimationFrameId); currentAnimationFrameId = null; }
       const off = document.createElement('canvas'); off.width = width; off.height = height;
       await renderBackgroundToCanvas(window.currentContent, off);
-      // Draw background
       ctx.drawImage(off, 0, 0);
-      // Draw watermark between background and text
       drawLicenseWatermark();
-      // Draw text if present
-      if (window.currentContent && window.currentContent.text) {
+      if (isClearMode) {
+        textCtx.clearRect(0, 0, width, height);
+      } else if (window.currentContent.text) {
         const txt = renderTextToCanvas(window.currentContent, width, height);
-        ctx.drawImage(txt, 0, 0);
+        textCtx.clearRect(0, 0, width, height);
+        textCtx.drawImage(txt, 0, 0);
       }
     }
 
@@ -299,10 +257,17 @@
     
     // Set canvas to actual display resolution
     function resizeCanvas() {
-      bgCanvas.width = window.screen.width;
-      bgCanvas.height = window.screen.height;
-      textCanvas.width = window.screen.width;
-      textCanvas.height = window.screen.height;
+      const _newW = window.screen.width;
+      const _newH = window.screen.height;
+      // Assigning .width/.height on a canvas always resets its content even when the
+      // value hasn't changed.  On Windows, Electron fires resize events on alt+tab /
+      // focus changes, which would clear both canvases unnecessarily every time.
+      if (bgCanvas.width === _newW && bgCanvas.height === _newH &&
+          textCanvas.width === _newW && textCanvas.height === _newH) return;
+      bgCanvas.width = _newW;
+      bgCanvas.height = _newH;
+      textCanvas.width = _newW;
+      textCanvas.height = _newH;
       // Redraw based on current mode
       if (isBlackMode || isClearMode) {
         // Just fill with black on background and clear text layer
@@ -489,102 +454,8 @@
       // approach used by applyTextFadeInAnimation.
       const _liveVidRunning = !!(window._liveBgVideo && !window._liveBgVideo.paused);
 
-      // Pre-render the OLD text to an off-screen canvas (use same logic as fade-in)
-      const textCanvas = document.createElement('canvas');
-      textCanvas.width = width;
-      textCanvas.height = height;
-      const textCtxOff = textCanvas.getContext('2d');
-      textCtxOff.clearRect(0, 0, width, height);
-      
-      // Render OLD text to off-screen canvas using proper wrapping
-      const styles = oldContent && oldContent.styles ? oldContent.styles : {};
-      const textStyle = styles.text || {};
-      const numberStyle = styles.number || styles.title || {};
-      const referenceStyle = styles.reference || {};
-
-      textCtxOff.textAlign = 'center';
-      textCtxOff.textBaseline = 'middle';
-      
-      const padding = width * 0.02;
-      const availableWidth = width - (padding * 2);
-      const availableHeight = height - (padding * 2);
-      let baseFontSize = height * 0.08;
-      
-      // Render verse number (top left)
-      if (oldContent.number) {
-        textCtxOff.font = `${baseFontSize * 0.6}px Arial`;
-        textCtxOff.textAlign = 'left';
-        textCtxOff.fillStyle = numberStyle.color || '#fff';
-        textCtxOff.fillText(oldContent.number, padding, padding + baseFontSize * 0.3);
-      }
-      
-      // Render verse text (center) - use proper wrapping logic
-      if (oldContent.text) {
-        textCtxOff.textAlign = 'center';
-        const textY = height / 2;
-        const textLines = oldContent.text.split('\n');
-        const allLines = [];
-        
-        textLines.forEach(textLine => {
-          const segments = parseVerseSegments(textLine);
-          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          textCtxOff.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtxOff);
-          allLines.push(...wrappedLines);
-        });
-        
-        let lines = allLines;
-        
-        // Size adjustment - grow font if space allows
-        while (true) {
-          const testSize = baseFontSize + 4;
-          textCtxOff.font = `${testSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtxOff);
-            testLines.push(...wrappedLines);
-          });
-          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
-            baseFontSize = testSize;
-            lines = testLines;
-          } else {
-            break;
-          }
-        }
-        
-        // Shrink font if needed
-        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
-          baseFontSize -= 2;
-          textCtxOff.font = `${baseFontSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtxOff);
-            testLines.push(...wrappedLines);
-          });
-          lines = testLines;
-        }
-        
-        // Render lines with proper positioning
-        const lineHeight = baseFontSize * 1.2;
-        const totalHeight = lines.length * lineHeight;
-        const startY = textY - (totalHeight / 2);
-        
-        lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtxOff, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
-        });
-      }
-      
-      // Render reference (bottom right)
-      if (oldContent.reference) {
-        textCtxOff.font = `${baseFontSize * 0.7}px Arial`;
-        textCtxOff.textAlign = 'right';
-        textCtxOff.fillText(oldContent.reference, width - padding, height - padding - baseFontSize * 0.3);
-      }
-
+      // Pre-render the OLD text using buildTextCanvas (full style support)
+      const textCanvas = buildTextCanvas(oldContent, width, height);
       // Capture background snapshot only when no video loop owns bgCtx.
       const backgroundImageData = _liveVidRunning ? null : ctx.getImageData(0, 0, width, height);
 
@@ -655,93 +526,8 @@
       const width = currentRenderWidth;
       const height = currentRenderHeight;
 
-      // Pre-render text to an off-screen canvas
-      const off = document.createElement('canvas');
-      off.width = width;
-      off.height = height;
-      const offCtx = off.getContext('2d');
-
-      const styles = content && content.styles ? content.styles : {};
-      const textStyle = styles.text || {};
-      const numberStyle = styles.number || styles.title || {};
-      const referenceStyle = styles.reference || {};
-
-      offCtx.clearRect(0, 0, width, height);
-      offCtx.textAlign = 'center';
-      offCtx.textBaseline = 'middle';
-
-      const padding = width * 0.02;
-      const availableWidth = width - (padding * 2);
-      const availableHeight = height - (padding * 2);
-      let baseFontSize = height * 0.08;
-
-      if (content.number) {
-        offCtx.font = `${baseFontSize * 0.6}px Arial`;
-        offCtx.textAlign = 'left';
-        offCtx.fillStyle = numberStyle.color || '#fff';
-        offCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
-      }
-
-      if (content.text) {
-        offCtx.textAlign = 'center';
-        const textY = height / 2;
-        const textLines = content.text.split('\n');
-        const allLines = [];
-
-        textLines.forEach(textLine => {
-          const segments = parseVerseSegments(textLine);
-          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          offCtx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
-          allLines.push(...wrappedLines);
-        });
-
-        let lines = allLines;
-        while (true) {
-          const testSize = baseFontSize + 4;
-          offCtx.font = `${testSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, offCtx);
-            testLines.push(...wrappedLines);
-          });
-          if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
-            baseFontSize = testSize;
-            lines = testLines;
-          } else break;
-        }
-
-        while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
-          baseFontSize -= 2;
-          offCtx.font = `${baseFontSize}px Arial`;
-          const testLines = [];
-          textLines.forEach(textLine => {
-            const segments = parseVerseSegments(textLine);
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, offCtx);
-            testLines.push(...wrappedLines);
-          });
-          lines = testLines;
-        }
-
-        const lineHeight = baseFontSize * 1.2;
-        const totalHeight = lines.length * lineHeight;
-        const startY = textY - (totalHeight / 2);
-        lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, offCtx, { textColor: textStyle.color || '#fff', subscriptColor: textStyle.subscriptColor || (textStyle.color ? textStyle.color : '#ddd') });
-        });
-      }
-
-      // Render reference if any
-      if (content.reference) {
-        offCtx.font = `${baseFontSize * 0.7}px Arial`;
-        offCtx.textAlign = 'right';
-        offCtx.fillStyle = referenceStyle.color || '#fff';
-        offCtx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
-      }
-
+      // Pre-render text using buildTextCanvas (full style support)
+      const off = buildTextCanvas(content, width, height);
       // Animate onto the text canvas
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
@@ -926,94 +712,13 @@
       });
     }
 
-    // Helper: render text-only to an offscreen canvas (same layout logic used elsewhere)
+    // (This second renderTextToCanvas definition is the one JS actually uses at runtime.
+    //  It delegates to buildTextCanvas for full style support.)
     function renderTextToCanvas(content) {
-      const canvas = document.createElement('canvas');
-      canvas.width = currentRenderWidth || window.innerWidth;
-      canvas.height = currentRenderHeight || window.innerHeight;
-      const textCtx = canvas.getContext('2d');
-      textCtx.clearRect(0, 0, canvas.width, canvas.height);
-      if (!content || !content.text) return canvas;
-
-      textCtx.fillStyle = '#fff';
-      textCtx.textAlign = 'center';
-      textCtx.textBaseline = 'middle';
-      const padding = canvas.width * 0.02;
-      const availableWidth = canvas.width - (padding * 2);
-      const availableHeight = canvas.height - (padding * 2);
-      let baseFontSize = canvas.height * 0.08;
-
-      // Verse number
-      if (content.number) {
-        textCtx.font = `${baseFontSize * 0.6}px Arial`;
-        textCtx.textAlign = 'left';
-        textCtx.fillText(content.number, padding, padding + baseFontSize * 0.3);
-      }
-
-      // Render verse text
-      const textY = canvas.height / 2;
-      const textLines = content.text.split('\n');
-      const allLines = [];
-      textLines.forEach(textLine => {
-        const segments = parseVerseSegments(textLine);
-        // Ensure inline markdown parsed for measurement/render
-        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-        textCtx.font = `${baseFontSize}px Arial`;
-        const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
-        allLines.push(...wrappedLines);
-      });
-
-      let lines = allLines;
-      // Grow font if space
-      while (true) {
-        const testSize = baseFontSize + 4;
-        textCtx.font = `${testSize}px Arial`;
-        const testLines = [];
-        textLines.forEach(textLine => {
-          const segments = parseVerseSegments(textLine);
-          // Ensure inline markdown is parsed for measurement
-          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, textCtx);
-          testLines.push(...wrappedLines);
-        });
-        if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < canvas.height * 0.15) {
-          baseFontSize = testSize;
-          lines = testLines;
-        } else break;
-      }
-
-      while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
-        baseFontSize -= 2;
-        textCtx.font = `${baseFontSize}px Arial`;
-        const testLines = [];
-        textLines.forEach(textLine => {
-          const segments = parseVerseSegments(textLine);
-          // Ensure inline markdown is parsed for measurement
-          segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, textCtx);
-          testLines.push(...wrappedLines);
-        });
-        lines = testLines;
-      }
-
-      // Draw lines
-      const lineHeight = baseFontSize * 1.2;
-      const totalHeight = lines.length * lineHeight;
-      const startY = textY - (totalHeight / 2);
-      lines.forEach((line, i) => {
-        renderLineWithSubscripts(line, canvas.width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, textCtx);
-      });
-
-      // Reference
-      if (content.reference) {
-        textCtx.font = `${baseFontSize * 0.7}px Arial`;
-        textCtx.textAlign = 'right';
-        textCtx.fillText(content.reference, canvas.width - padding, canvas.height - padding - baseFontSize * 0.3);
-      }
-
-      return canvas;
+      const W = currentRenderWidth  || window.innerWidth;
+      const H = currentRenderHeight || window.innerHeight;
+      return buildTextCanvas(content, W, H);
     }
-
     // Apply a simple background cross-fade between two contents (text remains on top)
     async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4) {
       // Cancel any ongoing animations
@@ -1111,7 +816,12 @@
       
       const width = canvas.width;
       const height = canvas.height;
-      
+      // Extract per-call style globals so closures (video loop, callbacks) inherit them
+      const _rstGlobal      = (renderContent_content.styles && renderContent_content.styles.global) || {};
+      const _overlayOpacity = _rstGlobal.overlayOpacity !== undefined ? _rstGlobal.overlayOpacity : 0.4;
+      const _bgBlur         = parseFloat(_rstGlobal.bgBlur) || 0;
+      const _normScale      = height / 1080;
+
       // IMPORTANT: Store OLD content before updating currentRenderContent
       const oldContent = currentRenderContent ? { ...currentRenderContent } : null;
       
@@ -1374,8 +1084,9 @@
                   drawLicenseWatermark(ctx, canvas);
                 } else if (media.type === 'GIF') {
                   setGifBg(media.path, media);
+                  gifBg.style.filter = _bgBlur > 0 ? `blur(${_bgBlur * _normScale}px)` : '';
                   ctx.clearRect(0, 0, width, height);
-                  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                  ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
                   ctx.fillRect(0, 0, width, height);
                   drawLicenseWatermark(ctx, canvas);
                   if (renderContent_content.transitionIn) {
@@ -1442,8 +1153,9 @@
           window._liveBgToken = (window._liveBgToken || 0) + 1;
           if (window._liveBgVideo) { window._liveBgVideo.pause(); window._liveBgVideo = null; }
           setGifBg(media.path, media);
+          gifBg.style.filter = _bgBlur > 0 ? `blur(${_bgBlur * _normScale}px)` : '';
           ctx.clearRect(0, 0, width, height);
-          ctx.fillStyle = 'rgba(0,0,0,0.4)';
+          ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
           ctx.fillRect(0, 0, width, height);
           drawLicenseWatermark();
           showTextWithAnimation();
@@ -1457,11 +1169,15 @@
           bgImg.onload = () => {
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
+            if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
             drawImageWithSettings(ctx, bgImg, width, height, {
               bgSize: media.bgSize || 'cover',
               bgRepeat: media.bgRepeat || 'no-repeat',
               bgPosition: media.bgPosition || 'center'
             });
+            ctx.filter = 'none';
+            ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
+            ctx.fillRect(0, 0, width, height);
             drawLicenseWatermark();
             showTextWithAnimation();
           };
@@ -1518,8 +1234,10 @@
                 }
                 w = bgVideo.videoWidth * scale; h = bgVideo.videoHeight * scale;
                 x = (width - w) / 2; y = (height - h) / 2;
+                if (_bgBlur > 0) bgCtx.filter = `blur(${_bgBlur * _normScale}px)`;
                 bgCtx.drawImage(bgVideo, x, y, w, h);
-                bgCtx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                bgCtx.filter = 'none';
+                bgCtx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
                 bgCtx.fillRect(0, 0, width, height);
                 drawLicenseWatermark();
               }
@@ -1651,10 +1369,153 @@
       return out;
     }
     
+    // ── Full-styled text canvas builder ─────────────────────────────────────
+    // Returns a transparent offscreen canvas with ALL text rendered using every
+    // style property from content.styles: font, color, bold, italic, shadow,
+    // stroke, letter-spacing, text-align, line-height, vertical-position.
+    function buildTextCanvas(content, W, H) {
+      const off   = document.createElement('canvas');
+      off.width   = W; off.height = H;
+      const bCtx  = off.getContext('2d');
+      bCtx.clearRect(0, 0, W, H);
+      if (!content) return off;
+
+      const styles = content.styles || {};
+      const textSt = styles.text      || {};
+      const numSt  = styles.number    || styles.title || {};
+      const subSt  = styles.subscript || {};
+      const refSt  = styles.reference || {};
+      const gl     = styles.global    || {};
+      const norm   = H / 1080;
+
+      function fStr(size, st) {
+        const w  = st && st.fontWeight === 'bold'   ? 'bold '   : '';
+        const it = st && st.fontStyle  === 'italic' ? 'italic ' : '';
+        const ff = (st && st.fontFamily) || 'Arial';
+        return `${it}${w}${size}px "${ff}"`;
+      }
+      function applyFx(st) {
+        const bl = ((st && st.shadowBlur) || 0) * norm;
+        const sx = ((st && st.shadowX)   || 0) * norm;
+        const sy = ((st && st.shadowY)   || 0) * norm;
+        if (bl > 0 || sx !== 0 || sy !== 0) {
+          bCtx.shadowColor = (st && st.shadowColor) || '#000';
+          bCtx.shadowBlur  = bl; bCtx.shadowOffsetX = sx; bCtx.shadowOffsetY = sy;
+        }
+      }
+      function clearFx() {
+        bCtx.shadowColor = 'transparent';
+        bCtx.shadowBlur = 0; bCtx.shadowOffsetX = 0; bCtx.shadowOffsetY = 0;
+      }
+      function drawTx(text, x, y, st) {
+        applyFx(st);
+        const sw = ((st && st.strokeWidth) || 0) * norm;
+        if (sw > 0) {
+          bCtx.strokeStyle = (st && st.strokeColor) || '#000';
+          bCtx.lineWidth = sw; bCtx.lineJoin = 'round';
+          bCtx.strokeText(text, x, y);
+        }
+        bCtx.fillText(text, x, y);
+        clearFx();
+      }
+
+      const pad    = W * 0.04;
+      const availW = W - pad * 2;
+      const availH = H - pad * 2;
+      const lhMult = gl.lineHeight       || 1.2;
+      const vpos   = gl.verticalPosition || 'center';
+      let baseSize = H * 0.08;
+
+      // Verse / song number (top-left)
+      if (content.number) {
+        const mult = numSt.sizeMultiplier || 0.6;
+        bCtx.font      = fStr(baseSize * mult, numSt);
+        bCtx.fillStyle = numSt.color || '#fff';
+        bCtx.textAlign = 'left';
+        bCtx.textBaseline = 'top';
+        drawTx(content.number, pad, pad, numSt);
+      }
+
+      // Main text
+      if (content.text) {
+        const textColor = textSt.color || '#fff';
+        const subColor  = subSt.color  || '#ddd';
+        const subMult   = subSt.sizeMultiplier || 0.6;
+        const textFF    = textSt.fontFamily || 'Arial';
+        const textAlign = textSt.textAlign || 'center';
+        if ('letterSpacing' in bCtx)
+          bCtx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * norm}px` : '0px';
+
+        const textLines = content.text.split('\n');
+        function buildLines(size) {
+          bCtx.font = fStr(size, textSt);
+          const all = [];
+          textLines.forEach(tl => {
+            const segs = parseVerseSegments(tl);
+            segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            all.push(...wrapTextWithSubscripts(segs, availW, size, bCtx, textFF));
+          });
+          return all;
+        }
+        let lines = buildLines(baseSize);
+        while (true) {
+          const ts = baseSize + 4, tl = buildLines(ts);
+          if (tl.length * ts * lhMult < availH * 0.82 && ts < H * 0.15) { baseSize = ts; lines = tl; } else break;
+        }
+        while (lines.length * baseSize * lhMult > availH && baseSize > 20) { baseSize -= 2; lines = buildLines(baseSize); }
+
+        const lh = baseSize * lhMult;
+        const totalH = lines.length * lh;
+        let startY = vpos === 'top' ? pad : vpos === 'bottom' ? H - pad - totalH : H / 2 - totalH / 2;
+
+        lines.forEach((line, i) => {
+          const lineY = startY + i * lh + baseSize / 2;
+          let totalW = 0;
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              bCtx.font = fStr(baseSize * subMult, subSt);
+              totalW += bCtx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+              bCtx.font = fStr(baseSize, merged); totalW += bCtx.measureText(seg.text).width;
+            }
+          });
+          let x = textAlign === 'left' ? pad : textAlign === 'right' ? W - pad - totalW : W / 2 - totalW / 2;
+          bCtx.textBaseline = 'alphabetic';
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              const ssz = baseSize * subMult;
+              bCtx.font = fStr(ssz, subSt); bCtx.fillStyle = subColor; bCtx.textAlign = 'left';
+              drawTx(seg.text + ' ', x, lineY + ssz * 0.35, subSt);
+              bCtx.font = fStr(ssz, subSt); x += bCtx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+              bCtx.font = fStr(baseSize, merged); bCtx.fillStyle = textColor; bCtx.textAlign = 'left';
+              drawTx(seg.text, x, lineY, merged);
+              bCtx.font = fStr(baseSize, merged); x += bCtx.measureText(seg.text).width;
+            }
+          });
+          bCtx.textBaseline = 'middle';
+        });
+        if ('letterSpacing' in bCtx) bCtx.letterSpacing = '0px';
+      }
+
+      // Reference (bottom-right)
+      if (content.reference) {
+        const mult = refSt.sizeMultiplier || 0.7;
+        bCtx.font = fStr(baseSize * mult, refSt);
+        bCtx.fillStyle = refSt.color || '#fff';
+        bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
+        drawTx(content.reference, W - pad, H - pad, refSt);
+      }
+      bCtx.textBaseline = 'middle';
+      return off;
+    }
+
     /**
      * Wrap text with subscript segments
      */
-    function wrapTextWithSubscripts(segments, maxWidth, baseFontSize, context = ctx) {
+    function wrapTextWithSubscripts(segments, maxWidth, baseFontSize, context = ctx, fontFamily = 'Arial') {
       const lines = [];
       let currentLine = [];
       let currentWidth = 0;
@@ -1663,7 +1524,7 @@
       
       segments.forEach(seg => {
         if (seg.isNumber) {
-          context.font = `${subscriptSize}px Arial`;
+          context.font = `${subscriptSize}px "${fontFamily}"`;
           const width = context.measureText(seg.text + ' ').width;
           
           if (currentWidth + width > maxWidth && currentLine.length > 0) {
@@ -1674,7 +1535,7 @@
           
           currentLine.push(seg);
           currentWidth += width;
-          context.font = `${baseFontSize}px Arial`;
+          context.font = `${baseFontSize}px "${fontFamily}"`;
         } else {
           // Use parsed words (with bold/italic flags) if available
           const words = seg.words ? seg.words : seg.text.split(' ');
@@ -1684,10 +1545,10 @@
 
             // Measure using style-aware font if available
             if (typeof wordObj !== 'string') {
-              const fontStr = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+              const fontStr = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px "${fontFamily}"`;
               context.font = fontStr;
             } else {
-              context.font = `${baseFontSize}px Arial`;
+              context.font = `${baseFontSize}px "${fontFamily}"`;
             }
 
             const width = context.measureText(testWord).width;
@@ -1719,14 +1580,15 @@
      */
     function renderLineWithSubscripts(segments, centerX, y, baseFontSize, context = ctx, colors = {}) {
       const subscriptSize = baseFontSize * 0.6;
+      const ff = colors.fontFamily || 'Arial';
       let totalWidth = 0;
       
       segments.forEach(seg => {
         if (seg.isNumber) {
-          context.font = `${subscriptSize}px Arial`;
+          context.font = `${subscriptSize}px "${ff}"`;
           totalWidth += context.measureText(seg.text + ' ').width;
         } else {
-          context.font = `${baseFontSize}px Arial`;
+          context.font = `${baseFontSize}px "${ff}"`;
           totalWidth += context.measureText(seg.text).width;
         }
       });
@@ -1737,7 +1599,7 @@
       
       segments.forEach(seg => {
         if (seg.isNumber) {
-          context.font = `${subscriptSize}px Arial`;
+          context.font = `${subscriptSize}px "${ff}"`;
           context.fillStyle = colors.subscriptColor || '#ddd';
           context.textAlign = 'left';
           context.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
@@ -1745,7 +1607,7 @@
           context.fillStyle = colors.textColor || '#fff';
         } else {
           // Honor per-segment bold/italic flags when rendering
-          const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          const fontStr = `${seg && seg.italic ? 'italic ' : ''}${seg && seg.bold ? 'bold ' : ''}${baseFontSize}px "${ff}"`;
           context.font = fontStr;
           context.textAlign = 'left';
           context.fillStyle = colors.textColor || '#fff';
@@ -1768,6 +1630,7 @@
       const textStyle = styles.text || {};
       const numberStyle = styles.number || styles.title || {};
       const referenceStyle = styles.reference || {};
+      const fontFamily = (textStyle && textStyle.fontFamily) || 'Arial';
       
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1781,7 +1644,7 @@
       
       // Render verse number (top left)
       if (content.number) {
-        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.font = `${baseFontSize * 0.6}px "${fontFamily}"`;
         ctx.textAlign = 'left';
         ctx.fillStyle = numberStyle.color || '#fff';
         ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
@@ -1807,8 +1670,8 @@
           segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
           
           // Auto-size font to fill vertical space optimally
-          ctx.font = `${baseFontSize}px Arial`;
-          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, ctx);
+          ctx.font = `${baseFontSize}px "${fontFamily}"`;
+          const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, ctx, fontFamily);
           allLines.push(...wrappedLines);
         });
         
@@ -1817,12 +1680,12 @@
         // Grow font size to fill available vertical space
         while (true) {
           const testSize = baseFontSize + 4;
-          ctx.font = `${testSize}px Arial`;
+          ctx.font = `${testSize}px "${fontFamily}"`;
           const testLines = [];
           textLines.forEach(textLine => {
               const segments = parseVerseSegments(textLine);
             segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, testSize, ctx, fontFamily);
             testLines.push(...wrappedLines);
           });
           if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < height * 0.15) {
@@ -1836,13 +1699,12 @@
         // If we overshot, shrink back down
         while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
           baseFontSize -= 2;
-          ctx.font = `${baseFontSize}px Arial`;
+          ctx.font = `${baseFontSize}px "${fontFamily}"`;
           const testLines = [];
           textLines.forEach(textLine => {
             const segments = parseVerseSegments(textLine);
             segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize);
+            const wrappedLines = wrapTextWithSubscripts(segments, availableWidth, baseFontSize, ctx, fontFamily);
             testLines.push(...wrappedLines);
           });
           lines = testLines;
@@ -1854,13 +1716,13 @@
         const startY = textY - (totalHeight / 2);
         
         lines.forEach((line, i) => {
-          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, ctx, { textColor: normalTextColor, subscriptColor });
+          renderLineWithSubscripts(line, width / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, ctx, { textColor: normalTextColor, subscriptColor, fontFamily });
         });
       }
       
       // Render reference (bottom right)
       if (content.reference) {
-        ctx.font = `${baseFontSize * 0.7}px Arial`;
+        ctx.font = `${baseFontSize * 0.7}px "${fontFamily}"`;
         ctx.textAlign = 'right';
         ctx.fillStyle = referenceStyle.color || '#fff';
         ctx.fillText(content.reference, width - padding, height - padding - baseFontSize * 0.3);
@@ -1869,7 +1731,7 @@
       // Render hint (if showing clipped verses)
       if (content.showingCount && content.totalSelected && content.showingCount < content.totalSelected) {
         const hint = `Showing ${content.showingCount} of ${content.totalSelected} selected`;
-        ctx.font = `${baseFontSize * 0.6}px Arial`;
+        ctx.font = `${baseFontSize * 0.6}px "${fontFamily}"`;
         ctx.fillStyle = '#ddd';
         ctx.textAlign = 'right';
         ctx.fillText(hint, width - padding, height - padding - baseFontSize * 1.1);

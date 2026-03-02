@@ -671,7 +671,7 @@ let currentTab = 'verses'; // 'verses' or 'songs'
 let songVerseViewMode = 'full'; // 'full' or 'blocks' - controls how song is displayed
 let anchorIndex = null;
 let currentBibleFile = null; // e.g. 'en_kjv.json'
-let previewStyles = { verseNumber: '', verseText: '', verseReference: '' };
+let previewStyles = { verseNumber: '', verseText: '', verseReference: '', verseSubscript: '' };
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
@@ -679,9 +679,11 @@ let keybinds = {}; // Loaded from settings
 
 // Listen for import notifications from main process
 ipcRenderer.on('songs-imported', (event, info) => {
-  const added = info && info.addedCount ? info.addedCount : 0;
-  const total = info && info.totalFound ? info.totalFound : 0;
-  alert(`EasyWorship import complete: found ${total} song(s), imported ${added} new song(s).`);
+  const added  = info && info.addedCount ? info.addedCount : 0;
+  const total  = info && info.totalFound ? info.totalFound : 0;
+  const source = (info && info.source) || 'easyworship';
+  const label  = source === 'videopsalm' ? 'VideoPsalm' : 'EasyWorship';
+  alert(`${label} import complete: found ${total} song(s), imported ${added} new song(s).`);
   // Refresh songs list from disk
   loadSongs();
 });
@@ -755,6 +757,7 @@ function applyPreviewStyles() {
   if (previewStyles.verseNumber) css += `#verse-number { ${atob(previewStyles.verseNumber)} }\n`;
   if (previewStyles.verseText) css += `#verse-text { ${atob(previewStyles.verseText)} }\n`;
   if (previewStyles.verseReference) css += `#verse-reference { ${atob(previewStyles.verseReference)} }\n`;
+  if (previewStyles.verseSubscript) css += `.verse-num { ${atob(previewStyles.verseSubscript)} }\n`;
   // Song preview styles
   if (previewStyles.songTitle) css += `#song-title { ${atob(previewStyles.songTitle)} }\n`;
   if (previewStyles.songText) css += `#song-text { ${atob(previewStyles.songText)} }\n`;
@@ -780,35 +783,191 @@ function applyPreviewStyles() {
 function parseCanvasStyleFromB64(b64) {
   if (!b64) return {};
   try {
-    const css = atob(b64).toLowerCase();
-    // Remove font-size/line-height/font shorthand (not allowed)
-    const cleaned = css.replace(/font-size\s*:\s*[^;]+;?/gi, '').replace(/line-height\s*:\s*[^;]+;?/gi, '').replace(/font\s*:\s*[^;]+;?/gi, '');
-    const res = {};
-    const colorMatch = cleaned.match(/color\s*:\s*([^;]+)\s*;?/i);
-    if (colorMatch) res.color = colorMatch[1].trim();
-    const weightMatch = cleaned.match(/font-weight\s*:\s*(bold|[6-9]00)\s*;?/i);
-    if (weightMatch) res.fontWeight = 'bold';
-    const italicMatch = cleaned.match(/font-style\s*:\s*(italic)\s*;?/i);
-    if (italicMatch) res.fontStyle = 'italic';
-    return res;
-  } catch (e) {
-    return {};
-  }
+    const css = decodeURIComponent(escape(atob(b64)));
+    const get  = (re) => { const m = css.match(re); return m ? m[1].trim() : null; };
+    const getN = (re, d=0) => { const m = css.match(re); return m ? parseFloat(m[1]) : d; };
+    return {
+      color:          get(/\bcolor\s*:\s*([^;]+)/i),
+      sizeMultiplier: (() => { const m = css.match(/font-size\s*:\s*([\d.]+)em/i); return m ? parseFloat(m[1]) : null; })(),
+      fontFamily:     get(/font-family\s*:\s*([^;]+)/i) || 'Arial',
+      fontWeight:     get(/font-weight\s*:\s*(bold)/i) ? 'bold' : null,
+      fontStyle:      get(/font-style\s*:\s*(italic)/i) ? 'italic' : null,
+      letterSpacing:  getN(/letter-spacing\s*:\s*([\d.]+)/i),
+      textAlign:      get(/text-align\s*:\s*([^;]+)/i) || 'center',
+      shadowColor:    get(/shadow-color\s*:\s*([^;]+)/i) || '#000000',
+      shadowBlur:     getN(/shadow-blur\s*:\s*([\d.]+)/i),
+      shadowX:        getN(/shadow-x\s*:\s*(-?[\d.]+)/i),
+      shadowY:        getN(/shadow-y\s*:\s*(-?[\d.]+)/i),
+      strokeColor:    get(/stroke-color\s*:\s*([^;]+)/i) || '#000000',
+      strokeWidth:    getN(/stroke-width\s*:\s*([\d.]+)/i),
+    };
+  } catch (e) { return {}; }
+}
+
+function parseGlobalStyleFromB64(b64) {
+  const def = { overlayOpacity: 0.4, bgBlur: 0, lineHeight: 1.2, verticalPosition: 'center' };
+  if (!b64) return def;
+  try {
+    const css = decodeURIComponent(escape(atob(b64)));
+    const getN = (re, d) => { const m = css.match(re); return m ? parseFloat(m[1]) : d; };
+    const getS = (re, d) => { const m = css.match(re); return m ? m[1].trim() : d; };
+    return {
+      overlayOpacity:   getN(/overlay-opacity\s*:\s*([\d.]+)/i, 0.4),
+      bgBlur:           getN(/bg-blur\s*:\s*([\d.]+)/i, 0),
+      lineHeight:       getN(/line-height\s*:\s*([\d.]+)/i, 1.2),
+      verticalPosition: getS(/vertical-position\s*:\s*([^;]+)/i, 'center'),
+    };
+  } catch { return def; }
 }
 
 function getCanvasStylesFor(type) {
   // type: 'verse' or 'song'
   const map = {};
   if (type === 'verse') {
-    map.text = parseCanvasStyleFromB64(previewStyles.verseText);
-    map.number = parseCanvasStyleFromB64(previewStyles.verseNumber);
+    map.text      = parseCanvasStyleFromB64(previewStyles.verseText);
+    map.number    = parseCanvasStyleFromB64(previewStyles.verseNumber);
     map.reference = parseCanvasStyleFromB64(previewStyles.verseReference);
+    map.subscript = parseCanvasStyleFromB64(previewStyles.verseSubscript);
   } else {
-    map.text = parseCanvasStyleFromB64(previewStyles.songText || previewStyles.verseText);
-    map.title = parseCanvasStyleFromB64(previewStyles.songTitle || previewStyles.verseNumber);
+    map.text      = parseCanvasStyleFromB64(previewStyles.songText      || previewStyles.verseText);
+    map.title     = parseCanvasStyleFromB64(previewStyles.songTitle     || previewStyles.verseNumber);
     map.reference = parseCanvasStyleFromB64(previewStyles.songReference || previewStyles.verseReference);
+    map.subscript = parseCanvasStyleFromB64(previewStyles.verseSubscript);
   }
+  map.global = parseGlobalStyleFromB64(previewStyles.global);
   return map;
+}
+
+// -----------------------------------------------------------------------
+// Text Styling Modal
+// -----------------------------------------------------------------------
+
+function _tsGetColor(key) {
+  // Extract hex color from base64-encoded CSS in previewStyles[key]
+  if (!previewStyles[key]) return null;
+  try {
+    const css = atob(previewStyles[key]);
+    const m = css.match(/color\s*:\s*([^;]+)\s*;?/i);
+    if (!m) return null;
+    const raw = m[1].trim();
+    // Return as hex — for named/rgb colors, create element to convert
+    if (raw.startsWith('#') && (raw.length === 4 || raw.length === 7)) return raw;
+    const el = document.createElement('div');
+    el.style.color = raw;
+    document.body.appendChild(el);
+    const computed = getComputedStyle(el).color;
+    document.body.removeChild(el);
+    const rgb = computed.match(/\d+/g);
+    if (!rgb) return null;
+    return '#' + rgb.map(v => parseInt(v).toString(16).padStart(2, '0')).join('');
+  } catch (e) { return null; }
+}
+
+function _tsGetSize(key) {
+  // Extract font-size em string from base64 CSS (e.g. "0.6em"), or "" if not set
+  if (!previewStyles[key]) return '';
+  try {
+    const css = atob(previewStyles[key]);
+    const m = css.match(/font-size\s*:\s*(\d*\.?\d+em)/i);
+    return m ? m[1] : '';
+  } catch (e) { return ''; }
+}
+
+function _tsSetStyle(key, colorHex, sizeEm) {
+  // Build CSS string and store base64-encoded in previewStyles
+  let css = '';
+  if (colorHex) css += `color: ${colorHex}; `;
+  if (sizeEm) css += `font-size: ${sizeEm}; `;
+  css = css.trim();
+  if (css) {
+    previewStyles[key] = btoa(css);
+  } else {
+    delete previewStyles[key];
+  }
+}
+
+function rerenderPreviewForStyles() {
+  // Re-render the preview (left) canvas with current styles applied.
+  // Prefer previewContent (last updatePreview call) but fall back to currentContent.
+  const type = currentTab === 'songs' ? 'song' : 'verse';
+  const newStyles = getCanvasStylesFor(type);
+
+  const previewCanvas = document.getElementById('preview-canvas');
+  const previewSrc = window.previewContent || window.currentContent;
+  if (previewCanvas && previewSrc) {
+    const updatedPreview = { ...previewSrc, styles: newStyles };
+    renderToCanvas(previewCanvas, updatedPreview, updatedPreview.width || 1920, updatedPreview.height || 1080);
+  }
+
+  // Also update the live canvas (right preview) and push to the actual live window
+  if (window.currentContent) {
+    const updatedLive = { ...window.currentContent, styles: newStyles };
+    const liveCanvas = document.getElementById('live-canvas');
+    if (liveCanvas) {
+      if (blackMode) {
+        const lctx = liveCanvas.getContext('2d');
+        liveCanvas.width  = updatedLive.width  || 1920;
+        liveCanvas.height = updatedLive.height || 1080;
+        lctx.fillStyle = '#000';
+        lctx.fillRect(0, 0, liveCanvas.width, liveCanvas.height);
+      } else if (clearMode) {
+        const noText = { ...updatedLive, number: '', text: '', reference: '' };
+        renderToCanvas(liveCanvas, noText, noText.width || 1920, noText.height || 1080);
+      } else {
+        renderToCanvas(liveCanvas, updatedLive, updatedLive.width || 1920, updatedLive.height || 1080);
+      }
+    }
+    // Push updated styles to the live window if it is open
+    if (liveMode) {
+      ipcRenderer.send('update-live-window', updatedLive);
+    }
+  }
+}
+
+function openTextStyleModal() {
+  const content = window.previewContent || window.currentContent || null;
+  const isDark = document.body.classList.contains('dark-theme');
+  // Capture background-only snapshot (no text) for video/GIF backgrounds
+  let bgSnapshot = null;
+  const media = content && content.backgroundMedia;
+  if (media && (media.type === 'GIF' || ['MP4','WEBM','OGG','MOV','AVI'].includes(media.type))) {
+    try {
+      const pc = document.getElementById('preview-canvas');
+      const src = pc && pc._bgSource;
+      if (src && (src.tagName === 'IMG' ? (src.complete && src.naturalWidth > 0) : src.readyState >= 2)) {
+        const off = document.createElement('canvas');
+        off.width = pc.width;
+        off.height = pc.height;
+        const octx = off.getContext('2d');
+        octx.drawImage(src, 0, 0, off.width, off.height);
+        bgSnapshot = off.toDataURL('image/jpeg', 0.85);
+      }
+    } catch (e) {}
+  }
+  ipcRenderer.send('open-style-window', {
+    previewStyles: { ...previewStyles },
+    content: content ? { ...content } : null,
+    darkMode: isDark,
+    bgSnapshot
+  });
+}
+
+function setupTextStyleModal() {
+  // Style editing is now a BrowserWindow (style-window.html).
+  // This function registers the global opener and the 'styles-updated' listener
+  // so the main renderer refreshes when the user changes something in the style window.
+  window.openTextStyleModal = openTextStyleModal;
+
+  ipcRenderer.on('styles-updated', (event, newStyles) => {
+    // Full replacement for the keys the style window manages —
+    // clear them first so a Reset All (which sends {}) correctly removes overrides.
+    ['verseText', 'verseNumber', 'verseSubscript', 'verseReference', 'global'].forEach(k => delete previewStyles[k]);
+    Object.keys(newStyles).forEach(k => {
+      if (newStyles[k]) previewStyles[k] = newStyles[k];
+    });
+    applyPreviewStyles();
+    rerenderPreviewForStyles();
+  });
 }
 
 function setupPopover() {
@@ -1129,14 +1288,30 @@ ipcRenderer.on('update-available', (event, res) => {
           const modal = document.createElement('div');
           modal.id = 'update-modal';
           modal.className = 'update-overlay';
-          const releaseNote = (info.body || '').split('\n')[0] || '';
+
+          // Build changelog HTML: all versions newer than current, or fall back to latest body.
+          let changelogHtml = '';
+          const entries = (info.changelog && info.changelog.length) ? info.changelog
+            : (info.body ? [{ version: info.latest || '', body: info.body }] : []);
+          if (entries.length) {
+            changelogHtml = entries.map(e => {
+              const lines = (e.body || '').trim().split('\n')
+                .map(l => l.trim()).filter(Boolean)
+                .map(l => `<div class="update-cl-line">${l.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`)
+                .join('');
+              return `<div class="update-cl-version">${e.version.replace(/</g,'&lt;')}</div>${lines}`;
+            }).join('');
+          }
+
           modal.innerHTML = `
             <div class="setup-card">
               <h2>Update available: ${info.latest || ''}</h2>
-              <div style="margin:8px 0;color:var(--muted,#666);font-size:0.9em;">${releaseNote}</div>
+              <div class="update-changelog-wrap">
+                <div class="update-changelog-scroll">${changelogHtml || '<div style="color:var(--muted,#888)">No release notes.</div>'}</div>
+              </div>
               <div style="margin-top:12px;display:flex;gap:8px;">
                 <button id="update-open-release" class="btn">Open Release Page</button>
-                <button id="update-download" class="btn primary">Download & Install</button>
+                <button id="update-download" class="btn primary">Download &amp; Install</button>
                 <button id="update-dismiss" class="btn">Dismiss</button>
               </div>
               <div id="update-progress" style="margin-top:12px;display:none;">
@@ -1330,6 +1505,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWebsitePanels();
   initTabs();
   setupPopover(); // Enabled: required so style buttons and menus can open the CSS popover
+  setupTextStyleModal();
+
+  // Click on the left (preview) canvas opens the text styling modal
+  const _previewCanvasEl = document.getElementById('preview-canvas');
+  if (_previewCanvasEl) {
+    _previewCanvasEl.style.cursor = 'pointer';
+    _previewCanvasEl.addEventListener('click', () => openTextStyleModal());
+  }
   initSchedule();
   initResizers();
   restoreDividerPositions();
@@ -1850,6 +2033,11 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   const textStyle = styles && styles.text ? styles.text : null;
   const numberStyle = styles && (styles.number || styles.title) ? (styles.number || styles.title) : null;
   const referenceStyle = styles && styles.reference ? styles.reference : null;
+  const subscriptStyle = styles && styles.subscript ? styles.subscript : null;
+  const globalStyle = styles && styles.global ? styles.global : {};
+  const _overlayOpacity = globalStyle.overlayOpacity !== undefined ? globalStyle.overlayOpacity : 0.4;
+  const _bgBlur    = parseFloat(globalStyle.bgBlur) || 0;
+  const _normScale = displayHeight / 1080; // normalise to 1080p for spatial values
 
   // Cache for <img> elements used as animated GIF backgrounds.
   // Reusing the same element lets the browser keep the animation running
@@ -1861,10 +2049,10 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     const media = content.backgroundMedia;
     
     if (media.type === 'COLOR') {
-      // Apply color/gradient background
+      if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
       applyColorToCanvas(ctx, media.color, displayWidth, displayHeight);
-      // Add semi-transparent overlay for text readability
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.filter = 'none';
+      ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
       ctx.fillRect(0, 0, displayWidth, displayHeight);
       renderTextContent();
       if (onRenderComplete) onRenderComplete();
@@ -1877,17 +2065,20 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
         bgImg.src = pathToFileURL(media.path);
         renderToCanvas._gifCache.set(media.path, bgImg);
       }
+      canvas._bgSource = bgImg;
       const drawGifFrame = () => {
         if (canvas._bgToken !== _myBgToken) return; // newer content replaced us
         if (bgImg.complete && bgImg.naturalWidth > 0) {
           ctx.fillStyle = '#000';
           ctx.fillRect(0, 0, displayWidth, displayHeight);
+          if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
           drawImageWithSettings(ctx, bgImg, displayWidth, displayHeight, {
             bgSize: media.bgSize || 'cover',
             bgRepeat: media.bgRepeat || 'no-repeat',
             bgPosition: media.bgPosition || 'center'
           });
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.filter = 'none';
+          ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
           ctx.fillRect(0, 0, displayWidth, displayHeight);
           renderTextContent();
         }
@@ -1899,16 +2090,15 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const bgImg = new Image();
       bgImg.onload = () => {
         if (canvas._bgToken !== _myBgToken) return; // superseded before load finished
+        if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
         drawImageWithSettings(ctx, bgImg, displayWidth, displayHeight, {
           bgSize: media.bgSize || 'cover',
           bgRepeat: media.bgRepeat || 'no-repeat',
           bgPosition: media.bgPosition || 'center'
         });
-        
-        // Add semi-transparent overlay for text readability
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.filter = 'none';
+        ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
         ctx.fillRect(0, 0, displayWidth, displayHeight);
-        
         renderTextContent();
       };
       bgImg.onerror = () => {
@@ -1923,6 +2113,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       bgVideo.src = pathToFileURL(media.path);
       bgVideo.muted = true;
       bgVideo.loop = true;
+      canvas._bgSource = bgVideo;
       safePlay(bgVideo);
 
       const _useRVFC = typeof bgVideo.requestVideoFrameCallback === 'function';
@@ -1940,8 +2131,10 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
           const h = bgVideo.videoHeight * scale;
           const x = (displayWidth - w) / 2;
           const y = (displayHeight - h) / 2;
+          if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
           ctx.drawImage(bgVideo, x, y, w, h);
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+          ctx.filter = 'none';
+          ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
           ctx.fillRect(0, 0, displayWidth, displayHeight);
           renderTextContent();
         }
@@ -1970,11 +2163,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       const x = (displayWidth - w) / 2;
       const y = (displayHeight - h) / 2;
       ctx.drawImage(bgImg, x, y, w, h);
-      
-      // Add semi-transparent overlay for text readability
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
       ctx.fillRect(0, 0, displayWidth, displayHeight);
-      
       renderTextContent();
     };
     bgImg.onerror = () => {
@@ -1987,116 +2177,162 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   }
   
   function renderTextContent() {
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-  
-  const padding = displayWidth * 0.02;
-  const availableWidth = displayWidth - (padding * 2);
-  const availableHeight = displayHeight - (padding * 2);
-  
-  // Calculate font sizes (scaled to display resolution)
-  let baseFontSize = displayHeight * 0.08; // 8% of height
-  
-  // Render verse number (top left)
-  if (content.number) {
-    ctx.font = `${baseFontSize * 0.6}px Arial`;
-    ctx.textAlign = 'left';
-      ctx.fillStyle = (numberStyle && numberStyle.color) ? numberStyle.color : '#fff';
-      ctx.fillText(content.number, padding, padding + baseFontSize * 0.3);
+
+    const padding = displayWidth * 0.04;
+    const availableWidth  = displayWidth  - padding * 2;
+    const availableHeight = displayHeight - padding * 2;
+    let baseFontSize = displayHeight * 0.08;
+
+    const lhMult  = globalStyle.lineHeight        || 1.2;
+    const vpos    = globalStyle.verticalPosition  || 'center';
+
+    // ── font helper ────────────────────────────────────────────────────
+    function fontStr(size, st) {
+      const w = st && st.fontWeight === 'bold'  ? 'bold '   : '';
+      const i = st && st.fontStyle  === 'italic' ? 'italic ' : '';
+      const f = (st && st.fontFamily) || 'Arial';
+      return `${i}${w}${size}px "${f}"`;
     }
-    
-    // Render verse text (center)
-    if (content.text) {
-      ctx.textAlign = 'center';
-      const textY = displayHeight / 2;
-      const textLines = content.text.split('\n');
-      const allLines = [];
-      // Default text color
-      const normalTextColor = (textStyle && textStyle.color) ? textStyle.color : '#fff';
-      // Subscript color uses a lighter tone or provided (derive if not given)
-      const subscriptColor = (textStyle && textStyle.subscriptColor) ? textStyle.subscriptColor : (textStyle && textStyle.color ? textStyle.color : '#ddd');
-    
-    textLines.forEach(textLine => {
-      // Parse text to handle verse numbers as subscripts
-      const segments = parseVerseSegments(textLine);
-      // For each non-number segment, parse inline Markdown to preserve bold/italic per word
-      segments.forEach(s => {
-        if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text);
-      });
-      
-      // Auto-size font to fill vertical space optimally
-      ctx.font = `${baseFontSize}px Arial`;
-      const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
-      allLines.push(...wrappedLines);
-    });
-    
-    let lines = allLines;
-    
-    // Grow font size to fill available vertical space
-    while (true) {
-      const testSize = baseFontSize + 4;
-      ctx.font = `${testSize}px Arial`;
-      const testLines = [];
-      textLines.forEach(textLine => {
-        const segments = parseVerseSegments(textLine);
-        // Ensure inline markdown is parsed for measurement
-        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-        const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, testSize);
-        testLines.push(...wrappedLines);
-      });
-      if (testLines.length * testSize * 1.2 < availableHeight * 0.85 && testSize < displayHeight * 0.15) {
-        baseFontSize = testSize;
-        lines = testLines;
-      } else {
-        break;
+
+    // ── shadow / stroke helpers ────────────────────────────────────────
+    function applyEffects(ctx, st) {
+      const bl = ((st && st.shadowBlur)  || 0) * _normScale;
+      const sx = ((st && st.shadowX)     || 0) * _normScale;
+      const sy = ((st && st.shadowY)     || 0) * _normScale;
+      if (bl > 0 || sx !== 0 || sy !== 0) {
+        ctx.shadowColor   = (st && st.shadowColor) || '#000';
+        ctx.shadowBlur    = bl;
+        ctx.shadowOffsetX = sx;
+        ctx.shadowOffsetY = sy;
       }
     }
-    
-    // If we overshot, shrink back down
-    while (lines.length * baseFontSize * 1.2 > availableHeight && baseFontSize > 20) {
-      baseFontSize -= 2;
-      ctx.font = `${baseFontSize}px Arial`;
-      const testLines = [];
-      textLines.forEach(textLine => {
-        const segments = parseVerseSegments(textLine);
-        // Ensure inline markdown is parsed for measurement
-        segments.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
-        const wrappedLines = wrapTextWithSubscripts(ctx, segments, availableWidth, baseFontSize);
-        testLines.push(...wrappedLines);
-      });
-      lines = testLines;
+    function clearEffects(ctx) {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     }
-    
-    // Render lines with subscript numbers
-    const lineHeight = baseFontSize * 1.2;
-    const totalHeight = lines.length * lineHeight;
-    const startY = textY - (totalHeight / 2);
-    
-    lines.forEach((line, i) => {
-      renderLineWithSubscripts(ctx, line, displayWidth / 2, startY + (i * lineHeight) + (baseFontSize / 2), baseFontSize, { textColor: normalTextColor, subscriptColor });
-    });
-  }
-  
-  // Render reference (bottom right)
-  if (content.reference) {
-    ctx.font = `${baseFontSize * 0.7}px Arial`;
-    ctx.textAlign = 'right';
-    ctx.fillStyle = (referenceStyle && referenceStyle.color) ? referenceStyle.color : '#fff';
-    ctx.fillText(content.reference, displayWidth - padding, displayHeight - padding - baseFontSize * 0.3);
-  }
-  
-  // Render hint (if provided)
-  if (content.showHint) {
-    ctx.font = `${baseFontSize * 0.6}px Arial`;
-    ctx.fillStyle = '#ddd';
-    ctx.textAlign = 'right';
-    ctx.fillText(content.showHint, displayWidth - padding, displayHeight - padding - baseFontSize * 1.1);
-  }
-        
-      // Call completion callback after rendering text
-      if (onRenderComplete) onRenderComplete();
-    } // end renderTextContent
+    function drawTextEx(text, x, y, st) {
+      applyEffects(ctx, st);
+      const sw = ((st && st.strokeWidth) || 0) * _normScale;
+      if (sw > 0) {
+        ctx.strokeStyle = (st && st.strokeColor) || '#000';
+        ctx.lineWidth = sw; ctx.lineJoin = 'round';
+        ctx.strokeText(text, x, y);
+      }
+      ctx.fillText(text, x, y);
+      clearEffects(ctx);
+    }
+
+    // ── Verse number (top-left) ────────────────────────────────────────
+    if (content.number) {
+      const mult = (numberStyle && numberStyle.sizeMultiplier) ? numberStyle.sizeMultiplier : 0.6;
+      ctx.font       = fontStr(baseFontSize * mult, numberStyle);
+      ctx.fillStyle  = (numberStyle && numberStyle.color) || '#fff';
+      ctx.textAlign  = 'left';
+      ctx.textBaseline = 'top';
+      drawTextEx(content.number, padding, padding, numberStyle);
+    }
+
+    // ── Main text ──────────────────────────────────────────────────────
+    if (content.text) {
+      const normalTextColor    = (textStyle && textStyle.color) || '#fff';
+      const subscriptColor     = (subscriptStyle && subscriptStyle.color) || '#ddd';
+      const subscriptMultiplier = (subscriptStyle && subscriptStyle.sizeMultiplier) || 0.6;
+      const textAlign          = (textStyle && textStyle.textAlign) || 'center';
+
+      if ('letterSpacing' in ctx)
+        ctx.letterSpacing = (textStyle && textStyle.letterSpacing) ? `${textStyle.letterSpacing * _normScale}px` : '0px';
+
+      const textLines = content.text.split('\n');
+
+      function buildLines(size) {
+        ctx.font = fontStr(size, textStyle);
+        const all = [];
+        textLines.forEach(tl => {
+          const segs = parseVerseSegments(tl);
+          segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          all.push(...wrapTextWithSubscripts(ctx, segs, availableWidth, size, subscriptMultiplier, (textStyle && textStyle.fontFamily) || 'Arial'));
+        });
+        return all;
+      }
+
+      let lines = buildLines(baseFontSize);
+
+      while (true) {
+        const ts = baseFontSize + 4;
+        const tl = buildLines(ts);
+        if (tl.length * ts * lhMult < availableHeight * 0.85 && ts < displayHeight * 0.15) { baseFontSize = ts; lines = tl; } else break;
+      }
+      while (lines.length * baseFontSize * lhMult > availableHeight && baseFontSize > 20) {
+        baseFontSize -= 2; lines = buildLines(baseFontSize);
+      }
+
+      const lineHeight  = baseFontSize * lhMult;
+      const totalHeight = lines.length * lineHeight;
+      let startY = vpos === 'top' ? padding : vpos === 'bottom' ? displayHeight - padding - totalHeight : displayHeight / 2 - totalHeight / 2;
+
+      lines.forEach((line, i) => {
+        const lineY = startY + i * lineHeight + baseFontSize / 2;
+        // measure total line width
+        let totalW = 0;
+        line.forEach(seg => {
+          if (seg.isNumber) {
+            ctx.font = fontStr(baseFontSize * subscriptMultiplier, subscriptStyle);
+            totalW += ctx.measureText(seg.text + ' ').width;
+          } else {
+            const merged = { ...(textStyle||{}), fontWeight: seg.bold ? 'bold' : (textStyle && textStyle.fontWeight), fontStyle: seg.italic ? 'italic' : (textStyle && textStyle.fontStyle) };
+            ctx.font = fontStr(baseFontSize, merged);
+            totalW += ctx.measureText(seg.text).width;
+          }
+        });
+        let x = textAlign === 'left' ? padding : textAlign === 'right' ? displayWidth - padding - totalW : displayWidth / 2 - totalW / 2;
+
+        ctx.textBaseline = 'alphabetic';
+        line.forEach(seg => {
+          if (seg.isNumber) {
+            const ssz = baseFontSize * subscriptMultiplier;
+            ctx.font = fontStr(ssz, subscriptStyle);
+            ctx.fillStyle = subscriptColor;
+            ctx.textAlign = 'left';
+            drawTextEx(seg.text + ' ', x, lineY + ssz * 0.35, subscriptStyle);
+            ctx.font = fontStr(ssz, subscriptStyle);
+            x += ctx.measureText(seg.text + ' ').width;
+          } else {
+            const merged = { ...(textStyle||{}), fontWeight: seg.bold ? 'bold' : (textStyle && textStyle.fontWeight), fontStyle: seg.italic ? 'italic' : (textStyle && textStyle.fontStyle) };
+            ctx.font = fontStr(baseFontSize, merged);
+            ctx.fillStyle = normalTextColor;
+            ctx.textAlign = 'left';
+            drawTextEx(seg.text, x, lineY, merged);
+            ctx.font = fontStr(baseFontSize, merged);
+            x += ctx.measureText(seg.text).width;
+          }
+        });
+        ctx.textBaseline = 'middle';
+      });
+
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    }
+
+    // ── Reference (bottom-right) ───────────────────────────────────────
+    if (content.reference) {
+      const mult = (referenceStyle && referenceStyle.sizeMultiplier) ? referenceStyle.sizeMultiplier : 0.7;
+      ctx.font      = fontStr(baseFontSize * mult, referenceStyle);
+      ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'alphabetic';
+      drawTextEx(content.reference, displayWidth - padding, displayHeight - padding, referenceStyle);
+    }
+
+    // ── Hint ──────────────────────────────────────────────────────────
+    if (content.showHint) {
+      ctx.font = fontStr(baseFontSize * 0.6, null);
+      ctx.fillStyle = '#ddd'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(content.showHint, displayWidth - padding, displayHeight - padding - baseFontSize * 1.1);
+    }
+
+    ctx.textBaseline = 'middle';
+    if (onRenderComplete) onRenderComplete();
+  } // end renderTextContent
 }
 
 /**
@@ -2132,17 +2368,18 @@ function parseVerseSegments(text) {
 /**
  * Wrap text with subscript segments
  */
-function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
+function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize, subscriptMultiplier, textFontFamily) {
   const lines = [];
   let currentLine = [];
   let currentWidth = 0;
   
-  const subscriptSize = baseFontSize * 0.6;
+  const subscriptSize = baseFontSize * (subscriptMultiplier || 0.6);
+  const tf = textFontFamily || 'Arial';
   
   segments.forEach(seg => {
     if (seg.isNumber) {
       // Measure subscript number
-      ctx.font = `${subscriptSize}px Arial`;
+      ctx.font = `${subscriptSize}px "${tf}"`;
       const width = ctx.measureText(seg.text + ' ').width;
       
       if (currentWidth + width > maxWidth && currentLine.length > 0) {
@@ -2153,7 +2390,7 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
       
       currentLine.push(seg);
       currentWidth += width;
-      ctx.font = `${baseFontSize}px Arial`;
+      ctx.font = `${baseFontSize}px "${tf}"`;
     } else {
       // If seg.words exists (parsed with inline markdown), use those styled words
       const words = seg.words ? seg.words : seg.text.split(' ');
@@ -2162,10 +2399,10 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
         const testWord = wordText + (idx < words.length - 1 ? ' ' : '');
         // Set font according to inline style for accurate measurement
         if (typeof wordObj !== 'string') {
-          const styleFont = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px Arial`;
+          const styleFont = `${wordObj.italic ? 'italic ' : ''}${wordObj.bold ? 'bold ' : ''}${baseFontSize}px "${tf}"`;
           ctx.font = styleFont;
         } else {
-          ctx.font = `${baseFontSize}px Arial`;
+          ctx.font = `${baseFontSize}px "${tf}"`;
         }
         const width = ctx.measureText(testWord).width;
         
@@ -2198,7 +2435,7 @@ function wrapTextWithSubscripts(ctx, segments, maxWidth, baseFontSize) {
  */
 function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize, colors = {}) {
   // Calculate total width
-  const subscriptSize = baseFontSize * 0.6;
+  const subscriptSize = baseFontSize * (colors.subscriptMultiplier || 0.6);
   let totalWidth = 0;
   
   segments.forEach(seg => {
@@ -2224,7 +2461,7 @@ function renderLineWithSubscripts(ctx, segments, centerX, y, baseFontSize, color
       ctx.font = `${subscriptSize}px Arial`;
       ctx.fillStyle = (colors && colors.subscriptColor) ? colors.subscriptColor : '#ddd';
       ctx.textAlign = 'left';
-      ctx.fillText(seg.text + ' ', x, y + (baseFontSize * 0.2));
+      ctx.fillText(seg.text + ' ', x, y + (subscriptSize * 0.35));
       x += ctx.measureText(seg.text + ' ').width;
       ctx.fillStyle = (colors && colors.textColor) ? colors.textColor : '#fff';
     } else {
@@ -2372,13 +2609,18 @@ async function updatePreview(verseOrIndices) {
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
-    renderToCanvas(previewCanvas, {
+    const previewContent = {
       number: numberText,
       text: textContent,
       reference: refText,
       showHint: showHint,
-      backgroundMedia: backgroundMedia
-    }, width, height);
+      backgroundMedia: backgroundMedia,
+      styles: getCanvasStylesFor('verse'),
+      width: width,
+      height: height
+    };
+    window.previewContent = previewContent;
+    renderToCanvas(previewCanvas, previewContent, width, height);
   }
 
   // Persist selection preview as last selection (single or range)
@@ -4513,7 +4755,8 @@ function initTabs() {
   // Song editor event listeners
   initSongEditor();
   initSongContextMenu();
-  
+  initSongListDragDrop();
+
   // Load saved view mode
   loadSongViewMode();
 }
@@ -4827,14 +5070,18 @@ async function updatePreviewFromSongVerse(verseIndex) {
   if (previewCanvas) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
     const styles = getCanvasStylesFor('song');
-    renderToCanvas(previewCanvas, {
+    const songPreviewContent = {
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
       showHint: null,
       backgroundMedia: backgroundMedia,
-      styles
-    }, width, height);
+      styles,
+      width: width,
+      height: height
+    };
+    window.previewContent = songPreviewContent;
+    renderToCanvas(previewCanvas, songPreviewContent, width, height);
   }
 }
 
@@ -5185,7 +5432,30 @@ function initSongContextMenu() {
   }
   
   if (importBtn) {
-    importBtn.addEventListener('click', () => {
+    // Parent "Import" item reveals submenu on hover (CSS); clicking is intentionally a no-op.
+    importBtn.addEventListener('click', (e) => { e.stopPropagation(); });
+  }
+
+  const ewImportBtn   = document.getElementById('song-import-easyworship');
+  const vpImportBtn   = document.getElementById('song-import-videopsalm');
+  const fileImportBtn = document.getElementById('song-import-file');
+
+  if (ewImportBtn) {
+    ewImportBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
+      ipcRenderer.invoke('import-easyworship');
+    });
+  }
+
+  if (vpImportBtn) {
+    vpImportBtn.addEventListener('click', () => {
+      closeContextMenu('song-context-menu');
+      ipcRenderer.invoke('import-videopsalm');
+    });
+  }
+
+  if (fileImportBtn) {
+    fileImportBtn.addEventListener('click', () => {
       closeContextMenu('song-context-menu');
       importSongs();
     });
@@ -5217,6 +5487,58 @@ function initSongContextMenu() {
       }
     });
   }
+}
+
+// Helper: fix and parse a VideoPsalm-format JSON file that may have literal
+// newlines inside string values or unquoted object keys.
+function fixAndParseVideoPsalmJson(raw) {
+  const result = [];
+  let inString = false;
+  let escaped  = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) { result.push(c); escaped = false; continue; }
+    if (c === '\\') { result.push(c); escaped = true; continue; }
+    if (c === '"') { inString = !inString; result.push(c); continue; }
+    if (inString && (c === '\r' || c === '\n')) {
+      if (c === '\r' && raw[i + 1] === '\n') i++;
+      result.push('\\n');
+      continue;
+    }
+    result.push(c);
+  }
+  let s = result.join('');
+  s = s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
+  return JSON.parse(s);
+}
+
+function initSongListDragDrop() {
+  const songListEl = document.getElementById('songs-tab-content');
+  if (!songListEl) return;
+
+  songListEl.addEventListener('dragover', (e) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      songListEl.classList.add('drag-over');
+    }
+  });
+
+  songListEl.addEventListener('dragleave', (e) => {
+    if (!songListEl.contains(e.relatedTarget)) {
+      songListEl.classList.remove('drag-over');
+    }
+  });
+
+  songListEl.addEventListener('drop', async (e) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    songListEl.classList.remove('drag-over');
+    const files = Array.from(e.dataTransfer.files).filter(f =>
+      /\.(json|txt|rtf|zip|db)$/i.test(f.name)
+    );
+    if (files.length > 0) await processSongImportFiles(files);
+  });
 }
 
 function editSong(songIndex) {
@@ -5286,107 +5608,248 @@ async function deleteSongs(songIndices) {
   }
 }
 
+function songToPlainText(song) {
+  const lines = [];
+  if (song.title)  lines.push(song.title);
+  if (song.author) lines.push(song.author);
+  if (lines.length) lines.push('');
+  (song.lyrics || []).forEach((section, i) => {
+    if (section.section) lines.push(`[${section.section}]`);
+    if (section.text)    lines.push(section.text);
+    if (i < (song.lyrics.length - 1)) lines.push('');
+  });
+  return lines.join('\n');
+}
+
 function exportSongs(songIndices) {
   if (songIndices.length === 0) return;
-  
   const songsToExport = songIndices.map(i => allSongs[i]);
-  const jsonData = JSON.stringify(songsToExport, null, 2);
-  
-  // Create a download
-  const blob = new Blob([jsonData], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `songs-export-${Date.now()}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+
+  // Show format picker modal
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;display:flex;align-items:center;justify-content:center;';
+
+  const card = document.createElement('div');
+  card.className = 'song-editor-panel';
+  card.style.cssText = 'padding:24px 28px;width:320px;max-width:95vw;border-radius:8px;';
+  card.innerHTML = `
+    <div style="font-size:1.1em;font-weight:600;margin-bottom:16px;">Export ${songsToExport.length} song${songsToExport.length !== 1 ? 's' : ''}</div>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button id="exp-json" class="btn primary" style="text-align:left;padding:10px 14px;"><strong>JSON</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">Reimportable — preserves all data</div></button>
+      <button id="exp-txt" class="btn" style="text-align:left;padding:10px 14px;"><strong>Text file</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">All songs in one .txt file</div></button>
+      <button id="exp-zip" class="btn" style="text-align:left;padding:10px 14px;"><strong>Text files (ZIP)</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">One .txt per song, zipped</div></button>
+    </div>
+    <div style="margin-top:16px;text-align:right;"><button id="exp-cancel" class="btn">Cancel</button></div>
+  `;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const close = () => document.body.removeChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  card.querySelector('#exp-cancel').onclick = close;
+
+  card.querySelector('#exp-json').onclick = () => {
+    close();
+    const jsonData = JSON.stringify(songsToExport, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `songs-export-${Date.now()}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  card.querySelector('#exp-txt').onclick = () => {
+    close();
+    const separator = '\n' + '='.repeat(60) + '\n\n';
+    const combined = songsToExport.map(songToPlainText).join(separator);
+    const blob = new Blob([combined], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const name = songsToExport.length === 1
+      ? (songsToExport[0].title || 'song').replace(/[/\\:*?"<>|]/g, '_') + '.txt'
+      : `songs-export-${Date.now()}.txt`;
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  card.querySelector('#exp-zip').onclick = () => {
+    close();
+    try {
+      const AdmZip = require('adm-zip');
+      const zip = new AdmZip();
+      // Track used filenames to avoid collisions
+      const used = {};
+      songsToExport.forEach(song => {
+        const base = (song.title || 'song').replace(/[/\\:*?"<>|]/g, '_').trim() || 'song';
+        let fname = base + '.txt';
+        if (used[fname]) { let n = 2; while (used[`${base}-${n}.txt`]) n++; fname = `${base}-${n}.txt`; }
+        used[fname] = true;
+        zip.addFile(fname, Buffer.from(songToPlainText(song), 'utf8'));
+      });
+      const buf = zip.toBuffer();
+      const blob = new Blob([buf], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `songs-export-${Date.now()}.zip`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('ZIP export failed:', e);
+      alert('ZIP export failed: ' + e.message);
+    }
+  };
 }
 
 function importSongs() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json,.txt,.rtf';
+  input.accept = '.json,.txt,.rtf,.zip,.db';
   input.multiple = true;
-  
-  input.onchange = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-    
-    let addedCount = 0;
-    
-    for (const file of files) {
-      const fileName = file.name;
-      const fileExt = path.extname(fileName).toLowerCase();
-      
-      try {
+  input.onchange = (e) => processSongImportFiles(Array.from(e.target.files));
+  input.click();
+}
+
+async function processSongImportFiles(files) {
+  if (!files || files.length === 0) return;
+
+  let addedCount = 0;
+
+  // Process a plain-text string (possibly containing multiple songs separated by ====)
+  // fallbackTitle is used only when the block has no title line of its own.
+  const processTxtContent = (plainText, fallbackTitle) => {
+    // Split on separator lines (3+ = signs on a line by themselves)
+    const blocks = plainText.split(/^={3,}\s*$/m).map(b => b.trim()).filter(Boolean);
+    const batch = blocks.length > 1 || !fallbackTitle;
+    blocks.forEach(block => {
+      // If multiple blocks (batch file) or no fallback, auto-detect title from first line
+      const title = (batch || !fallbackTitle) ? null : fallbackTitle;
+      const parsed = parseSongText(title, block);
+      if (parsed) {
+        const exists = allSongs.some(s => s.title === parsed.title && s.author === parsed.author);
+        if (!exists) { allSongs.push(parsed); addedCount++; }
+      }
+    });
+  };
+
+  for (const file of files) {
+    const fileName = file.name;
+    const fileExt  = path.extname(fileName).toLowerCase();
+
+    try {
+      if (fileExt === '.zip') {
+        // ZIP: extract entries and process each one
+        const AdmZip = require('adm-zip');
+        const buf = Buffer.from(await file.arrayBuffer());
+        const zip = new AdmZip(buf);
+        zip.getEntries().forEach(entry => {
+          if (entry.isDirectory) return;
+          const entryName = entry.entryName;
+          const entryExt  = path.extname(entryName).toLowerCase();
+          try {
+            const content = entry.getData().toString('utf8');
+            if (entryExt === '.json') {
+              const imported = JSON.parse(content);
+              (Array.isArray(imported) ? imported : [imported]).forEach(song => {
+                if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
+                  const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+                  if (!exists) { allSongs.push(song); addedCount++; }
+                }
+              });
+            } else if (entryExt === '.txt') {
+              processTxtContent(content, path.basename(entryName, entryExt));
+            } else if (entryExt === '.rtf') {
+              processTxtContent(stripRTF(content), path.basename(entryName, entryExt));
+            }
+          } catch (err) {
+            console.error(`Failed to import zip entry ${entryName}:`, err);
+          }
+        });
+
+      } else if (fileExt === '.db') {
+        // EasyWorship Songs.db / SongWords.db — handled in main process via sql.js
+        const result = await ipcRenderer.invoke('import-ew-db-file', file.path);
+        if (result && result.added > 0) {
+          // Main process already wrote to songs.json; sync allSongs from disk
+          try {
+            const userData  = await ipcRenderer.invoke('get-user-data-path');
+            const songsPath = path.join(userData, 'songs.json');
+            const loaded    = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]');
+            allSongs.length = 0;
+            allSongs.push(...loaded);
+            renderSongList(allSongs);
+          } catch {}
+          alert(`EasyWorship database: found ${result.total} song(s), imported ${result.added} new song(s).`);
+        } else {
+          if (result && result.error) console.warn('[import-ew-db-file]', result.error);
+          alert(`No new songs found in ${fileName}${result ? ` (${result.total} found, all duplicates)` : ''}.`);
+        }
+        continue; // already saved — skip the shared save below
+
+      } else {
         const fileContent = await file.text();
-        
+
         if (fileExt === '.json') {
-          // JSON import - array of songs
-          const importedSongs = JSON.parse(fileContent);
-          
-          if (!Array.isArray(importedSongs)) {
-            console.warn(`Skipping ${fileName}: not an array`);
-            continue;
+          let parsed;
+          try {
+            parsed = JSON.parse(fileContent);
+          } catch (_) {
+            try { parsed = fixAndParseVideoPsalmJson(fileContent); }
+            catch (e2) { console.warn(`Skipping ${fileName}: JSON parse failed`, e2); continue; }
           }
-          
-          importedSongs.forEach(song => {
-            if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
-              const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
-              if (!exists) {
-                allSongs.push(song);
-                addedCount++;
+
+          if (parsed && (Array.isArray(parsed.Songs) || Array.isArray(parsed.songs))) {
+            // VideoPsalm format
+            const vpSongs = parsed.Songs || parsed.songs || [];
+            vpSongs.forEach(vpSong => {
+              const title  = vpSong.Text || 'Untitled';
+              const author = [vpSong.Author, vpSong.Composer].filter(Boolean).join(', ') || '';
+              const lyrics = (vpSong.Verses || []).map(v => ({
+                section: '',
+                text: (v.Text || '').replace(/\[[A-Ga-g][^\]]{0,10}\]/g, '').trim()
+              })).filter(v => v.text);
+              if (lyrics.length) {
+                const exists = allSongs.some(s => (s.title || '').trim() === title.trim());
+                if (!exists) { allSongs.push({ title, author, lyrics }); addedCount++; }
               }
-            }
-          });
-        } else if (fileExt === '.txt' || fileExt === '.rtf') {
-          // Plain text or RTF import - one song per file
-          let plainText = fileContent;
-          
-          // Strip RTF formatting if RTF file
-          if (fileExt === '.rtf') {
-            plainText = stripRTF(fileContent);
+            });
+          } else if (Array.isArray(parsed)) {
+            // Liturgia JSON format
+            parsed.forEach(song => {
+              if (song.title && song.lyrics && Array.isArray(song.lyrics)) {
+                const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+                if (!exists) { allSongs.push(song); addedCount++; }
+              }
+            });
+          } else {
+            console.warn(`Skipping ${fileName}: unrecognized JSON structure`);
           }
-          
-          // Parse song using same logic as song editor
-          const songTitle = path.basename(fileName, fileExt);
-          const parsedSong = parseSongText(songTitle, plainText);
-          
-          if (parsedSong) {
-            const exists = allSongs.some(s => s.title === parsedSong.title && s.author === parsedSong.author);
-            if (!exists) {
-              allSongs.push(parsedSong);
-              addedCount++;
-            }
-          }
+
+        } else if (fileExt === '.txt') {
+          processTxtContent(fileContent, path.basename(fileName, fileExt));
+        } else if (fileExt === '.rtf') {
+          processTxtContent(stripRTF(fileContent), path.basename(fileName, fileExt));
         } else {
           console.warn(`Skipping ${fileName}: unsupported file type`);
         }
-      } catch (err) {
-        console.error(`Failed to import ${fileName}:`, err);
       }
+    } catch (err) {
+      console.error(`Failed to import ${fileName}:`, err);
     }
-    
-    if (addedCount > 0) {
-      // Save to file
-      try {
-        const userData = await ipcRenderer.invoke('get-user-data-path');
-        const songsPath = path.join(userData, 'songs.json');
-        fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
-        
-        // Refresh display
-        renderSongList(allSongs);
-        alert(`Imported ${addedCount} song(s)`);
-      } catch (err) {
-        console.error('Failed to save imported songs:', err);
-        alert('Failed to save imported songs');
-      }
-    } else {
-      alert('No new songs to import (duplicates skipped or invalid files)');
+  }
+
+  if (addedCount > 0) {
+    try {
+      const userData  = await ipcRenderer.invoke('get-user-data-path');
+      const songsPath = path.join(userData, 'songs.json');
+      fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+      renderSongList(allSongs);
+      alert(`Imported ${addedCount} song(s)`);
+    } catch (err) {
+      console.error('Failed to save imported songs:', err);
+      alert('Failed to save imported songs');
     }
-  };
-  
-  input.click();
+  } else {
+    alert('No new songs to import (duplicates skipped or invalid files)');
+  }
 }
 
 // Helper function to strip RTF formatting and extract plain text
@@ -5419,48 +5882,64 @@ function stripRTF(rtfContent) {
 }
 
 // Helper function to parse song text using same logic as song editor
+// Pass title=null to auto-detect the title from the first line of the text block.
 function parseSongText(title, lyricsText) {
-  const trimmedLyrics = lyricsText.trim();
-  
-  if (!trimmedLyrics) {
-    return null;
-  }
-  
-  // Parse sections from plaintext (same as saveSongFromEditor)
-  const sectionTexts = trimmedLyrics.split(/\n\n+/).filter(v => v.trim());
-  const sections = [];
-  
-  sectionTexts.forEach((text) => {
-    let sectionLabel = '';
-    let sectionContent = text.trim();
+  let text = lyricsText.trim();
+  if (!text) return null;
 
-    // Only treat a top-line that is exactly a tag as a section label
+  const allLines = text.split('\n');
+  let author = '';
+
+  // Auto-detect title: consume the first non-empty line as the song title
+  if (!title) {
+    const firstNonEmpty = allLines.findIndex(l => l.trim());
+    if (firstNonEmpty === -1) return null;
+    title = allLines[firstNonEmpty].trim();
+    allLines.splice(0, firstNonEmpty + 1);
+    text = allLines.join('\n').trim();
+  }
+
+  // Author detection: if the next non-empty, non-section-tag line is short and
+  // looks like a name/attribution (no brackets, under 60 chars), treat it as author.
+  const nextLineIdx = allLines.findIndex(l => l.trim());
+  if (nextLineIdx !== -1) {
+    const candidate = allLines[nextLineIdx].trim();
+    const isSectionTag = /^[\[\{\(].+[\]\}\)]$/.test(candidate);
+    const looksLikeName = !isSectionTag && candidate.length <= 60 && !candidate.includes('\n');
+    if (looksLikeName) {
+      // Only use as author when it isn't followed immediately by more text on the same
+      // line and the next block starts after a blank line (i.e., it stands alone).
+      const afterCandidate = allLines.slice(nextLineIdx + 1);
+      const nextAfter = afterCandidate.findIndex(l => l.trim());
+      const authorLineIsAlone = nextAfter === -1 || afterCandidate.slice(0, nextAfter).every(l => !l.trim());
+      if (authorLineIsAlone && nextAfter !== 0) {
+        author = candidate;
+        allLines.splice(0, nextLineIdx + 1);
+        text = allLines.join('\n').trim();
+      }
+    }
+  }
+
+  if (!text) return null;
+
+  // Parse sections (blank-line delimited, optional [Tag] first line)
+  const sectionTexts = text.split(/\n\n+/).filter(v => v.trim());
+  const sections = [];
+  sectionTexts.forEach((block) => {
+    let sectionLabel = 'Verse';
+    let sectionContent = block.trim();
     const lines = sectionContent.split('\n');
-    const firstLine = lines[0] ? lines[0].trim() : '';
-    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
-    if (tagLineMatch) {
-      sectionLabel = tagLineMatch[1].trim();
+    const tagMatch = lines[0] ? lines[0].trim().match(/^[\[\{\(](.+?)[\]\}\)]$/) : null;
+    if (tagMatch) {
+      sectionLabel = tagMatch[1].trim();
       lines.shift();
       sectionContent = lines.join('\n').trim();
-    } else {
-      sectionLabel = 'Verse';
     }
-
-    sections.push({
-      section: sectionLabel,
-      text: sectionContent
-    });
+    if (sectionContent) sections.push({ section: sectionLabel, text: sectionContent });
   });
-  
-  if (sections.length === 0) {
-    return null;
-  }
-  
-  return {
-    title: title,
-    author: '',
-    lyrics: sections
-  };
+
+  if (sections.length === 0) return null;
+  return { title, author, lyrics: sections };
 }
 
 // ========== SONG EDITOR ==========
@@ -5783,13 +6262,30 @@ async function saveMedia() {
 
 function initMediaHandlers() {
   const addBtn = document.getElementById('media-add-btn');
-  if (addBtn) {
-    addBtn.addEventListener('click', importMediaFiles);
-  }
+  const addMenu = document.getElementById('media-add-context-menu');
+  if (addBtn && addMenu) {
+    addBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const rect = addBtn.getBoundingClientRect();
+      addMenu.style.left = rect.left + 'px';
+      addMenu.style.top = (rect.bottom + 4) + 'px';
+      addMenu.style.display = addMenu.style.display === 'block' ? 'none' : 'block';
+    });
 
-  const addWebsiteBtn = document.getElementById('media-add-website-btn');
-  if (addWebsiteBtn) {
-    addWebsiteBtn.addEventListener('click', () => openWebsiteModal());
+    document.getElementById('media-add-menu-files').addEventListener('click', () => {
+      addMenu.style.display = 'none';
+      importMediaFiles();
+    });
+    document.getElementById('media-add-menu-website').addEventListener('click', () => {
+      addMenu.style.display = 'none';
+      openWebsiteModal();
+    });
+    document.getElementById('media-add-menu-color').addEventListener('click', () => {
+      addMenu.style.display = 'none';
+      openColorEditor();
+    });
+
+    document.addEventListener('click', () => { addMenu.style.display = 'none'; });
   }
   
   const searchInput = document.getElementById('media-search-input');

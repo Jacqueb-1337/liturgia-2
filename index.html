@@ -343,9 +343,8 @@
       <!-- Media Tab Content -->
       <div id="media-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
         <div style="padding: 1em; display: flex; gap: 8px; align-items: center;">
+          <button id="media-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Add media">+</button>
           <input type="text" id="media-search-input" placeholder="Search media files..." style="flex: 1; padding: 8px; box-sizing: border-box;" />
-          <button id="media-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Add media file">+</button>
-          <button id="media-add-website-btn" style="padding: 6px 12px; font-size: 13px; font-weight: bold;" title="Add website">Website</button>
         </div>
         <div id="media-display" style="flex: 1; padding: 10px; overflow-y: auto;">
           <!-- Media content will be shown here -->
@@ -353,12 +352,25 @@
       </div>
     </div>
   </div>
+  <!-- Media add context menu -->
+  <div id="media-add-context-menu">
+    <div class="context-menu-item" id="media-add-menu-files">Photo / Video</div>
+    <div class="context-menu-item" id="media-add-menu-website">Website</div>
+    <div class="context-menu-item" id="media-add-menu-color">Color</div>
+  </div>
   <!-- Song context menu -->
   <div id="song-context-menu">
     <div class="context-menu-item" id="song-context-edit">Edit Song</div>
     <div class="context-menu-item" id="song-context-delete">Delete</div>
     <div class="context-menu-item" id="song-context-export">Export</div>
-    <div class="context-menu-item" id="song-context-import">Import Songs</div>
+    <div class="context-menu-item context-menu-has-submenu" id="song-context-import">
+      Import<span class="context-menu-arrow">&#9654;</span>
+      <div class="context-submenu" id="song-import-submenu">
+        <div class="context-menu-item" id="song-import-easyworship">EasyWorship database</div>
+        <div class="context-menu-item" id="song-import-videopsalm">VideoPsalm database</div>
+        <div class="context-menu-item" id="song-import-file">Select file</div>
+      </div>
+    </div>
   </div>
   <!-- Song Editor Modal -->
   <div id="song-editor-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center;">

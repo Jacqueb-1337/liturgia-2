@@ -143,6 +143,7 @@ let splashClosed = false;
 let splashShownTime = 0;
 let lastStatusUpdateTime = 0; // Track when status last changed
 let settingsWindow = null; // Reference to settings window for IPC communication
+let styleWindow = null;    // Reference to text-styling window
 let mainWindowReady = false;
 let mainWindowLoaded = false;
 let rendererReady = false; // Set when renderer finishes DOMContentLoaded initialization
@@ -585,6 +586,129 @@ async function importEasyWorshipHandler() {
   try { fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8'); } catch (e) { console.error('Failed to write songs.json', e); dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] }); return; }
 
   mainWindow && mainWindow.webContents.send('songs-imported', { addedCount: added, totalFound: songs.length });
+}
+
+// --- VideoPsalm Import ---
+function parseVideoPsalmJson(raw) {
+  // VP JSON may contain literal (unescaped) newlines inside string values,
+  // and sometimes unquoted object keys. Fix both before handing to JSON.parse.
+  const result = [];
+  let inString = false;
+  let escaped  = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (escaped) { result.push(c); escaped = false; continue; }
+    if (c === '\\') { result.push(c); escaped = true; continue; }
+    if (c === '"') { inString = !inString; result.push(c); continue; }
+    if (inString && (c === '\r' || c === '\n')) {
+      if (c === '\r' && raw[i + 1] === '\n') i++;
+      result.push('\\n');
+      continue;
+    }
+    result.push(c);
+  }
+  let s = result.join('');
+  // Fix unquoted keys: { SomeKey: -> { "SomeKey":
+  s = s.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
+  return JSON.parse(s);
+}
+
+async function importVideoPsalmFromFile(jsonPath) {
+  const raw = fs.readFileSync(jsonPath, 'utf8');
+  let data;
+  try { data = JSON.parse(raw); } catch (_) { data = parseVideoPsalmJson(raw); }
+  const vpSongs = data.Songs || data.songs || [];
+  if (!Array.isArray(vpSongs) || vpSongs.length === 0) return [];
+  return vpSongs.map(vpSong => {
+    const title  = vpSong.Text || 'Untitled';
+    const author = [vpSong.Author, vpSong.Composer].filter(Boolean).join(', ') || '';
+    const lyrics = (vpSong.Verses || []).map(v => ({
+      section: '',
+      text: (v.Text || '').replace(/\[[A-Ga-g][^\]]{0,10}\]/g, '').trim()
+    })).filter(v => v.text);
+    return { title, author, lyrics };
+  }).filter(s => s.lyrics.length > 0);
+}
+
+async function importVideoPsalmHandler() {
+  const choice = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Auto Scan', 'Select File', 'Cancel'],
+    defaultId: 0,
+    title: 'Import VideoPsalm database',
+    message: 'Import VideoPsalm songs',
+    detail: 'Auto Scan checks common VideoPsalm locations. Select File lets you pick a .json songbook file directly.'
+  });
+  if (choice.response === 2) return;
+
+  let jsonPath = null;
+  if (choice.response === 0) {
+    const candidates = [
+      path.join(os.homedir(), 'Documents', 'VideoPsalm'),
+      path.join(os.homedir(), 'Documents', 'VideoPsalm', 'Songbooks'),
+      path.join('C:\\ProgramData', 'VideoPsalm'),
+      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'VideoPsalm'),
+    ];
+    outer: for (const c of candidates) {
+      if (!fs.existsSync(c)) continue;
+      try {
+        const entries = fs.readdirSync(c);
+        const jsonFile = entries.find(f => f.toLowerCase().endsWith('.json') && !f.toLowerCase().startsWith('settings'));
+        if (jsonFile) { jsonPath = path.join(c, jsonFile); break outer; }
+        for (const entry of entries) {
+          const sub = path.join(c, entry);
+          try {
+            const subEntries = fs.readdirSync(sub);
+            const subJson = subEntries.find(f => f.toLowerCase().endsWith('.json') && !f.toLowerCase().startsWith('settings'));
+            if (subJson) { jsonPath = path.join(sub, subJson); break outer; }
+          } catch {}
+        }
+      } catch {}
+    }
+    if (!jsonPath) {
+      await dialog.showMessageBox({ type: 'info', message: 'No VideoPsalm database found', detail: 'No .json songbook found in common VideoPsalm locations. Please select the file manually.', buttons: ['OK'] });
+    }
+  }
+  if (!jsonPath) {
+    const sel = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      title: 'Select VideoPsalm database file',
+      filters: [{ name: 'VideoPsalm JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }]
+    });
+    if (sel.canceled || !sel.filePaths || sel.filePaths.length === 0) return;
+    jsonPath = sel.filePaths[0];
+  }
+
+  let songs;
+  try {
+    songs = await importVideoPsalmFromFile(jsonPath);
+  } catch (e) {
+    await dialog.showMessageBox({ type: 'error', message: 'Failed to import VideoPsalm file', detail: e.message || String(e), buttons: ['OK'] });
+    return;
+  }
+  if (!songs || songs.length === 0) {
+    await dialog.showMessageBox({ type: 'info', message: 'No songs found', detail: `No songs found in ${path.basename(jsonPath)}`, buttons: ['OK'] });
+    return;
+  }
+
+  const { getUserDataDir } = require('./lib/paths');
+  const songsPath = path.join(getUserDataDir(app), 'songs.json');
+  let existing = [];
+  try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
+  let added = 0;
+  for (const s of songs) {
+    const dup = existing.some(e => (e.title || '').trim() === (s.title || '').trim());
+    if (dup) continue;
+    existing.push(s);
+    added++;
+  }
+  try {
+    fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (e) {
+    await dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] });
+    return;
+  }
+  mainWindow && mainWindow.webContents.send('songs-imported', { addedCount: added, totalFound: songs.length, source: 'videopsalm' });
 }
 
 // ---------------------------
@@ -1048,6 +1172,50 @@ ipcMain.handle('renderer-ready', async () => {
   
   tryCloseSplashScreen();
   return { success: true };
+});
+
+ipcMain.handle('import-easyworship', async () => {
+  await importEasyWorshipHandler();
+});
+
+ipcMain.handle('import-videopsalm', async () => {
+  await importVideoPsalmHandler();
+});
+
+ipcMain.handle('import-ew-db-file', async (_event, dbFilePath) => {
+  try {
+    const dir   = path.dirname(dbFilePath);
+    const songs = await importEasyWorshipFromDir(dir);
+    if (!songs || songs.length === 0) return { added: 0, total: 0 };
+    const { getUserDataDir } = require('./lib/paths');
+    const songsPath = path.join(getUserDataDir(app), 'songs.json');
+    let existing = [];
+    try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
+    let added = 0;
+    for (const s of songs) {
+      const dup = existing.some(e =>
+        (e.title  || '').trim() === (s.title  || '').trim() &&
+        (e.author || '').trim() === (s.author || '').trim()
+      );
+      if (dup) continue;
+      const lyrics = [];
+      if (s.text) {
+        const verses = s.text.split(/\n\n+/);
+        if (verses.length > 1) {
+          verses.forEach((v, i) => { if (v.trim()) lyrics.push({ section: `Verse ${i + 1}`, text: v.trim() }); });
+        } else {
+          lyrics.push({ section: '', text: s.text.trim() });
+        }
+      }
+      existing.push({ title: s.title, author: s.author, lyrics });
+      added++;
+    }
+    try { fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8'); } catch {}
+    return { added, total: songs.length };
+  } catch (e) {
+    console.error('[import-ew-db-file]', e);
+    return { added: 0, total: 0, error: e.message };
+  }
 });
 
 // Remote control pairing callback
@@ -1863,6 +2031,10 @@ async function createWindow() {
           label: 'Import EasyWorship database...',
           click: async () => { await importEasyWorshipHandler(); }
         },
+        {
+          label: 'Import VideoPsalm database...',
+          click: async () => { await importVideoPsalmHandler(); }
+        },
         { type: 'separator' },
         { role: 'quit' }
       ]
@@ -2263,7 +2435,25 @@ async function checkForUpdates() {
     const cmp = semverCompare(latest, current);
     const updateAvailable = (cmp === 1);
     const assets = (j.assets || []).map(a => ({ name: a.name, url: a.browser_download_url, size: a.size }));
-    const result = { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets };
+
+    // Fetch all releases and collect changelog entries for every version newer than current.
+    let changelog = [];
+    try {
+      const allApi = 'https://api.github.com/repos/Jacqueb-1337/liturgia-2/releases?per_page=100';
+      const ra = await fetchFn(allApi, { headers: { 'User-Agent': 'Liturgia-Updater' } });
+      if (ra.ok) {
+        const all = await ra.json();
+        changelog = all
+          .filter(rel => semverCompare((rel.tag_name || rel.name || '').toString(), current) > 0)
+          .sort((a, b) => semverCompare(
+            (b.tag_name || b.name || '').toString(),
+            (a.tag_name || a.name || '').toString()
+          ))
+          .map(rel => ({ version: (rel.tag_name || rel.name || '').toString(), body: rel.body || '' }));
+      }
+    } catch (e) { console.warn('checkForUpdates: failed to fetch all releases', e); }
+
+    const result = { ok:true, updateAvailable, latest, current, html_url: j.html_url, body: j.body, assets, changelog };
     // Also cache the last check result (useful if renderer requests it later before another check)
     lastUpdateCheck = result;
     return result;
@@ -2569,3 +2759,41 @@ ipcMain.on('website-mirror-stop', () => {
 // Legacy — no-ops so no errors if old sends arrive
 ipcMain.on('website-navigate', () => {});
 ipcMain.on('website-clear', () => {});
+
+// Text Styling Window
+ipcMain.on('open-style-window', (event, data) => {
+  if (styleWindow && !styleWindow.isDestroyed()) {
+    // Bring existing window to front and re-send init data
+    styleWindow.focus();
+    styleWindow.webContents.send('style-window-init', data);
+    return;
+  }
+  styleWindow = new BrowserWindow({
+    width: 440,
+    height: 720,
+    minWidth: 360,
+    minHeight: 500,
+    title: 'Text Styling',
+    parent: mainWindow,
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+  styleWindow.setMenuBarVisibility(false);
+  styleWindow.loadFile('style-window.html');
+  styleWindow.once('ready-to-show', () => {
+    styleWindow.show();
+    styleWindow.webContents.send('style-window-init', data);
+  });
+  styleWindow.on('closed', () => { styleWindow = null; });
+});
+
+// Forward style changes from style-window back to main renderer
+ipcMain.on('styles-changed', (event, newStyles) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('styles-updated', newStyles);
+  }
+});

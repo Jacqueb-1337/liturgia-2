@@ -1,0 +1,1362 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self';" />
+  <title>Text Styling</title>
+  <style>
+    :root {
+      --bg: #f2f2f2;
+      --surface: #fff;
+      --border: #ddd;
+      --text: #222;
+      --muted: #666;
+      --label: #444;
+      --section-label: #555;
+      --input-bg: #fff;
+      --input-border: #ccc;
+      --hover: #e8e8e8;
+      --accent: #0078d4;
+      --accent-hover: #005fa3;
+      --separator: #eaeaea;
+    }
+    body.dark {
+      --bg: #1e1e1e;
+      --surface: #252526;
+      --border: #444;
+      --text: #eee;
+      --muted: #aaa;
+      --label: #ccc;
+      --section-label: #aaa;
+      --input-bg: #2a2a2a;
+      --input-border: #555;
+      --hover: #333;
+      --separator: #3a3a3a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 13px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    #preview-wrap {
+      flex-shrink: 0;
+      background: #000;
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+    #sw-canvas { display: block; width: 100%; height: auto; }
+    #preview-label {
+      position: absolute;
+      bottom: 6px; left: 8px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.5);
+      pointer-events: none;
+    }
+
+    #controls-wrap {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 10px 8px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .style-section {
+      border-bottom: 1px solid var(--separator);
+      padding: 7px 0 9px;
+    }
+    .style-section:last-child { border-bottom: none; }
+
+    .style-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--section-label);
+      margin-bottom: 5px;
+    }
+
+    .style-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 3px;
+    }
+
+    .style-field {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .style-field label {
+      font-size: 10px;
+      color: var(--label);
+      white-space: nowrap;
+    }
+
+    input[type="color"] {
+      width: 28px;
+      height: 22px;
+      border: 1px solid var(--input-border);
+      border-radius: 3px;
+      padding: 1px 2px;
+      background: var(--input-bg);
+      cursor: pointer;
+    }
+
+    select {
+      padding: 2px 4px;
+      border: 1px solid var(--input-border);
+      border-radius: 3px;
+      background: var(--input-bg);
+      color: var(--text);
+      font-size: 11px;
+      min-width: 68px;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 64px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--input-border);
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .range-val {
+      font-size: 10px;
+      color: var(--muted);
+      min-width: 22px;
+      text-align: right;
+    }
+
+    .btn-toggle {
+      padding: 1px 7px;
+      border-radius: 3px;
+      border: 1px solid var(--input-border);
+      font-size: 12px;
+      cursor: pointer;
+      background: var(--input-bg);
+      color: var(--text);
+      line-height: 1.6;
+      user-select: none;
+    }
+    .btn-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-toggle:hover:not(.active) { background: var(--hover); }
+
+    .align-group { display: flex; gap: 2px; }
+    .align-group .btn-toggle { padding: 1px 6px; }
+
+    .btn-font {
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--input-border);
+      font-size: 11px;
+      cursor: pointer;
+      background: var(--input-bg);
+      color: var(--text);
+      max-width: 76px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-font:hover { background: var(--hover); }
+
+    .sub-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-top: 5px;
+      margin-bottom: 1px;
+    }
+
+    #footer {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 8px 10px;
+      border-top: 1px solid var(--separator);
+      background: var(--surface);
+    }
+
+    .btn {
+      padding: 4px 14px;
+      border-radius: 4px;
+      border: 1px solid var(--input-border);
+      font-size: 12px;
+      cursor: pointer;
+      background: var(--input-bg);
+      color: var(--text);
+    }
+    .btn:hover { background: var(--hover); }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+    /* Font Picker Popover */
+    #font-picker {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+      z-index: 9999;
+      padding: 8px;
+      display: none;
+      width: 300px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #font-picker.visible { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; max-height: 300px; overflow-y: auto; }
+    .font-opt {
+      padding: 5px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      background: var(--input-bg);
+      color: var(--text);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      overflow: hidden;
+    }
+    .font-opt-name {
+      font-family: system-ui, sans-serif;
+      font-size: 9px;
+      line-height: 1.2;
+      color: var(--text-muted, #888);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      width: 100%;
+      text-align: center;
+    }
+    .font-opt-preview {
+      font-size: 13px;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      width: 100%;
+      text-align: center;
+    }
+    .font-opt:hover { background: var(--hover); border-color: var(--input-border); }
+    .font-opt.active { border-color: var(--accent); background: rgba(0,120,212,0.1); }
+  </style>
+</head>
+<body>
+
+  <div id="preview-wrap">
+    <canvas id="sw-canvas"></canvas>
+    <span id="preview-label">Preview</span>
+  </div>
+
+  <div id="controls-wrap">
+
+    <!-- Canvas & Layout -->
+    <div class="style-section">
+      <div class="style-section-title">Canvas &amp; Layout</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Overlay</label>
+          <input type="range" id="ts-global-overlay" min="0" max="100" step="1" value="40">
+          <span class="range-val" id="ts-global-overlay-val">40%</span>
+        </div>
+        <div class="style-field">
+          <label>BG Blur</label>
+          <input type="range" id="ts-global-blur" min="0" max="20" step="1" value="0">
+          <span class="range-val" id="ts-global-blur-val">0px</span>
+        </div>
+      </div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Position</label>
+          <div class="align-group">
+            <button class="btn-toggle" id="ts-global-vpos-top" data-val="top">Top</button>
+            <button class="btn-toggle active" id="ts-global-vpos-center" data-val="center">Ctr</button>
+            <button class="btn-toggle" id="ts-global-vpos-bottom" data-val="bottom">Bot</button>
+          </div>
+        </div>
+        <div class="style-field">
+          <label>Line Ht</label>
+          <select id="ts-global-lineheight">
+            <option value="1.0">1.0</option>
+            <option value="1.1">1.1</option>
+            <option value="1.2" selected>1.2</option>
+            <option value="1.3">1.3</option>
+            <option value="1.4">1.4</option>
+            <option value="1.5">1.5</option>
+            <option value="1.7">1.7</option>
+            <option value="2.0">2.0</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Text -->
+    <div class="style-section">
+      <div class="style-section-title">Main Text</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-text-color" value="#ffffff">
+        </div>
+        <div class="style-field">
+          <label>Font</label>
+          <button class="btn-font" id="ts-text-font-btn">Arial</button>
+          <input type="hidden" id="ts-text-font" value="Arial">
+        </div>
+        <button class="btn-toggle" id="ts-text-bold" title="Bold"><b>B</b></button>
+        <button class="btn-toggle" id="ts-text-italic" title="Italic"><em>I</em></button>
+      </div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Align</label>
+          <div class="align-group">
+            <button class="btn-toggle" id="ts-text-align-left" data-val="left">L</button>
+            <button class="btn-toggle active" id="ts-text-align-center" data-val="center">C</button>
+            <button class="btn-toggle" id="ts-text-align-right" data-val="right">R</button>
+          </div>
+        </div>
+        <div class="style-field">
+          <label>Spc</label>
+          <select id="ts-text-letterspacing">
+            <option value="0">Default</option>
+            <option value="1">+1px</option>
+            <option value="2">+2px</option>
+            <option value="3">+3px</option>
+            <option value="5">+5px</option>
+            <option value="8">+8px</option>
+          </select>
+        </div>
+      </div>
+      <div class="sub-label">Shadow</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-text-shadow-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Blur</label>
+          <input type="range" id="ts-text-shadow-blur" min="0" max="30" step="1" value="0">
+          <span class="range-val" id="ts-text-shadow-blur-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>X</label>
+          <input type="range" id="ts-text-shadow-x" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-text-shadow-x-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>Y</label>
+          <input type="range" id="ts-text-shadow-y" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-text-shadow-y-val">0</span>
+        </div>
+      </div>
+      <div class="sub-label">Outline</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-text-stroke-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Width</label>
+          <select id="ts-text-stroke-width">
+            <option value="0">None</option>
+            <option value="1">1px</option>
+            <option value="2">2px</option>
+            <option value="3">3px</option>
+            <option value="4">4px</option>
+            <option value="6">6px</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Verse Number -->
+    <div class="style-section">
+      <div class="style-section-title">Verse Number (top-left)</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-number-color" value="#ffffff">
+        </div>
+        <div class="style-field">
+          <label>Size</label>
+          <select id="ts-number-size">
+            <option value="">Default</option>
+            <option value="0.4em">Small</option>
+            <option value="0.55em">Medium</option>
+            <option value="0.7em">Large</option>
+            <option value="0.85em">X-Large</option>
+          </select>
+        </div>
+        <div class="style-field">
+          <label>Font</label>
+          <button class="btn-font" id="ts-number-font-btn">Arial</button>
+          <input type="hidden" id="ts-number-font" value="Arial">
+        </div>
+        <button class="btn-toggle" id="ts-number-bold" title="Bold"><b>B</b></button>
+      </div>
+      <div class="sub-label">Shadow</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-number-shadow-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Blur</label>
+          <input type="range" id="ts-number-shadow-blur" min="0" max="30" step="1" value="0">
+          <span class="range-val" id="ts-number-shadow-blur-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>X</label>
+          <input type="range" id="ts-number-shadow-x" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-number-shadow-x-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>Y</label>
+          <input type="range" id="ts-number-shadow-y" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-number-shadow-y-val">0</span>
+        </div>
+      </div>
+      <div class="sub-label">Outline</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-number-stroke-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Width</label>
+          <select id="ts-number-stroke-width">
+            <option value="0">None</option>
+            <option value="1">1px</option>
+            <option value="2">2px</option>
+            <option value="3">3px</option>
+            <option value="4">4px</option>
+            <option value="6">6px</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Inline Verse Numbers -->
+    <div class="style-section">
+      <div class="style-section-title">Inline Verse Numbers</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-subscript-color" value="#dddddd">
+        </div>
+        <div class="style-field">
+          <label>Size</label>
+          <select id="ts-subscript-size">
+            <option value="">Default</option>
+            <option value="0.4em">Small</option>
+            <option value="0.55em">Medium</option>
+            <option value="0.7em">Large</option>
+            <option value="0.85em">X-Large</option>
+          </select>
+        </div>
+        <div class="style-field">
+          <label>Font</label>
+          <button class="btn-font" id="ts-subscript-font-btn">Arial</button>
+          <input type="hidden" id="ts-subscript-font" value="Arial">
+        </div>
+      </div>
+      <div class="sub-label">Shadow</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-subscript-shadow-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Blur</label>
+          <input type="range" id="ts-subscript-shadow-blur" min="0" max="30" step="1" value="0">
+          <span class="range-val" id="ts-subscript-shadow-blur-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>X</label>
+          <input type="range" id="ts-subscript-shadow-x" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-subscript-shadow-x-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>Y</label>
+          <input type="range" id="ts-subscript-shadow-y" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-subscript-shadow-y-val">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reference -->
+    <div class="style-section">
+      <div class="style-section-title">Verse Reference (bottom-right)</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-reference-color" value="#ffffff">
+        </div>
+        <div class="style-field">
+          <label>Size</label>
+          <select id="ts-reference-size">
+            <option value="">Default</option>
+            <option value="0.45em">Small</option>
+            <option value="0.6em">Medium</option>
+            <option value="0.75em">Large</option>
+            <option value="0.9em">X-Large</option>
+          </select>
+        </div>
+        <div class="style-field">
+          <label>Font</label>
+          <button class="btn-font" id="ts-reference-font-btn">Arial</button>
+          <input type="hidden" id="ts-reference-font" value="Arial">
+        </div>
+        <button class="btn-toggle" id="ts-reference-bold" title="Bold"><b>B</b></button>
+        <button class="btn-toggle" id="ts-reference-italic" title="Italic"><em>I</em></button>
+      </div>
+      <div class="sub-label">Shadow</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-reference-shadow-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Blur</label>
+          <input type="range" id="ts-reference-shadow-blur" min="0" max="30" step="1" value="0">
+          <span class="range-val" id="ts-reference-shadow-blur-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>X</label>
+          <input type="range" id="ts-reference-shadow-x" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-reference-shadow-x-val">0</span>
+        </div>
+        <div class="style-field">
+          <label>Y</label>
+          <input type="range" id="ts-reference-shadow-y" min="-20" max="20" step="1" value="0">
+          <span class="range-val" id="ts-reference-shadow-y-val">0</span>
+        </div>
+      </div>
+      <div class="sub-label">Outline</div>
+      <div class="style-row">
+        <div class="style-field">
+          <label>Color</label>
+          <input type="color" id="ts-reference-stroke-color" value="#000000">
+        </div>
+        <div class="style-field">
+          <label>Width</label>
+          <select id="ts-reference-stroke-width">
+            <option value="0">None</option>
+            <option value="1">1px</option>
+            <option value="2">2px</option>
+            <option value="3">3px</option>
+            <option value="4">4px</option>
+            <option value="6">6px</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="footer">
+    <button class="btn" id="btn-reset">Reset All</button>
+    <button class="btn" id="btn-cancel">Cancel</button>
+    <button class="btn btn-primary" id="btn-save">Save</button>
+  </div>
+
+  <!-- Font Picker Popover -->
+  <div id="font-picker"></div>
+
+<script>
+'use strict';
+const { ipcRenderer } = require('electron');
+
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const FONTS = [
+  'Arial', 'Arial Black', 'Book Antiqua', 'Bookman Old Style',
+  'Calibri', 'Cambria', 'Candara', 'Century Gothic',
+  'Comic Sans MS', 'Consolas', 'Constantia', 'Corbel',
+  'Courier New', 'Franklin Gothic Medium', 'Garamond', 'Georgia',
+  'Gil Sans MT', 'Impact', 'Leelawadee UI', 'Lucida Console',
+  'Lucida Sans Unicode', 'Microsoft Sans Serif', 'Palatino Linotype',
+  'Segoe UI', 'Segoe UI Light', 'Tahoma', 'Times New Roman',
+  'Trebuchet MS', 'Verdana',
+];
+
+// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let initContent = null;
+let localStyles  = {};
+let bgSnapshot   = null;
+let _activeFontTarget = null; // id of hidden font input currently being picked
+
+// â”€â”€ Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function pathToFileURL(p) {
+  if (!p) return '';
+  return 'file:///' + p.replace(/\\/g, '/');
+}
+
+function applyColorToCanvas(ctx, colorCSS, W, H) {
+  if (colorCSS.startsWith('linear-gradient')) {
+    const m = colorCSS.match(/linear-gradient\((\d+)deg,\s*([^,]+),\s*(.+)\)/);
+    if (m) {
+      const rad = (parseInt(m[1]) - 90) * Math.PI / 180;
+      const g = ctx.createLinearGradient(W/2+Math.cos(rad)*W/2, H/2+Math.sin(rad)*H/2, W/2-Math.cos(rad)*W/2, H/2-Math.sin(rad)*H/2);
+      g.addColorStop(0, m[2].trim()); g.addColorStop(1, m[3].trim());
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = '#000';
+  } else if (colorCSS.startsWith('radial-gradient')) {
+    const m = colorCSS.match(/radial-gradient\(circle,\s*([^,]+),\s*(.+)\)/);
+    if (m) {
+      const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)/2);
+      g.addColorStop(0, m[1].trim()); g.addColorStop(1, m[2].trim());
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = '#000';
+  } else ctx.fillStyle = colorCSS;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawImageCover(ctx, img, W, H) {
+  const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+  const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+  ctx.drawImage(img, (W-w)/2, (H-h)/2, w, h);
+}
+
+// â”€â”€ Style serialisation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function toB64Style(o) {
+  let css = '';
+  if (o.color)       css += `color: ${o.color}; `;
+  if (o.sizeEm)      css += `font-size: ${o.sizeEm}; `;
+  if (o.fontFamily && o.fontFamily !== 'Arial') css += `font-family: ${o.fontFamily}; `;
+  if (o.bold)        css += `font-weight: bold; `;
+  if (o.italic)      css += `font-style: italic; `;
+  const ls = parseInt(o.letterSpacing || 0);
+  if (ls > 0)        css += `letter-spacing: ${ls}; `;
+  if (o.textAlign && o.textAlign !== 'center') css += `text-align: ${o.textAlign}; `;
+  const sb = parseInt(o.shadowBlur || 0), sx = parseInt(o.shadowX || 0), sy = parseInt(o.shadowY || 0);
+  if (sb > 0 || sx !== 0 || sy !== 0)
+    css += `shadow-color: ${o.shadowColor||'#000000'}; shadow-blur: ${sb}; shadow-x: ${sx}; shadow-y: ${sy}; `;
+  const sw = parseInt(o.strokeWidth || 0);
+  if (sw > 0) css += `stroke-color: ${o.strokeColor||'#000000'}; stroke-width: ${sw}; `;
+  return css.trim() ? btoa(unescape(encodeURIComponent(css.trim()))) : '';
+}
+
+function toB64Global(o) {
+  let css = `overlay-opacity: ${o.overlayOpacity}; bg-blur: ${o.bgBlur}; line-height: ${o.lineHeight}; vertical-position: ${o.verticalPosition};`;
+  return btoa(unescape(encodeURIComponent(css)));
+}
+
+function styleFromB64(b64) {
+  if (!b64) return {};
+  try {
+    const css = decodeURIComponent(escape(atob(b64)));
+    const get = (re) => { const m = css.match(re); return m ? m[1].trim() : null; };
+    const getN = (re, d=0) => { const m = css.match(re); return m ? parseFloat(m[1]) : d; };
+    return {
+      color:          get(/\bcolor\s*:\s*([^;]+)/i),
+      sizeMultiplier: (() => { const m = css.match(/font-size\s*:\s*([\d.]+)em/i); return m ? parseFloat(m[1]) : null; })(),
+      fontFamily:     get(/font-family\s*:\s*([^;]+)/i) || 'Arial',
+      fontWeight:     get(/font-weight\s*:\s*(bold)/i) ? 'bold' : null,
+      fontStyle:      get(/font-style\s*:\s*(italic)/i) ? 'italic' : null,
+      letterSpacing:  getN(/letter-spacing\s*:\s*([\d.]+)/i),
+      textAlign:      get(/text-align\s*:\s*([^;]+)/i) || 'center',
+      shadowColor:    get(/shadow-color\s*:\s*([^;]+)/i) || '#000000',
+      shadowBlur:     getN(/shadow-blur\s*:\s*([\d.]+)/i),
+      shadowX:        getN(/shadow-x\s*:\s*(-?[\d.]+)/i),
+      shadowY:        getN(/shadow-y\s*:\s*(-?[\d.]+)/i),
+      strokeColor:    get(/stroke-color\s*:\s*([^;]+)/i) || '#000000',
+      strokeWidth:    getN(/stroke-width\s*:\s*([\d.]+)/i),
+    };
+  } catch { return {}; }
+}
+
+function globalFromB64(b64) {
+  const def = { overlayOpacity: 0.4, bgBlur: 0, lineHeight: 1.2, verticalPosition: 'center' };
+  if (!b64) return def;
+  try {
+    const css = decodeURIComponent(escape(atob(b64)));
+    const getN = (re, d) => { const m = css.match(re); return m ? parseFloat(m[1]) : d; };
+    const getS = (re, d) => { const m = css.match(re); return m ? m[1].trim() : d; };
+    return {
+      overlayOpacity:   getN(/overlay-opacity\s*:\s*([\d.]+)/i, 0.4),
+      bgBlur:           getN(/bg-blur\s*:\s*([\d.]+)/i, 0),
+      lineHeight:       getN(/line-height\s*:\s*([\d.]+)/i, 1.2),
+      verticalPosition: getS(/vertical-position\s*:\s*([^;]+)/i, 'center'),
+    };
+  } catch { return def; }
+}
+
+// â”€â”€ helpers to read color/em from b64 (for populateControls) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function getColorHex(b64) {
+  const s = styleFromB64(b64);
+  if (!s.color) return null;
+  const raw = s.color;
+  if (raw.startsWith('#') && (raw.length === 4 || raw.length === 7)) return raw;
+  const el = document.createElement('div');
+  el.style.color = raw;
+  document.body.appendChild(el);
+  const computed = getComputedStyle(el).color;
+  document.body.removeChild(el);
+  const rgb = computed.match(/\d+/g);
+  return rgb ? '#' + rgb.map(v => parseInt(v).toString(16).padStart(2,'0')).join('') : null;
+}
+
+function getSizeEm(b64) {
+  const s = styleFromB64(b64);
+  return s.sizeMultiplier ? s.sizeMultiplier + 'em' : '';
+}
+
+// â”€â”€ Toggle helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function setToggle(id, active) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('active', !!active);
+}
+
+function getActiveToggle(ids, def) {
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (el && el.classList.contains('active')) return el.dataset.val || el.textContent.trim().toLowerCase();
+  }
+  return def;
+}
+
+function setActiveToggleGroup(ids, value) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const val = el.dataset.val || el.textContent.trim().toLowerCase();
+    el.classList.toggle('active', val === value);
+  });
+}
+
+function wireToggleGroup(ids) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', () => {
+      ids.forEach(oid => document.getElementById(oid)?.classList.remove('active'));
+      el.classList.add('active');
+      onControlChange();
+    });
+  });
+}
+
+function wireToggle(id) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', () => { el.classList.toggle('active'); onControlChange(); });
+}
+
+// â”€â”€ Range display helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function wireRange(rangeId, valId, suffix) {
+  const r = document.getElementById(rangeId);
+  const v = document.getElementById(valId);
+  if (!r || !v) return;
+  const update = () => { v.textContent = r.value + suffix; onControlChange(); };
+  r.addEventListener('input', update);
+}
+
+function setRange(id, valId, val, suffix) {
+  const r = document.getElementById(id);
+  const v = document.getElementById(valId);
+  if (r) r.value = val;
+  if (v) v.textContent = val + suffix;
+}
+
+// â”€â”€ Font Picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function buildFontPicker() {
+  const picker = document.getElementById('font-picker');
+  picker.innerHTML = '';
+  FONTS.forEach(font => {
+    const opt = document.createElement('div');
+    opt.className = 'font-opt';
+    opt.title = font;
+    opt.dataset.font = font;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'font-opt-name';
+    nameEl.textContent = font;
+    const previewEl = document.createElement('span');
+    previewEl.className = 'font-opt-preview';
+    previewEl.textContent = 'AaBbCc.,;:-';
+    previewEl.style.fontFamily = font;
+    opt.appendChild(nameEl);
+    opt.appendChild(previewEl);
+    opt.addEventListener('click', () => {
+      if (_activeFontTarget) {
+        document.getElementById(_activeFontTarget).value = font;
+        // Update the button label
+        const btnId = _activeFontTarget.replace('-font', '-font-btn');
+        const btn = document.getElementById(btnId);
+        if (btn) { btn.textContent = font; btn.style.fontFamily = font; }
+        // Mark active
+        picker.querySelectorAll('.font-opt').forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+      }
+      closeFontPicker();
+      onControlChange();
+    });
+    picker.appendChild(opt);
+  });
+}
+
+function openFontPicker(targetInputId, btnEl) {
+  _activeFontTarget = targetInputId;
+  const picker = document.getElementById('font-picker');
+  buildFontPicker();
+
+  // Mark currently selected font
+  const currentFont = document.getElementById(targetInputId)?.value || 'Arial';
+  picker.querySelectorAll('.font-opt').forEach(o => {
+    o.classList.toggle('active', o.dataset.font === currentFont);
+  });
+
+  picker.classList.add('visible');
+
+  // Position near the button
+  const rect = btnEl.getBoundingClientRect();
+  const pw = 300, ph = 300;
+  let left = rect.left, top = rect.bottom + 4;
+  if (left + pw > window.innerWidth)  left = window.innerWidth - pw - 8;
+  if (top + ph > window.innerHeight)  top = rect.top - ph - 4;
+  picker.style.left = left + 'px';
+  picker.style.top  = top  + 'px';
+}
+
+function closeFontPicker() {
+  document.getElementById('font-picker').classList.remove('visible');
+  _activeFontTarget = null;
+}
+
+// â”€â”€ Read controls â†’ localStyles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function readControlsToLocalStyles() {
+  localStyles.verseText = toB64Style({
+    color:          document.getElementById('ts-text-color').value,
+    fontFamily:     document.getElementById('ts-text-font').value,
+    bold:           document.getElementById('ts-text-bold').classList.contains('active'),
+    italic:         document.getElementById('ts-text-italic').classList.contains('active'),
+    letterSpacing:  document.getElementById('ts-text-letterspacing').value,
+    textAlign:      getActiveToggle(['ts-text-align-left','ts-text-align-center','ts-text-align-right'], 'center'),
+    shadowColor:    document.getElementById('ts-text-shadow-color').value,
+    shadowBlur:     document.getElementById('ts-text-shadow-blur').value,
+    shadowX:        document.getElementById('ts-text-shadow-x').value,
+    shadowY:        document.getElementById('ts-text-shadow-y').value,
+    strokeColor:    document.getElementById('ts-text-stroke-color').value,
+    strokeWidth:    document.getElementById('ts-text-stroke-width').value,
+  });
+  localStyles.verseNumber = toB64Style({
+    color:       document.getElementById('ts-number-color').value,
+    sizeEm:      document.getElementById('ts-number-size').value,
+    fontFamily:  document.getElementById('ts-number-font').value,
+    bold:        document.getElementById('ts-number-bold').classList.contains('active'),
+    shadowColor: document.getElementById('ts-number-shadow-color').value,
+    shadowBlur:  document.getElementById('ts-number-shadow-blur').value,
+    shadowX:     document.getElementById('ts-number-shadow-x').value,
+    shadowY:     document.getElementById('ts-number-shadow-y').value,
+    strokeColor: document.getElementById('ts-number-stroke-color').value,
+    strokeWidth: document.getElementById('ts-number-stroke-width').value,
+  });
+  localStyles.verseSubscript = toB64Style({
+    color:       document.getElementById('ts-subscript-color').value,
+    sizeEm:      document.getElementById('ts-subscript-size').value,
+    fontFamily:  document.getElementById('ts-subscript-font').value,
+    shadowColor: document.getElementById('ts-subscript-shadow-color').value,
+    shadowBlur:  document.getElementById('ts-subscript-shadow-blur').value,
+    shadowX:     document.getElementById('ts-subscript-shadow-x').value,
+    shadowY:     document.getElementById('ts-subscript-shadow-y').value,
+  });
+  localStyles.verseReference = toB64Style({
+    color:       document.getElementById('ts-reference-color').value,
+    sizeEm:      document.getElementById('ts-reference-size').value,
+    fontFamily:  document.getElementById('ts-reference-font').value,
+    bold:        document.getElementById('ts-reference-bold').classList.contains('active'),
+    italic:      document.getElementById('ts-reference-italic').classList.contains('active'),
+    shadowColor: document.getElementById('ts-reference-shadow-color').value,
+    shadowBlur:  document.getElementById('ts-reference-shadow-blur').value,
+    shadowX:     document.getElementById('ts-reference-shadow-x').value,
+    shadowY:     document.getElementById('ts-reference-shadow-y').value,
+    strokeColor: document.getElementById('ts-reference-stroke-color').value,
+    strokeWidth: document.getElementById('ts-reference-stroke-width').value,
+  });
+  localStyles.global = toB64Global({
+    overlayOpacity: document.getElementById('ts-global-overlay').value / 100,
+    bgBlur:         document.getElementById('ts-global-blur').value,
+    lineHeight:     document.getElementById('ts-global-lineheight').value,
+    verticalPosition: getActiveToggle(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom'], 'center'),
+  });
+}
+
+// â”€â”€ Populate controls from localStyles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function populateControls() {
+  function setColor(id, b64, def) {
+    const hex = getColorHex(b64) || def;
+    const el = document.getElementById(id);
+    if (el) el.value = hex;
+  }
+  function setSize(id, b64) {
+    const em = getSizeEm(b64);
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    let found = false;
+    for (const opt of sel.options) { if (opt.value === em) { sel.value = em; found = true; break; } }
+    if (!found) sel.value = '';
+  }
+  function setFont(inputId, btnId, b64) {
+    const s = styleFromB64(b64);
+    const font = s.fontFamily || 'Arial';
+    const inp = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
+    if (inp) inp.value = font;
+    if (btn) { btn.textContent = font; btn.style.fontFamily = font; }
+  }
+  function setSelect(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.value = val || el.options[0].value;
+  }
+
+  // Text
+  setColor('ts-text-color', localStyles.verseText, '#ffffff');
+  setFont('ts-text-font', 'ts-text-font-btn', localStyles.verseText);
+  const ts = styleFromB64(localStyles.verseText);
+  setToggle('ts-text-bold', ts.fontWeight === 'bold');
+  setToggle('ts-text-italic', ts.fontStyle === 'italic');
+  setActiveToggleGroup(['ts-text-align-left','ts-text-align-center','ts-text-align-right'], ts.textAlign || 'center');
+  setSelect('ts-text-letterspacing', String(ts.letterSpacing || 0));
+  setRange('ts-text-shadow-blur', 'ts-text-shadow-blur-val', ts.shadowBlur || 0, '');
+  setRange('ts-text-shadow-x',    'ts-text-shadow-x-val',    ts.shadowX    || 0, '');
+  setRange('ts-text-shadow-y',    'ts-text-shadow-y-val',    ts.shadowY    || 0, '');
+  const tscEl = document.getElementById('ts-text-shadow-color');
+  if (tscEl) tscEl.value = ts.shadowColor || '#000000';
+  setSelect('ts-text-stroke-width', String(ts.strokeWidth || 0));
+  const tskEl = document.getElementById('ts-text-stroke-color');
+  if (tskEl) tskEl.value = ts.strokeColor || '#000000';
+
+  // Number
+  setColor('ts-number-color', localStyles.verseNumber, '#ffffff');
+  setSize('ts-number-size', localStyles.verseNumber);
+  setFont('ts-number-font', 'ts-number-font-btn', localStyles.verseNumber);
+  const ns = styleFromB64(localStyles.verseNumber);
+  setToggle('ts-number-bold', ns.fontWeight === 'bold');
+  setRange('ts-number-shadow-blur', 'ts-number-shadow-blur-val', ns.shadowBlur || 0, '');
+  setRange('ts-number-shadow-x',    'ts-number-shadow-x-val',    ns.shadowX    || 0, '');
+  setRange('ts-number-shadow-y',    'ts-number-shadow-y-val',    ns.shadowY    || 0, '');
+  const nscEl = document.getElementById('ts-number-shadow-color');
+  if (nscEl) nscEl.value = ns.shadowColor || '#000000';
+  setSelect('ts-number-stroke-width', String(ns.strokeWidth || 0));
+  const nskEl = document.getElementById('ts-number-stroke-color');
+  if (nskEl) nskEl.value = ns.strokeColor || '#000000';
+
+  // Subscript
+  setColor('ts-subscript-color', localStyles.verseSubscript, '#dddddd');
+  setSize('ts-subscript-size', localStyles.verseSubscript);
+  setFont('ts-subscript-font', 'ts-subscript-font-btn', localStyles.verseSubscript);
+  const ss = styleFromB64(localStyles.verseSubscript);
+  setRange('ts-subscript-shadow-blur', 'ts-subscript-shadow-blur-val', ss.shadowBlur || 0, '');
+  setRange('ts-subscript-shadow-x',    'ts-subscript-shadow-x-val',    ss.shadowX    || 0, '');
+  setRange('ts-subscript-shadow-y',    'ts-subscript-shadow-y-val',    ss.shadowY    || 0, '');
+  const sscEl = document.getElementById('ts-subscript-shadow-color');
+  if (sscEl) sscEl.value = ss.shadowColor || '#000000';
+
+  // Reference
+  setColor('ts-reference-color', localStyles.verseReference, '#ffffff');
+  setSize('ts-reference-size', localStyles.verseReference);
+  setFont('ts-reference-font', 'ts-reference-font-btn', localStyles.verseReference);
+  const rs = styleFromB64(localStyles.verseReference);
+  setToggle('ts-reference-bold',   rs.fontWeight === 'bold');
+  setToggle('ts-reference-italic', rs.fontStyle === 'italic');
+  setRange('ts-reference-shadow-blur', 'ts-reference-shadow-blur-val', rs.shadowBlur || 0, '');
+  setRange('ts-reference-shadow-x',    'ts-reference-shadow-x-val',    rs.shadowX    || 0, '');
+  setRange('ts-reference-shadow-y',    'ts-reference-shadow-y-val',    rs.shadowY    || 0, '');
+  const rscEl = document.getElementById('ts-reference-shadow-color');
+  if (rscEl) rscEl.value = rs.shadowColor || '#000000';
+  setSelect('ts-reference-stroke-width', String(rs.strokeWidth || 0));
+  const rskEl = document.getElementById('ts-reference-stroke-color');
+  if (rskEl) rskEl.value = rs.strokeColor || '#000000';
+
+  // Global
+  const g = globalFromB64(localStyles.global);
+  setRange('ts-global-overlay', 'ts-global-overlay-val', Math.round(g.overlayOpacity * 100), '%');
+  setRange('ts-global-blur',    'ts-global-blur-val',    g.bgBlur, 'px');
+  setActiveToggleGroup(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom'], g.verticalPosition || 'center');
+  const lhEl = document.getElementById('ts-global-lineheight');
+  if (lhEl) lhEl.value = String(g.lineHeight);
+}
+
+// â”€â”€ Canvas text rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function parseVerseSegments(text) {
+  const segs = [], re = /(\d+)\s{2}/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) { const t = text.substring(last, m.index).trim(); if (t) segs.push({ isNumber:false, text:t }); }
+    segs.push({ isNumber:true, text:m[1] });
+    last = re.lastIndex;
+  }
+  if (last < text.length) { const t = text.substring(last).trim(); if (t) segs.push({ isNumber:false, text:t }); }
+  return segs;
+}
+
+function parseInlineMarkdownWords(s) {
+  const out = [];
+  const tokens = s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|_[^_]+_)/);
+  tokens.forEach(tok => {
+    if (!tok) return;
+    let bold = false, italic = false, raw = tok;
+    if (/^\*\*[^*]+\*\*$/.test(tok) || /^__[^_]+__$/.test(tok)) { bold=true; raw=tok.slice(2,-2); }
+    else if (/^\*[^*]+\*$/.test(tok) || /^_[^_]+_$/.test(tok)) { italic=true; raw=tok.slice(1,-1); }
+    raw.split(' ').forEach((w,i,a) => { if (!w && i<a.length-1) return; out.push({text:w+(i<a.length-1?' ':''), bold, italic}); });
+  });
+  return out;
+}
+
+function wrapTextWithSubscripts(ctx, segs, maxW, baseSize, subMult, fontFamily) {
+  const lines = [];
+  let cur = [], curW = 0;
+  const subSize = baseSize * (subMult || 0.6);
+  const ff = fontFamily || 'Arial';
+  segs.forEach(seg => {
+    if (seg.isNumber) {
+      ctx.font = `${subSize}px "${ff}"`;
+      const w = ctx.measureText(seg.text+' ').width;
+      if (curW+w > maxW && cur.length) { lines.push(cur); cur=[]; curW=0; }
+      cur.push(seg); curW += w;
+      ctx.font = `${baseSize}px "${ff}"`;
+    } else {
+      (seg.words || seg.text.split(' ').map(t=>({text:t+' ',bold:false,italic:false}))).forEach(wo => {
+        const wt = typeof wo === 'string' ? wo : wo.text;
+        ctx.font = `${wo.italic?'italic ':''}${wo.bold?'bold ':''}${baseSize}px "${ff}"`;
+        const w = ctx.measureText(wt).width;
+        if (curW+w > maxW && cur.length) { lines.push(cur); cur=[]; curW=0; }
+        cur.push({isNumber:false,text:wt,bold:!!wo.bold,italic:!!wo.italic}); curW+=w;
+      });
+    }
+  });
+  if (cur.length) lines.push(cur);
+  return lines;
+}
+
+// â”€â”€ Main canvas render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function buildStylesObj() {
+  return {
+    text:      styleFromB64(localStyles.verseText),
+    number:    styleFromB64(localStyles.verseNumber),
+    subscript: styleFromB64(localStyles.verseSubscript),
+    reference: styleFromB64(localStyles.verseReference),
+    global:    globalFromB64(localStyles.global),
+  };
+}
+
+function renderContentToCanvas(canvas, content, stylesObj) {
+  const W = canvas.width, H = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const gl = stylesObj.global || {};
+  const overlayOpacity = gl.overlayOpacity !== undefined ? gl.overlayOpacity : 0.4;
+  const bgBlur = parseFloat(gl.bgBlur) || 0;
+  const scale = H / 1080; // normalise spatial values to 1080p
+
+  function applyBg(drawFn) {
+    if (bgBlur > 0) ctx.filter = `blur(${bgBlur * scale}px)`;
+    drawFn();
+    ctx.filter = 'none';
+    ctx.fillStyle = `rgba(0,0,0,${overlayOpacity})`;
+    ctx.fillRect(0, 0, W, H);
+    renderText();
+  }
+
+  if (content.backgroundMedia) {
+    const m = content.backgroundMedia;
+    if (m.type === 'COLOR') {
+      applyBg(() => applyColorToCanvas(ctx, m.color, W, H));
+    } else if (['JPG','JPEG','PNG','WEBP','BMP'].includes(m.type)) {
+      const img = new Image();
+      img.onload = () => applyBg(() => drawImageCover(ctx, img, W, H));
+      img.onerror = () => { ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H); renderText(); };
+      img.src = pathToFileURL(m.path);
+      return;
+    } else if (bgSnapshot) {
+      const img = new Image();
+      img.onload = () => applyBg(() => drawImageCover(ctx, img, W, H));
+      img.onerror = () => { ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H); renderText(); };
+      img.src = bgSnapshot;
+      return;
+    } else {
+      ctx.fillStyle = '#111'; ctx.fillRect(0,0,W,H);
+      renderText();
+    }
+  } else {
+    ctx.fillStyle = '#111'; ctx.fillRect(0,0,W,H);
+    renderText();
+  }
+
+  function fontStr(size, st) {
+    const w = st.fontWeight === 'bold' ? 'bold ' : '';
+    const i = st.fontStyle  === 'italic' ? 'italic ' : '';
+    const f = st.fontFamily || 'Arial';
+    return `${i}${w}${size}px "${f}"`;
+  }
+
+  function applyShadow(st) {
+    const bl = (st.shadowBlur || 0) * scale;
+    const sx = (st.shadowX    || 0) * scale;
+    const sy = (st.shadowY    || 0) * scale;
+    if (bl > 0 || sx !== 0 || sy !== 0) {
+      ctx.shadowColor = st.shadowColor || '#000';
+      ctx.shadowBlur = bl;
+      ctx.shadowOffsetX = sx;
+      ctx.shadowOffsetY = sy;
+    }
+  }
+
+  function clearShadow() {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  }
+
+  function drawText(text, x, y, st) {
+    applyShadow(st);
+    const sw = (st.strokeWidth || 0) * scale;
+    if (sw > 0) {
+      ctx.strokeStyle = st.strokeColor || '#000';
+      ctx.lineWidth = sw;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(text, x, y);
+    }
+    ctx.fillText(text, x, y);
+    clearShadow();
+  }
+
+  function renderText() {
+    const textSt  = stylesObj.text      || {};
+    const numSt   = stylesObj.number    || {};
+    const subSt   = stylesObj.subscript || {};
+    const refSt   = stylesObj.reference || {};
+    const lhMult  = gl.lineHeight || 1.2;
+    const vpos    = gl.verticalPosition || 'center';
+
+    const pad  = W * 0.04;
+    const availW = W - pad * 2;
+    const availH = H - pad * 2;
+    let baseSize = H * 0.09;
+
+    const subMult = subSt.sizeMultiplier || 0.6;
+
+    // Letter spacing
+    if ('letterSpacing' in ctx) ctx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * scale}px` : '0px';
+
+    // Verse number
+    if (content.number) {
+      const mult = numSt.sizeMultiplier || 0.6;
+      ctx.font = fontStr(baseSize * mult, numSt);
+      ctx.fillStyle = numSt.color || '#fff';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      drawText(content.number, pad, pad, numSt);
+    }
+
+    // Main text
+    if (content.text) {
+      const textColor = textSt.color || '#fff';
+      const subColor  = subSt.color  || '#ddd';
+      const textAlign = textSt.textAlign || 'center';
+      const textLines = content.text.split('\n');
+
+      function buildLines(size) {
+        ctx.font = fontStr(size, textSt);
+        const all = [];
+        textLines.forEach(line => {
+          const segs = parseVerseSegments(line);
+          segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+          all.push(...wrapTextWithSubscripts(ctx, segs, availW, size, subMult, textSt.fontFamily || 'Arial'));
+        });
+        return all;
+      }
+
+      let allLines = buildLines(baseSize);
+      while (true) {
+        const ts = baseSize + 4;
+        const tl = buildLines(ts);
+        if (tl.length * ts * lhMult < availH * 0.82 && ts < H * 0.15) { baseSize = ts; allLines = tl; } else break;
+      }
+      while (allLines.length * baseSize * lhMult > availH && baseSize > 14) { baseSize -= 2; allLines = buildLines(baseSize); }
+
+      const lh = baseSize * lhMult;
+      const totalH = allLines.length * lh;
+      let startY = vpos === 'top' ? pad : vpos === 'bottom' ? H - pad - totalH : H/2 - totalH/2;
+
+      allLines.forEach((line, i) => {
+        const lineY = startY + i * lh + baseSize / 2;
+        // Measure total width
+        let tw = 0;
+        line.forEach(seg => {
+          if (seg.isNumber) {
+            ctx.font = fontStr(baseSize * subMult, subSt);
+            tw += ctx.measureText(seg.text+' ').width;
+          } else {
+            const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+            ctx.font = fontStr(baseSize, merged);
+            tw += ctx.measureText(seg.text).width;
+          }
+        });
+        let x = textAlign === 'left' ? pad : textAlign === 'right' ? W - pad - tw : W/2 - tw/2;
+
+        ctx.textBaseline = 'alphabetic';
+        line.forEach(seg => {
+          if (seg.isNumber) {
+            const sSz = baseSize * subMult;
+            ctx.font = fontStr(sSz, subSt);
+            ctx.fillStyle = subColor;
+            ctx.textAlign = 'left';
+            drawText(seg.text+' ', x, lineY + sSz * 0.35, subSt);
+            ctx.font = fontStr(sSz, subSt);
+            x += ctx.measureText(seg.text+' ').width;
+          } else {
+            const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+            ctx.font = fontStr(baseSize, merged);
+            ctx.fillStyle = textColor;
+            ctx.textAlign = 'left';
+            drawText(seg.text, x, lineY, merged);
+            ctx.font = fontStr(baseSize, merged);
+            x += ctx.measureText(seg.text).width;
+          }
+        });
+        ctx.textBaseline = 'middle';
+      });
+
+      if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    }
+
+    // Reference
+    if (content.reference) {
+      const mult = refSt.sizeMultiplier || 0.7;
+      ctx.font = fontStr(baseSize * mult, refSt);
+      ctx.fillStyle = refSt.color || '#fff';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'alphabetic';
+      drawText(content.reference, W - pad, H - pad, refSt);
+    }
+
+    ctx.textBaseline = 'middle';
+  }
+}
+
+// â”€â”€ Re-render preview canvas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function rerenderCanvas() {
+  if (!initContent) return;
+  const canvas = document.getElementById('sw-canvas');
+  canvas.width  = initContent.width  || 1920;
+  canvas.height = initContent.height || 1080;
+  renderContentToCanvas(canvas, initContent, buildStylesObj());
+}
+
+// â”€â”€ Control change â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function onControlChange() {
+  readControlsToLocalStyles();
+  rerenderCanvas();
+}
+
+// â”€â”€ IPC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ipcRenderer.on('style-window-init', (event, data) => {
+  localStyles = data.previewStyles ? { ...data.previewStyles } : {};
+  initContent = data.content   || null;
+  bgSnapshot  = data.bgSnapshot || null;
+  if (data.darkMode) document.body.classList.add('dark');
+  populateControls();
+  rerenderCanvas();
+});
+
+// â”€â”€ DOMContentLoaded â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+document.addEventListener('DOMContentLoaded', () => {
+
+  // Wire range inputs
+  wireRange('ts-global-overlay', 'ts-global-overlay-val', '%');
+  wireRange('ts-global-blur',    'ts-global-blur-val',    'px');
+  wireRange('ts-text-shadow-blur', 'ts-text-shadow-blur-val', '');
+  wireRange('ts-text-shadow-x',    'ts-text-shadow-x-val',    '');
+  wireRange('ts-text-shadow-y',    'ts-text-shadow-y-val',    '');
+  wireRange('ts-number-shadow-blur', 'ts-number-shadow-blur-val', '');
+  wireRange('ts-number-shadow-x',    'ts-number-shadow-x-val',    '');
+  wireRange('ts-number-shadow-y',    'ts-number-shadow-y-val',    '');
+  wireRange('ts-subscript-shadow-blur', 'ts-subscript-shadow-blur-val', '');
+  wireRange('ts-subscript-shadow-x',    'ts-subscript-shadow-x-val',    '');
+  wireRange('ts-subscript-shadow-y',    'ts-subscript-shadow-y-val',    '');
+  wireRange('ts-reference-shadow-blur', 'ts-reference-shadow-blur-val', '');
+  wireRange('ts-reference-shadow-x',    'ts-reference-shadow-x-val',    '');
+  wireRange('ts-reference-shadow-y',    'ts-reference-shadow-y-val',    '');
+
+  // Wire toggle groups / simple toggles
+  wireToggleGroup(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom']);
+  wireToggleGroup(['ts-text-align-left','ts-text-align-center','ts-text-align-right']);
+  wireToggle('ts-text-bold');
+  wireToggle('ts-text-italic');
+  wireToggle('ts-number-bold');
+  wireToggle('ts-reference-bold');
+  wireToggle('ts-reference-italic');
+
+  // Wire select & color inputs
+  ['ts-global-lineheight',
+   'ts-text-color','ts-text-letterspacing','ts-text-shadow-color','ts-text-stroke-width','ts-text-stroke-color',
+   'ts-number-color','ts-number-size','ts-number-shadow-color','ts-number-stroke-width','ts-number-stroke-color',
+   'ts-subscript-color','ts-subscript-size','ts-subscript-shadow-color',
+   'ts-reference-color','ts-reference-size','ts-reference-shadow-color','ts-reference-stroke-width','ts-reference-stroke-color',
+  ].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.addEventListener('input', onControlChange); el.addEventListener('change', onControlChange); }
+  });
+
+  // Wire font picker buttons
+  ['ts-text-font-btn','ts-number-font-btn','ts-subscript-font-btn','ts-reference-font-btn'].forEach(btnId => {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    const targetId = btnId.replace('-btn', '');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (document.getElementById('font-picker').classList.contains('visible') && _activeFontTarget === targetId) {
+        closeFontPicker();
+      } else {
+        openFontPicker(targetId, btn);
+      }
+    });
+  });
+
+  // Close picker on outside click
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('font-picker').contains(e.target)) closeFontPicker();
+  });
+
+  // Footer buttons
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    localStyles = {};
+    populateControls();
+    rerenderCanvas();
+  });
+
+  document.getElementById('btn-cancel').addEventListener('click', () => window.close());
+
+  document.getElementById('btn-save').addEventListener('click', async () => {
+    readControlsToLocalStyles();
+    await ipcRenderer.invoke('update-settings', { previewStyles: localStyles });
+    ipcRenderer.send('styles-changed', { ...localStyles });
+    window.close();
+  });
+});
+</script>
+
+</body>
+</html>
