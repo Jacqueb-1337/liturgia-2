@@ -37,12 +37,22 @@ Function CreateAutoUpdatePage
   nsDialogs::Show
 FunctionEnd
 
-Page custom CreateAutoUpdatePage
-
-Function .onInstSuccess
-  ; Write choice to registry so installer choice persists
+Function LeaveAutoUpdatePage
+  ; Capture state while the dialog is still alive (control handle is valid here).
+  ; .onInstSuccess runs after the page is destroyed so NSD_GetState would return 0 there.
   ${NSD_GetState} $AUTOCHECK_CTRL $R1
   ${If} $R1 == 1
+    StrCpy $AUTOCHECK 1
+  ${Else}
+    StrCpy $AUTOCHECK 0
+  ${EndIf}
+FunctionEnd
+
+Page custom CreateAutoUpdatePage LeaveAutoUpdatePage
+
+Function .onInstSuccess
+  ; Use the value captured in LeaveAutoUpdatePage — never read the control here.
+  ${If} $AUTOCHECK == 1
     WriteRegStr HKCU "Software\Liturgia" "AutoCheckForUpdates" "1"
   ${Else}
     WriteRegStr HKCU "Software\Liturgia" "AutoCheckForUpdates" "0"

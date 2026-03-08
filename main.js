@@ -2364,19 +2364,23 @@ app.whenReady().then(async () => {
     if (settings.autoCheckUpdates) {
       const res = await checkForUpdates();
       if (res && res.updateAvailable && mainWindow) {
-        // Send update info to renderer. If the renderer isn't ready yet (still loading), store
-        // the update info and deliver it when the window finishes loading so the user sees the
-        // in-app modal on startup reliably.
-        if (mainWindow.webContents && mainWindow.webContents.isLoading && mainWindow.webContents.isLoading()) {
-          pendingUpdate = res;
-          // Ensure we send it once the renderer finishes loading
+        // Always defer through did-finish-load so the renderer's ipcRenderer.on('update-available')
+        // listener is guaranteed to be registered before we deliver the message.
+        // (The renderer JS runs after did-finish-load, so sending immediately risks losing the event.)
+        pendingUpdate = res;
+        if (mainWindow.webContents.isLoading()) {
           mainWindow.webContents.once('did-finish-load', () => {
-            try { if (pendingUpdate && mainWindow && mainWindow.webContents) { mainWindow.webContents.send('update-available', pendingUpdate); pendingUpdate = null; } } catch(e) {}
+            setTimeout(() => {
+              try { if (pendingUpdate && mainWindow && mainWindow.webContents) { mainWindow.webContents.send('update-available', pendingUpdate); pendingUpdate = null; } } catch(e) {}
+            }, 500); // small delay so renderer scripts fully initialise
           });
         } else {
-          try { mainWindow.webContents.send('update-available', res); } catch(e) {}
+          // Window already loaded — still use a short timeout so any deferred renderer
+          // setup (e.g. dynamic ipcRenderer.on calls) finishes before we send.
+          setTimeout(() => {
+            try { if (pendingUpdate && mainWindow && mainWindow.webContents) { mainWindow.webContents.send('update-available', pendingUpdate); pendingUpdate = null; } } catch(e) {}
+          }, 500);
         }
-
       }
     }
   } catch (e) { console.warn('Startup update check failed', e); }
@@ -2494,6 +2498,17 @@ async function checkForUpdates() {
 // Expose manual check via IPC
 ipcMain.handle('check-for-updates-manual', async () => {
   return await checkForUpdates();
+});
+
+// Settings window can ask main window to show the full update/download modal
+ipcMain.on('show-update-modal', (event, res) => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('update-available', res);
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (e) { console.warn('show-update-modal relay error', e); }
 });
 
 // Renderer can ask for any pending update that was found before it was ready

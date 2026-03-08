@@ -210,9 +210,11 @@ window.addEventListener('DOMContentLoaded', () => {
         status.textContent = 'Checking...';
         const res = await ipcRenderer.invoke('check-for-updates-manual');
         if (res && res.ok && res.updateAvailable) {
-          status.innerHTML = `Update available: <strong>${res.latest}</strong> — <a href="${res.html_url}" target="_blank">Release</a>`;
+          // Forward to the main window so it shows the full download/install modal
+          ipcRenderer.send('show-update-modal', res);
+          status.textContent = `Update available: ${res.latest}`;
         } else if (res && res.ok) {
-          status.textContent = 'No updates available';
+          status.textContent = 'No updates available. You are on the latest version.';
         } else {
           status.textContent = 'Update check failed';
         }

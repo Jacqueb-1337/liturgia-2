@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "description": "Liturgia — presentation software",
@@ -43,7 +43,7 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowElevation": true,
+      "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Liturgia",
