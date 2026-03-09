@@ -200,54 +200,61 @@ function parseSuggestionReference(text) {
   };
 }
 
+// Type a reference string into the verse search bar and trigger its input handler.
+// Used by suggestion cards so the search box handles filtering/navigation for us.
+function typeIntoSearchBar(text) {
+  const searchInput = document.getElementById('search-autocomplete-input');
+  if (!searchInput) return;
+  searchInput.value = text;
+  searchInput.focus();
+  searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// Build the best partial reference string to type from a parsed ref object + raw refText.
+// Prefers the already-formatted refText; falls back to constructing from parsed parts.
+function refTextForSearch(parsed, rawRefText) {
+  if (rawRefText && rawRefText.trim()) return rawRefText.trim();
+  if (!parsed) return '';
+  let s = parsed.book || '';
+  if (parsed.chapter != null) s += ` ${parsed.chapter}`;
+  if (parsed.verse   != null) s += `:${parsed.verse}`;
+  if (parsed.verseEnd != null && parsed.verseEnd !== parsed.verse) s += `-${parsed.verseEnd}`;
+  return s.trim();
+}
+
 async function handleSuggestionCardDoubleClick(item) {
   if (!item) return;
   const refText = item.ref || item.reference;
   const parsed = parseSuggestionReference(refText);
-  if (!parsed) {
-    safeStatus('Unable to parse suggestion reference.');
-    return;
-  }
-  const success = await selectReferenceRange(parsed);
-  if (success) {
-    safeStatus(`Loaded ${refText} - Going Live`);
-    // Go live with the selected verse(s)
-    await handleVerseDoubleClick(selectedIndices);
-  } else {
-    // Invalid verse - populate search with book only
-    const bookSearch = parsed.book || refText.split(/[\s:]/)[0];
-    const searchInput = document.getElementById('search-autocomplete-input');
-    if (searchInput) {
-      searchInput.value = bookSearch;
-      searchInput.focus();
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+  // For a complete book+chapter:verse reference, go live directly.
+  if (parsed && parsed.book && parsed.chapter && parsed.verse) {
+    const success = await selectReferenceRange(parsed);
+    if (success) {
+      safeStatus(`Loaded ${refText} — Going Live`);
+      await handleVerseDoubleClick(selectedIndices);
+      return;
     }
-    safeStatus(`Verse not found. Searching for ${bookSearch}...`);
   }
+
+  // Partial reference (book-only or book+chapter) — type into search bar so user can complete it.
+  const searchText = refTextForSearch(parsed, refText);
+  if (!searchText) { safeStatus('Unable to parse suggestion reference.'); return; }
+  typeIntoSearchBar(searchText);
+  safeStatus(`Searching for ${searchText}…`);
 }
 
 async function handleSuggestionCardClick(item) {
   if (!item) return;
   const refText = item.ref || item.reference;
   const parsed = parseSuggestionReference(refText);
-  if (!parsed) {
-    safeStatus('Unable to parse suggestion reference.');
-    return;
-  }
-  const success = await selectReferenceRange(parsed);
-  if (success && refText) {
-    safeStatus(`Loaded ${refText}`);
-  } else {
-    // Invalid verse - populate search with book only
-    const bookSearch = parsed.book || refText.split(/[\s:]/)[0];
-    const searchInput = document.getElementById('search-autocomplete-input');
-    if (searchInput) {
-      searchInput.value = bookSearch;
-      searchInput.focus();
-      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    safeStatus(`Verse not found. Searching for ${bookSearch}...`);
-  }
+
+  // Always type into the search bar — let the search box handle finding and highlighting.
+  const searchText = refTextForSearch(parsed, refText);
+  if (!searchText) { safeStatus('Unable to parse suggestion reference.'); return; }
+
+  typeIntoSearchBar(searchText);
+  safeStatus(`Searching for ${searchText}…`);
 }
 
 function isReferenceValid(ref) {
