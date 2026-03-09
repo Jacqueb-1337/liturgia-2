@@ -821,7 +821,18 @@
         // Expose for use below (avoids re-computing).
         renderContent._sameBgVideo = _sameBgVideo;
       }
-      
+
+      // Stop any media video loop (window.currentVideo) unless the new content is also
+      // a video media item. The drawFrame loop exits when window.currentVideo !== video.
+      {
+        const _newIsVideoMedia = renderContent_content.isMedia &&
+          ['MP4','WEBM','OGG','MOV','AVI'].includes(renderContent_content.mediaType);
+        if (!_newIsVideoMedia && window.currentVideo) {
+          try { window.currentVideo.pause(); } catch (_) {}
+          window.currentVideo = null;
+        }
+      }
+
       console.log('Live window renderContent called with:', renderContent_content);
       
       const width = canvas.width;
