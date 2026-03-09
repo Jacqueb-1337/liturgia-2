@@ -732,12 +732,30 @@ let currentTab = 'verses'; // 'verses' or 'songs'
 let songVerseViewMode = 'full'; // 'full' or 'blocks' - controls how song is displayed
 let anchorIndex = null;
 let currentBibleFile = null; // e.g. 'en_kjv.json'
+let secondaryBibleFile = null;    // secondary translation filename
+let secondaryVerseMap = new Map(); // key → {key, text} for fast lookup
+let dualTranslationEnabled = false;
 let previewStyles = { verseNumber: '', verseText: '', verseReference: '', verseSubscript: '' };
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
 let _websiteIsLive = false; // true while a website is the active live source
 let keybinds = {}; // Loaded from settings
+
+// Refresh keybinds whenever settings are saved from the settings window
+ipcRenderer.on('settings-updated', (event, data) => {
+  if (data && data.keybinds) {
+    const defaultKeybinds = {
+      'next-verse': 'ArrowRight',
+      'prev-verse': 'ArrowLeft',
+      'go-live': 'Enter',
+      'focus-search': 'Ctrl+f',
+      'toggle-clear': '',
+      'toggle-black': '',
+    };
+    keybinds = { ...defaultKeybinds, ...data.keybinds };
+  }
+});
 
 // Listen for import notifications from main process
 ipcRenderer.on('songs-imported', (event, info) => {
@@ -783,6 +801,9 @@ async function loadAndApplySettings() {
     'next-verse': 'ArrowRight',
     'prev-verse': 'ArrowLeft',
     'go-live': 'Enter',
+    'focus-search': 'Ctrl+f',
+    'toggle-clear': '',
+    'toggle-black': '',
     'select-chorus-1': 'Alt+c',
     'select-verse-1': 'Alt+1',
     'select-verse-2': 'Alt+2',
@@ -804,6 +825,9 @@ async function loadAndApplySettings() {
   };
   keybinds = { ...defaultKeybinds, ...(settings.keybinds || {}) };
   console.log('[renderer] Keybinds loaded:', keybinds);
+  // Restore dual translation state — file is loaded after initScripture.
+  if (settings && settings.secondaryBibleFile) secondaryBibleFile = settings.secondaryBibleFile;
+  if (settings && settings.dualTranslationEnabled !== undefined) dualTranslationEnabled = !!settings.dualTranslationEnabled;
 }
 
 function applyPreviewStyles() {
@@ -1590,14 +1614,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWebsiteModal();
   initWebsitePanels();
   initTabs();
+  initVideoLiveBar();
   setupPopover(); // Enabled: required so style buttons and menus can open the CSS popover
   setupTextStyleModal();
 
-  // Click on the left (preview) canvas opens the text styling modal
+  // Click on the left (preview) canvas or its hover overlay opens the text styling modal
   const _previewCanvasEl = document.getElementById('preview-canvas');
   if (_previewCanvasEl) {
     _previewCanvasEl.style.cursor = 'pointer';
     _previewCanvasEl.addEventListener('click', () => openTextStyleModal());
+  }
+  const _previewOverlay = document.getElementById('preview-edit-overlay');
+  if (_previewOverlay) {
+    _previewOverlay.addEventListener('click', () => openTextStyleModal());
   }
   initSchedule();
   initResizers();
@@ -1645,7 +1674,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       if (clampedPreview !== previewPercent) {
         slidePreview.style.flex = `${clampedPreview} 1 0%`;
-        document.getElementById('slide-live').style.flex = `${100 - clampedPreview} 1 0%`;
+        document.getElementById('live-panel-wrapper').style.flex = `${100 - clampedPreview} 1 0%`;
         changed = true;
       }
       if (clampedVerse !== verseHeightPx) {
@@ -1706,6 +1735,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
+  // After any button click, return focus to body so global keybinds keep working.
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.tagName === 'BUTTON') {
+      e.target.blur();
+    }
+  });
+
   // Keyboard navigation - use keybinds system
   window.addEventListener('keydown', (e) => {
     // Check for go-live keybind first, before text input check (should work globally)
@@ -1714,6 +1750,18 @@ window.addEventListener('DOMContentLoaded', async () => {
       handleVerseDoubleClick(); // Calls the same logic as "Go Live" button
       return;
     }
+    // Focus the active tab's search bar (works even when a text input is focused)
+    if (matchesKeybind(keybinds['focus-search'], e)) {
+      e.preventDefault();
+      const searchEl = currentTab === 'songs'
+        ? document.getElementById('song-search-input')
+        : document.getElementById('search-autocomplete-input');
+      if (searchEl) { searchEl.focus(); searchEl.select(); }
+      return;
+    }
+    // Toggle clear / black (work globally, before text-input guard)
+    if (keybinds['toggle-clear'] && matchesKeybind(keybinds['toggle-clear'], e)) { e.preventDefault(); toggleClear(); return; }
+    if (keybinds['toggle-black'] && matchesKeybind(keybinds['toggle-black'], e)) { e.preventDefault(); toggleBlack(); return; }
     
     // Check current state
     const isInSongsTab = currentTab === 'songs';
@@ -1957,6 +2005,11 @@ async function initScripture() {
     }
   }
 
+  // Preload secondary translation data if previously saved
+  if (secondaryBibleFile) {
+    loadSecondaryBible(secondaryBibleFile, { enable: dualTranslationEnabled, quiet: true }).catch(() => {});
+  }
+
   // Setup the EasyWorship-style search box.
   // Save config so applyDynamicBibleMeta() can re-call updateSearchBox with new book names.
   searchBoxConfig = {
@@ -1976,10 +2029,21 @@ async function initScripture() {
     onToggleLive: toggleLive,
     onToggleClear: toggleClear,
     onToggleBlack: toggleBlack,
+    onToggleDual: handleToggleDual,
+    onPickDual: openDualBiblePicker,
     // Use dynamic book names when available; fall back to hardcoded KJV list until Bible loads.
     books: dynamicBibleMeta.bookNames.length ? dynamicBibleMeta.bookNames : BOOKS
   };
   setupSearchBox(searchBoxConfig);
+
+  // Update Dual button state if secondary translation was preloaded before button existed
+  if (secondaryBibleFile && secondaryVerseMap.size > 0) {
+    if (window.dualButton) {
+      window.dualButton.style.display = '';
+      window.dualButton.textContent = getSecondaryDisplayName();
+      window.dualButton.classList.toggle('active', dualTranslationEnabled);
+    }
+  }
 }
 
 // Jump to verse (e.g. after search)
@@ -1990,18 +2054,179 @@ function jumpToVerse(idx) {
   // renderWindow will be called by the scroll event
 }
 
+// ── Dual translation helpers ─────────────────────────────────────────────────
+function getPrimaryDisplayLabel() {
+  if (!currentBibleFile) return 'KJV';
+  const base = currentBibleFile.replace(/\.json$/, '');
+  const parts = base.split('_');
+  return (parts.length >= 2 ? parts.slice(1) : parts).join(' ').toUpperCase();
+}
+
+function getSecondaryDisplayName() {
+  if (!secondaryBibleFile) return '';
+  const base = secondaryBibleFile.endsWith('.json') ? secondaryBibleFile.slice(0, -5) : secondaryBibleFile;
+  const parts = base.split('_');
+  return (parts.length >= 2 ? parts.slice(1) : parts).join(' ').toUpperCase();
+}
+
+// Returns { secondaryText, secondaryRef } for the given allVerses indices, or {}.
+function buildSecondaryForCanvas(indices) {
+  if (!dualTranslationEnabled || secondaryVerseMap.size === 0 || !indices || indices.length === 0) return {};
+  const parts = [];
+  const foundIndices = [];
+  indices.forEach(i => {
+    const sv = secondaryVerseMap.get(allVerses[i].key);
+    if (sv) {
+      const verseNum = allVerses[i].key.split(':')[1];
+      const clean = sv.text.replace(/(\.(\d+)[\s\S]*)$/, '');
+      parts.push(`${verseNum}  ${clean}`);
+      foundIndices.push(i);
+    }
+  });
+  if (parts.length === 0) return {};
+  const secName = getSecondaryDisplayName();
+  const secondaryRef = foundIndices.length === 1
+    ? `${allVerses[foundIndices[0]].key} (${secName})`
+    : `${allVerses[foundIndices[0]].key} \u2013 ${allVerses[foundIndices[foundIndices.length - 1]].key} (${secName})`;
+  return { secondaryText: parts.join(' '), secondaryRef };
+}
+
+async function loadSecondaryBible(bibleFileName, { enable = true, quiet = false } = {}) {
+  try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    const baseName = bibleFileName.endsWith('.json') ? bibleFileName.replace('.json', '') : bibleFileName;
+    const baseDir = path.join(userData, 'bibles', baseName);
+    const verses = await loadAllVersesFromDisk(baseDir);
+    secondaryBibleFile = bibleFileName;
+    // Re-key secondary verses by position against the primary allVerses array so that
+    // translations with different book names (e.g. "Génesis" vs "Genesis") still match.
+    secondaryVerseMap = new Map();
+    verses.forEach((sv, i) => {
+      const primaryKey = allVerses[i] ? allVerses[i].key : sv.key;
+      secondaryVerseMap.set(primaryKey, sv);
+    });
+    if (enable) {
+      dualTranslationEnabled = true;
+      await ipcRenderer.invoke('update-settings', { secondaryBibleFile: bibleFileName, dualTranslationEnabled: true });
+    }
+    if (window.dualButton) {
+      window.dualButton.style.display = '';
+      window.dualButton.textContent = getSecondaryDisplayName();
+      window.dualButton.classList.toggle('active', dualTranslationEnabled);
+    }
+    if (!quiet) {
+      updateVerseDisplay();
+      if (selectedIndices.length > 0 && currentTab === 'verses') await updatePreview(selectedIndices);
+      if (enable) safeStatus(`Dual translation: ${getSecondaryDisplayName()} enabled`);
+    }
+  } catch (err) {
+    console.error('Failed to load secondary bible:', err);
+    if (!quiet && enable) safeStatus('Failed to load secondary translation.');
+  }
+}
+
+async function handleToggleDual() {
+  if (dualTranslationEnabled) {
+    dualTranslationEnabled = false;
+    await ipcRenderer.invoke('update-settings', { dualTranslationEnabled: false });
+    if (window.dualButton) {
+      window.dualButton.classList.remove('active');
+    }
+    updateVerseDisplay();
+    if (selectedIndices.length > 0 && currentTab === 'verses') await updatePreview(selectedIndices);
+    safeStatus('Dual translation disabled');
+  } else if (secondaryBibleFile && secondaryVerseMap.size > 0) {
+    await loadSecondaryBible(secondaryBibleFile, { enable: true, quiet: false });
+  } else {
+    await openDualBiblePicker();
+  }
+}
+
+async function openDualBiblePicker() {
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  const biblesBase = path.join(userData, 'bibles');
+  let availableBibles = [];
+  try {
+    const primaryBase = currentBibleFile ? currentBibleFile.replace(/\.json$/, '') : null;
+    const entries = fs.readdirSync(biblesBase, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === primaryBase) continue;
+      if (fs.existsSync(path.join(biblesBase, entry.name, 'bible.json'))) {
+        availableBibles.push(entry.name);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to list bibles:', err);
+  }
+  if (availableBibles.length === 0) {
+    safeStatus('No other translations available. Download one in Settings > Bibles.');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'dual-bible-picker-overlay';
+  const modal = document.createElement('div');
+  modal.className = 'dual-bible-picker-modal';
+  const title = document.createElement('h3');
+  title.className = 'dual-bible-picker-title';
+  title.textContent = 'Select Secondary Translation';
+  const list = document.createElement('ul');
+  list.className = 'dual-bible-picker-list';
+  availableBibles.forEach(bibleId => {
+    const item = document.createElement('li');
+    item.className = 'dual-bible-picker-item';
+    const parts = bibleId.split('_');
+    item.textContent = (parts.length >= 2 ? parts.slice(1) : parts).join(' ').toUpperCase() + `  (${bibleId})`;
+    item.addEventListener('click', async () => {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      await loadSecondaryBible(bibleId);
+    });
+    list.appendChild(item);
+  });
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'dual-bible-picker-cancel';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); });
+  overlay.addEventListener('click', e => { if (e.target === overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); });
+  modal.appendChild(title);
+  modal.appendChild(list);
+  modal.appendChild(cancelBtn);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function updateVerseDisplay() {
   const disp = document.getElementById('verse-display');
   if (!disp) return;
 
-  // For the right-side verse display, show the selected verses as a single passage
-  const sorted = selectedIndices.slice().sort((a,b) => a-b);
-  if (sorted.length === 0) {
-    disp.innerHTML = '';
-  } else {
+  const sorted = selectedIndices.slice().sort((a, b) => a - b);
+  if (sorted.length === 0) { disp.innerHTML = ''; return; }
+  {
     const combined = sorted.map(i => allVerses[i].text.replace(/(\.\d+[\s\S]*)$/, '')).join(' ');
-    const ref = (sorted.length === 1) ? allVerses[sorted[0]].key : `${allVerses[sorted[0]].key} - ${allVerses[sorted[sorted.length-1]].key}`;
-    disp.innerHTML = `<p><strong>${ref}</strong><br>${combined}</p>`;
+    const ref = sorted.length === 1
+      ? allVerses[sorted[0]].key
+      : `${allVerses[sorted[0]].key} - ${allVerses[sorted[sorted.length - 1]].key}`;
+    let html = `<p><strong>${ref}</strong><br>${combined}</p>`;
+    if (dualTranslationEnabled && secondaryVerseMap.size > 0) {
+      const secName = getSecondaryDisplayName();
+      const secParts = [];
+      const missing = [];
+      sorted.forEach(i => {
+        const sv = secondaryVerseMap.get(allVerses[i].key);
+        if (sv) secParts.push(sv.text.replace(/(\.(\d+)[\s\S]*)$/, ''));
+        else missing.push(allVerses[i].key);
+      });
+      const missingNote = missing.length
+        ? ` <em class="dual-missing">(${missing.join(', ')} not in ${secName})</em>` : '';
+      html += `<hr class="dual-translation-divider">`;
+      if (secParts.length > 0) {
+        html += `<p class="secondary-verse-text"><strong>${ref} \u2014 ${secName}</strong><br>${secParts.join(' ')}${missingNote}</p>`;
+      } else {
+        html += `<p class="secondary-verse-text secondary-verse-missing">Not available in ${secName}</p>`;
+      }
+    }
+    disp.innerHTML = html;
   }
 }
 
@@ -2271,9 +2496,11 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   function renderTextContent() {
     ctx.textBaseline = 'middle';
 
+    const isDual = !!(content.secondaryText);
+    const primaryRegionH = isDual ? displayHeight * 0.52 : displayHeight;
     const padding = displayWidth * 0.04;
     const availableWidth  = displayWidth  - padding * 2;
-    const availableHeight = displayHeight - padding * 2;
+    const availableHeight = primaryRegionH - padding * 2;
     let baseFontSize = displayHeight * 0.08;
 
     const lhMult  = globalStyle.lineHeight        || 1.2;
@@ -2361,7 +2588,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
 
       const lineHeight  = baseFontSize * lhMult;
       const totalHeight = lines.length * lineHeight;
-      let startY = vpos === 'top' ? padding : vpos === 'bottom' ? displayHeight - padding - totalHeight : displayHeight / 2 - totalHeight / 2;
+      let startY = vpos === 'top' ? padding : vpos === 'bottom' ? primaryRegionH - padding - totalHeight : primaryRegionH / 2 - totalHeight / 2;
 
       lines.forEach((line, i) => {
         const lineY = startY + i * lineHeight + baseFontSize / 2;
@@ -2412,14 +2639,114 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'alphabetic';
-      drawTextEx(content.reference, displayWidth - padding, displayHeight - padding, referenceStyle);
+      const _refY = isDual ? (primaryRegionH - padding * 0.5) : (displayHeight - padding);
+      drawTextEx(content.reference, displayWidth - padding, _refY, referenceStyle);
     }
 
     // ── Hint ──────────────────────────────────────────────────────────
     if (content.showHint) {
       ctx.font = fontStr(baseFontSize * 0.6, null);
       ctx.fillStyle = '#ddd'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(content.showHint, displayWidth - padding, displayHeight - padding - baseFontSize * 1.1);
+      const _hintY = isDual ? (primaryRegionH - padding * 0.5) : (displayHeight - padding);
+      ctx.fillText(content.showHint, displayWidth - padding, _hintY - baseFontSize * 1.1);
+    }
+
+    // ── Secondary translation ──────────────────────────────────────────
+    if (isDual) {
+      const dividerY = displayHeight * 0.56;
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = (referenceStyle && referenceStyle.color) || '#fff';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding, dividerY);
+      ctx.lineTo(displayWidth - padding, dividerY);
+      ctx.stroke();
+      ctx.restore();
+
+      const secAreaTop = dividerY + padding * 0.5;
+      const secAreaH = displayHeight - secAreaTop - padding * 0.5;
+
+      if (content.secondaryRef) {
+        const secRefMult = (referenceStyle && referenceStyle.sizeMultiplier) ? referenceStyle.sizeMultiplier * 0.8 : 0.55;
+        ctx.font = fontStr(baseFontSize * secRefMult, referenceStyle);
+        ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'alphabetic';
+        ctx.globalAlpha = 0.7;
+        drawTextEx(content.secondaryRef, displayWidth - padding, displayHeight - padding * 0.5, referenceStyle);
+        ctx.globalAlpha = 1.0;
+      }
+
+      if (content.secondaryText) {
+        const secTextColor = (textStyle && textStyle.color) || '#fff';
+        const subscriptMultiplier = (subscriptStyle && subscriptStyle.sizeMultiplier) || 0.6;
+        const secTextFF = (textStyle && textStyle.fontFamily) || 'Arial';
+        const secTextAlign = (textStyle && textStyle.textAlign) || 'center';
+        if ('letterSpacing' in ctx) ctx.letterSpacing = (textStyle && textStyle.letterSpacing) ? `${textStyle.letterSpacing * _normScale}px` : '0px';
+        let secFontSize = displayHeight * 0.065;
+        const secTextLines = content.secondaryText.split('\n');
+        function buildSecLines(size) {
+          ctx.font = fontStr(size, textStyle);
+          const all = [];
+          secTextLines.forEach(tl => {
+            const segs = parseVerseSegments(tl);
+            segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            all.push(...wrapTextWithSubscripts(ctx, segs, availableWidth, size, subscriptMultiplier, secTextFF));
+          });
+          return all;
+        }
+        let secLines = buildSecLines(secFontSize);
+        while (true) {
+          const ts = secFontSize + 4, tl = buildSecLines(ts);
+          if (tl.length * ts * lhMult < secAreaH * 0.8 && ts < displayHeight * 0.12) { secFontSize = ts; secLines = tl; } else break;
+        }
+        while (secLines.length * secFontSize * lhMult > secAreaH && secFontSize > 14) {
+          secFontSize -= 2; secLines = buildSecLines(secFontSize);
+        }
+        const secLH = secFontSize * lhMult;
+        const secTotalH = secLines.length * secLH;
+        let secStartY = secAreaTop + secAreaH / 2 - secTotalH / 2;
+        ctx.globalAlpha = 0.85;
+        secLines.forEach((line, i) => {
+          const lineY = secStartY + i * secLH + secFontSize / 2;
+          let totalW = 0;
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              ctx.font = fontStr(secFontSize * subscriptMultiplier, subscriptStyle);
+              totalW += ctx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...(textStyle||{}), fontWeight: seg.bold ? 'bold' : (textStyle && textStyle.fontWeight), fontStyle: seg.italic ? 'italic' : (textStyle && textStyle.fontStyle) };
+              ctx.font = fontStr(secFontSize, merged);
+              totalW += ctx.measureText(seg.text).width;
+            }
+          });
+          let x = secTextAlign === 'left' ? padding : secTextAlign === 'right' ? displayWidth - padding - totalW : displayWidth / 2 - totalW / 2;
+          ctx.textBaseline = 'alphabetic';
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              const ssz = secFontSize * subscriptMultiplier;
+              ctx.font = fontStr(ssz, subscriptStyle);
+              ctx.fillStyle = (subscriptStyle && subscriptStyle.color) || '#ddd';
+              ctx.textAlign = 'left';
+              drawTextEx(seg.text + ' ', x, lineY + ssz * 0.35, subscriptStyle);
+              ctx.font = fontStr(ssz, subscriptStyle);
+              x += ctx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...(textStyle||{}), fontWeight: seg.bold ? 'bold' : (textStyle && textStyle.fontWeight), fontStyle: seg.italic ? 'italic' : (textStyle && textStyle.fontStyle) };
+              ctx.font = fontStr(secFontSize, merged);
+              ctx.fillStyle = secTextColor;
+              ctx.textAlign = 'left';
+              drawTextEx(seg.text, x, lineY, merged);
+              ctx.font = fontStr(secFontSize, merged);
+              x += ctx.measureText(seg.text).width;
+            }
+          });
+          ctx.textBaseline = 'middle';
+        });
+        ctx.globalAlpha = 1.0;
+        if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+      }
     }
 
     ctx.textBaseline = 'middle';
@@ -2659,6 +2986,7 @@ async function updatePreview(verseOrIndices) {
   let textContent = '';
   let refText = '';
   let showHint = null;
+  let _fittedIndices = null;
   
   if (Array.isArray(verseOrIndices)) {
     const originalCount = verseOrIndices.length;
@@ -2672,11 +3000,12 @@ async function updatePreview(verseOrIndices) {
     });
     textContent = parts.join(' ');
     
+    _fittedIndices = indices;
     if (indices.length === 1) {
       numberText = allVerses[indices[0]].key.split(':')[1];
-      refText = `${allVerses[indices[0]].key} (KJV)`;
+      refText = `${allVerses[indices[0]].key} (${getPrimaryDisplayLabel()})`;
     } else if (indices.length > 1) {
-      refText = `${allVerses[indices[0]].key} - ${allVerses[indices[indices.length - 1]].key} (KJV)`;
+      refText = `${allVerses[indices[0]].key} - ${allVerses[indices[indices.length - 1]].key} (${getPrimaryDisplayLabel()})`;
       if (indices.length < originalCount) {
         showHint = `Showing ${indices.length} of ${originalCount} selected`;
       }
@@ -2686,9 +3015,23 @@ async function updatePreview(verseOrIndices) {
     const clean = v.text.replace(/(\.\d+[\s\S]*)$/, '');
     textContent = clean;
     numberText = v.key.split(':')[1];
-    refText = `${v.key} (KJV)`;
+    refText = `${v.key} (${getPrimaryDisplayLabel()})`;
   }
   
+  // Secondary translation content for canvas
+  const _secContent = _fittedIndices
+    ? buildSecondaryForCanvas(_fittedIndices)
+    : (() => {
+        if (!dualTranslationEnabled || secondaryVerseMap.size === 0 || !verseOrIndices || !verseOrIndices.key) return {};
+        const sv = secondaryVerseMap.get(verseOrIndices.key);
+        if (!sv) return {};
+        const vn = verseOrIndices.key.split(':')[1];
+        return {
+          secondaryText: `${vn}  ${sv.text.replace(/(\.(\d+)[\s\S]*)$/, '')}`,
+          secondaryRef: `${verseOrIndices.key} (${getSecondaryDisplayName()})`
+        };
+      })();
+
   // Get external display dimensions
   const settings = await ipcRenderer.invoke('load-settings');
   const displays = await ipcRenderer.invoke('get-displays');
@@ -2709,7 +3052,8 @@ async function updatePreview(verseOrIndices) {
       backgroundMedia: backgroundMedia,
       styles: getCanvasStylesFor('verse'),
       width: width,
-      height: height
+      height: height,
+      ..._secContent
     };
     window.previewContent = previewContent;
     renderToCanvas(previewCanvas, previewContent, width, height);
@@ -2722,6 +3066,7 @@ async function updatePreview(verseOrIndices) {
 async function updateLive(verseOrIndices) {
   // Stop website mirror if it was active before pushing verse content
   hideWebsiteLivePanel(true);
+  hideVideoLiveBar();
 
   // Accept a single index, array of indices, or a verse object
   let indices = [];
@@ -2743,8 +3088,9 @@ async function updateLive(verseOrIndices) {
   const textContent = parts.join(' ');
   
   const numberText = indicesToShow.length === 1 ? allVerses[indicesToShow[0]].key.split(':')[1] : '';
-  const refText = indicesToShow.length === 1 ? `${allVerses[indicesToShow[0]].key} (KJV)` : `${allVerses[indicesToShow[0]].key} - ${allVerses[indicesToShow[indicesToShow.length-1]].key} (KJV)`;
+  const refText = indicesToShow.length === 1 ? `${allVerses[indicesToShow[0]].key} (${getPrimaryDisplayLabel()})` : `${allVerses[indicesToShow[0]].key} - ${allVerses[indicesToShow[indicesToShow.length-1]].key} (${getPrimaryDisplayLabel()})`;
   const showHint = indicesToShow.length < indices.length ? `Showing ${indicesToShow.length} of ${indices.length} selected` : null;
+  const _liveSec = buildSecondaryForCanvas(indicesToShow);
   
   // Get external display dimensions
   const settings = await ipcRenderer.invoke('load-settings');
@@ -2767,7 +3113,8 @@ async function updateLive(verseOrIndices) {
       width: width,
       height: height,
       backgroundMedia: backgroundMedia,
-      styles
+      styles,
+      ..._liveSec
     };
     // If preview is in black or clear mode, reflect that in the preview canvas
     if (blackMode) {
@@ -2806,7 +3153,8 @@ async function updateLive(verseOrIndices) {
     backgroundMedia: backgroundMedia,
     styles: getCanvasStylesFor('verse'),
     transitionIn: transitionSettings['fade-in'],
-    transitionOut: transitionSettings['fade-out']
+    transitionOut: transitionSettings['fade-out'],
+    ..._liveSec
   });
   
   // Push state to relay for mobile to display
@@ -4676,7 +5024,7 @@ function initResizers() {
   // Preview divider resizer
   const previewResizer = document.getElementById('preview-resizer');
   const slidePreview = document.getElementById('slide-preview');
-  const slideLive = document.getElementById('slide-live');
+  const livePanelWrapper = document.getElementById('live-panel-wrapper');
   
   let isResizingPreview = false;
   
@@ -4713,7 +5061,7 @@ function initResizers() {
       
       if (percentage > 10 && percentage < 90) {
         slidePreview.style.flex = `${percentage} 1 0%`;
-        slideLive.style.flex = `${100 - percentage} 1 0%`;
+        livePanelWrapper.style.flex = `${100 - percentage} 1 0%`;
       }
     } else if (isResizingVerse) {
       const newHeight = window.innerHeight - e.clientY;
@@ -4791,7 +5139,7 @@ async function restoreDividerPositions() {
   
   const scheduleSidebar = document.getElementById('schedule-sidebar');
   const slidePreview = document.getElementById('slide-preview');
-  const slideLive = document.getElementById('slide-live');
+  const livePanelWrapper = document.getElementById('live-panel-wrapper');
   const versePanel = document.getElementById('verse-panel');
   const topSection = document.getElementById('top-section');
 
@@ -4824,7 +5172,7 @@ async function restoreDividerPositions() {
   // Apply computed layout
   scheduleSidebar.style.width = scheduleWidthPx + 'px';
   slidePreview.style.flex = `${previewPercent} 1 0%`;
-  slideLive.style.flex = `${100 - previewPercent} 1 0%`;
+  livePanelWrapper.style.flex = `${100 - previewPercent} 1 0%`;
 
   versePanel.style.flex = `0 0 ${verseHeightPx}px`;
   const topHeight = Math.max(50, window.innerHeight - verseHeightPx - 16);
@@ -4914,6 +5262,7 @@ async function loadSongs() {
     }
     
     renderSongList(allSongs);
+    populateHymnalFilter();
     
     // Add scroll handler for virtual scrolling
     const songListContainer = document.getElementById('song-list');
@@ -4962,15 +5311,18 @@ function renderSongList(songs) {
     const songItem = document.createElement('div');
     songItem.className = 'song-item';
     
-    // Highlight matched text if there's a search query
-    if (currentSearchQuery) {
-      songItem.innerHTML = highlightText(song.title, currentSearchQuery);
-      // Also set title attribute so full text is visible on hover
-      songItem.title = song.title;
-    } else {
-      songItem.textContent = song.title;
-      songItem.title = song.title;
-    }
+    // Build badge for hymnal/page
+    const badgeText = song.page
+      ? (song.hymnal ? `${song.hymnal} p.${song.page}` : `p.${song.page}`)
+      : (song.hymnal ? song.hymnal : '');
+    const badgeHtml = badgeText ? `<span class="song-hymnal-badge">${escapeHtml(badgeText)}</span>` : '';
+    const titleHtml = currentSearchQuery
+      ? highlightText(escapeHtml(song.title), currentSearchQuery)
+      : escapeHtml(song.title);
+    songItem.innerHTML = `<span class="song-item-title-text">${titleHtml}</span>${badgeHtml}`;
+    songItem.title = song.title
+      + (song.hymnal ? ` — ${song.hymnal}` : '')
+      + (song.page ? ` p.${song.page}` : '');
     
     songItem.setAttribute('data-index', actualIndex);
     songItem.style.cssText = `
@@ -4979,10 +5331,13 @@ function renderSongList(songs) {
       left: 0;
       right: 0;
       height: ${SONG_ITEM_HEIGHT}px;
-      padding: 8px;
+      padding: 4px 8px;
       cursor: pointer;
       border-bottom: 1px solid #eee;
       box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
     `;
     
     if (selectedSongIndices.includes(actualIndex)) {
@@ -5202,6 +5557,7 @@ async function updatePreviewFromSongVerse(verseIndex) {
 }
 
 async function updateLiveFromSongVerse(verseIndex) {
+  hideVideoLiveBar();
   // Stop website mirror if it was active before pushing song content
   hideWebsiteLivePanel(true);
 
@@ -5402,57 +5758,82 @@ function selectSongChorusByNumber(chorusNum) {
   }
 }
 
+// Song search + hymnal filter combined
+function applyFiltersAndRender() {
+  const searchInput = document.getElementById('song-search-input');
+  const hymnalSelect = document.getElementById('song-hymnal-filter');
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+  const hymnalFilter = hymnalSelect ? hymnalSelect.value : '';
+  currentSearchQuery = query;
+
+  let pool = allSongs;
+
+  // Hymnal filter (dropdown)
+  if (hymnalFilter) {
+    pool = pool.filter(s => s.hymnal === hymnalFilter);
+  }
+
+  if (!query) {
+    filteredSongs = pool;
+    renderSongList(filteredSongs);
+    displaySelectedSong();
+    return;
+  }
+
+  // Pure-number query → page number search
+  const pageQuery = /^\d+$/.test(query) ? parseInt(query, 10) : null;
+  if (pageQuery !== null) {
+    filteredSongs = pool.filter(s => s.page === pageQuery);
+    renderSongList(filteredSongs);
+    displaySelectedSong();
+    return;
+  }
+
+  // Text search by title and lyrics
+  const results = [];
+  pool.forEach((song, _poolIdx) => {
+    let score = 0;
+    const titleLower = song.title.toLowerCase();
+    if (titleLower.includes(query)) {
+      score += 1000;
+      if (titleLower.startsWith(query)) score += 500;
+    }
+    song.lyrics.forEach(section => {
+      if (section.text.toLowerCase().includes(query)) score += 10;
+    });
+    if (score > 0) results.push({ song, score });
+  });
+
+  results.sort((a, b) => b.score - a.score);
+  filteredSongs = results.map(r => r.song);
+  renderSongList(filteredSongs);
+  displaySelectedSong();
+}
+
+function populateHymnalFilter() {
+  const select = document.getElementById('song-hymnal-filter');
+  if (!select) return;
+  const hymnals = [...new Set(allSongs.filter(s => s.hymnal).map(s => s.hymnal))].sort();
+  const currentVal = select.value;
+  select.innerHTML = '<option value="">All hymnals</option>';
+  hymnals.forEach(h => {
+    const opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = h;
+    select.appendChild(opt);
+  });
+  if (hymnals.includes(currentVal)) select.value = currentVal;
+}
+
 // Song search
 document.addEventListener('DOMContentLoaded', () => {
   const songSearchInput = document.getElementById('song-search-input');
   if (songSearchInput) {
-    songSearchInput.addEventListener('input', (e) => {
-      const query = e.target.value.toLowerCase().trim();
-      currentSearchQuery = query;
-      
-      if (!query) {
-        filteredSongs = allSongs;
-        renderSongList(filteredSongs);
-        displaySelectedSong(); // Refresh to remove highlights
-        return;
-      }
-      
-      // Search songs by title and lyrics
-      const results = [];
-      
-      allSongs.forEach((song, index) => {
-        let score = 0;
-        const titleLower = song.title.toLowerCase();
-        
-        // Title match (higher priority)
-        if (titleLower.includes(query)) {
-          score += 1000;
-          if (titleLower.startsWith(query)) {
-            score += 500; // Even higher for starts-with
-          }
-        }
-        
-        // Lyrics match (lower priority)
-        song.lyrics.forEach(section => {
-          const textLower = section.text.toLowerCase();
-          if (textLower.includes(query)) {
-            score += 10;
-          }
-        });
-        
-        if (score > 0) {
-          results.push({ song, index, score });
-        }
-      });
-      
-      // Sort by score (descending)
-      results.sort((a, b) => b.score - a.score);
-      
-      // Render filtered results
-      filteredSongs = results.map(r => r.song);
-      renderSongList(filteredSongs);
-      displaySelectedSong(); // Refresh to show highlights
-    });
+    songSearchInput.addEventListener('input', applyFiltersAndRender);
+  }
+  const hymnalSelect = document.getElementById('song-hymnal-filter');
+  if (hymnalSelect) {
+    hymnalSelect.addEventListener('change', applyFiltersAndRender);
   }
 });
 
@@ -5676,6 +6057,10 @@ function editSong(songIndex) {
     modal.style.display = 'flex';
     titleInput.value = song.title;
     authorInput.value = song.author || '';
+    const hymnalInput = document.getElementById('song-editor-hymnal');
+    const pageInput = document.getElementById('song-editor-page');
+    if (hymnalInput) hymnalInput.value = song.hymnal || '';
+    if (pageInput) pageInput.value = song.page || '';
     
     // Convert song lyrics back to plain text with [Section] tags
     const lyricsText = song.lyrics.map(section => `[${section.section}]\n${section.text}`).join('\n\n');
@@ -5720,6 +6105,7 @@ async function deleteSongs(songIndices) {
     if (searchInput) searchInput.value = '';
     
     renderSongList(allSongs);
+    populateHymnalFilter();
     displaySelectedSong();
   } catch (err) {
     console.error('Failed to delete songs:', err);
@@ -5895,6 +6281,7 @@ async function processSongImportFiles(files) {
             allSongs.length = 0;
             allSongs.push(...loaded);
             renderSongList(allSongs);
+            populateHymnalFilter();
           } catch {}
           alert(`EasyWorship database: found ${result.total} song(s), imported ${result.added} new song(s).`);
         } else {
@@ -5961,6 +6348,7 @@ async function processSongImportFiles(files) {
       const songsPath = path.join(userData, 'songs.json');
       fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
       renderSongList(allSongs);
+      populateHymnalFilter();
       alert(`Imported ${addedCount} song(s)`);
     } catch (err) {
       console.error('Failed to save imported songs:', err);
@@ -6170,6 +6558,10 @@ function openSongEditor() {
     modal.style.display = 'flex';
     if (titleInput) titleInput.value = '';
     if (authorInput) authorInput.value = '';
+    const hymnalInput = document.getElementById('song-editor-hymnal');
+    const pageInput = document.getElementById('song-editor-page');
+    if (hymnalInput) hymnalInput.value = '';
+    if (pageInput) pageInput.value = '';
     if (lyricsInput) {
       lyricsInput.textContent = '';
       const previewEl = document.getElementById('song-editor-preview');
@@ -6257,6 +6649,10 @@ async function saveSongFromEditor() {
   
   const title = document.getElementById('song-editor-title').value.trim();
   const author = document.getElementById('song-editor-author').value.trim();
+  const hymnalEl = document.getElementById('song-editor-hymnal');
+  const pageEl = document.getElementById('song-editor-page');
+  const hymnalVal = hymnalEl ? hymnalEl.value.trim() : '';
+  const pageVal = pageEl && pageEl.value ? parseInt(pageEl.value, 10) : null;
   const lyricsDiv = document.getElementById('song-editor-lyrics');
   
   // Use innerText instead of textContent to preserve newlines from contenteditable
@@ -6309,6 +6705,8 @@ async function saveSongFromEditor() {
     author: author || '',
     lyrics: sections
   };
+  if (hymnalVal) songData.hymnal = hymnalVal;
+  if (pageVal && !isNaN(pageVal)) songData.page = pageVal;
   
   // Check if we're editing or creating new
   if (editingIndex !== null && editingIndex !== '') {
@@ -6330,6 +6728,7 @@ async function saveSongFromEditor() {
     
     // Refresh song list
     renderSongList(allSongs);
+    populateHymnalFilter();
     closeSongEditor();
     
     // Select the song - use editingIndex if available (editing), otherwise new song (last index)
@@ -7293,7 +7692,7 @@ function openVideoEditor(mediaIndex) {
   document.getElementById('video-object-fit').value = media.objectFit || 'contain';
   document.getElementById('video-repeat-count').value = media.videoRepeat !== undefined ? media.videoRepeat : 0;
   document.getElementById('video-playback-speed').value = media.playbackSpeed !== undefined ? String(media.playbackSpeed) : '1';
-  document.getElementById('video-muted').checked = media.muted !== false; // default true
+  document.getElementById('video-play-audio').checked = media.muted === false; // checked = audio plays (default unchecked = muted)
   
   // Load video for preview
   videoPreviewElement = document.createElement('video');
@@ -7334,7 +7733,7 @@ function saveVideoSettings() {
   media.objectFit = document.getElementById('video-object-fit').value;
   media.videoRepeat = parseInt(document.getElementById('video-repeat-count').value, 10) || 0;
   media.playbackSpeed = parseFloat(document.getElementById('video-playback-speed').value) || 1;
-  media.muted = document.getElementById('video-muted').checked;
+  media.muted = !document.getElementById('video-play-audio').checked; // unchecked = muted (default)
   // Derive loop from repeat: 0 = infinite loop, >0 = finite
   media.loop = media.videoRepeat === 0;
   
@@ -8056,6 +8455,192 @@ function displayMediaOnPreview(media) {
   }
 }
 
+// ========== VIDEO LIVE BAR ==========
+let _vlbRafId = null;
+let _vlbIsScrubbing = false;
+
+function _vlbFormatTime(s) {
+  if (!isFinite(s) || s < 0) return '0:00';
+  const m = Math.floor(s / 60);
+  const ss = Math.floor(s % 60).toString().padStart(2, '0');
+  return `${m}:${ss}`;
+}
+
+function _vlbRafUpdate() {
+  _vlbRafId = requestAnimationFrame(() => {
+    const bar = document.getElementById('video-live-bar');
+    if (!bar || !bar.classList.contains('active')) { _vlbRafId = null; return; }
+
+    const video = window._liveVideoElement;
+    if (video) {
+      const btn = document.getElementById('vlb-play-pause');
+      if (btn) {
+        const playIcon = document.getElementById('vlb-icon-play');
+        const pauseIcon = document.getElementById('vlb-icon-pause');
+        if (playIcon) playIcon.style.display = video.paused ? '' : 'none';
+        if (pauseIcon) pauseIcon.style.display = video.paused ? 'none' : '';
+      }
+
+      const timeEl = document.getElementById('vlb-time');
+      if (timeEl) {
+        timeEl.textContent = `${_vlbFormatTime(video.currentTime)} / ${_vlbFormatTime(video.duration)}`;
+      }
+
+      if (!_vlbIsScrubbing) {
+        const scrub = document.getElementById('vlb-scrub');
+        if (scrub && video.duration) {
+          scrub.value = video.currentTime / video.duration;
+        }
+      }
+    }
+
+    _vlbRafUpdate();
+  });
+}
+
+async function showVideoLiveBar() {
+  const liveCanvas = document.getElementById('live-canvas');
+  window._liveVideoElement = liveCanvas ? liveCanvas._currentPreviewVideo : null;
+  if (!window._liveVideoElement) return;
+
+  const bar = document.getElementById('video-live-bar');
+  if (!bar) return;
+
+  // Reset speed selector to match the video's current rate
+  const speedSel = document.getElementById('vlb-speed');
+  if (speedSel && window._liveVideoElement) {
+    const rate = window._liveVideoElement.playbackRate || 1;
+    const opt = speedSel.querySelector(`option[value="${rate}"]`);
+    if (opt) speedSel.value = rate;
+    else speedSel.value = '1';
+  }
+
+  // Populate audio output device popover
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+    const settings = await ipcRenderer.invoke('load-settings');
+    const savedDeviceId = (settings && settings.audioOutputDeviceId) || 'default';
+    const popover = document.getElementById('vlb-audio-popover');
+    if (popover) {
+      popover.innerHTML = '<div id="vlb-audio-popover-title">Audio Output</div>';
+      const allDevices = [{ deviceId: 'default', label: 'System Default' }, ...audioOutputs.filter(d => d.deviceId !== 'default')];
+      allDevices.forEach((d, i) => {
+        const item = document.createElement('div');
+        item.className = 'vlb-device-item' + (d.deviceId === savedDeviceId ? ' selected' : '');
+        item.dataset.deviceId = d.deviceId;
+        const check = document.createElement('span');
+        check.className = 'vlb-device-check';
+        check.textContent = d.deviceId === savedDeviceId ? '\u2713' : '';
+        const label = document.createElement('span');
+        label.className = 'vlb-device-item-label';
+        label.textContent = d.label || `Audio Output ${i + 1}`;
+        item.appendChild(check);
+        item.appendChild(label);
+        popover.appendChild(item);
+      });
+    }
+    // Highlight speaker button if a non-default device is saved
+    const audioBtn = document.getElementById('vlb-audio-btn');
+    if (audioBtn) audioBtn.classList.toggle('active-device', savedDeviceId !== 'default');
+    // Apply saved device to local preview video immediately
+    if (window._liveVideoElement && typeof window._liveVideoElement.setSinkId === 'function') {
+      window._liveVideoElement.setSinkId(savedDeviceId).catch(() => {});
+    }
+  } catch (e) { /* ignore audio device query errors */ }
+
+  bar.classList.add('active');
+  if (!_vlbRafId) _vlbRafUpdate();
+}
+
+function hideVideoLiveBar() {
+  window._liveVideoElement = null;
+  const bar = document.getElementById('video-live-bar');
+  if (bar) bar.classList.remove('active');
+}
+
+function initVideoLiveBar() {
+  const playPauseBtn = document.getElementById('vlb-play-pause');
+  if (playPauseBtn) {
+    playPauseBtn.addEventListener('click', () => {
+      const v = window._liveVideoElement;
+      if (!v) return;
+      if (v.paused) {
+        v.play();
+        // Don't include currentTime on play — let live window continue from its own position
+        ipcRenderer.send('video-live-control', { action: 'sync', paused: false, playbackRate: v.playbackRate });
+      } else {
+        v.pause();
+        // Include currentTime on pause so live window freezes at exact same position
+        ipcRenderer.send('video-live-control', { action: 'sync', paused: true, currentTime: v.currentTime, playbackRate: v.playbackRate });
+      }
+    });
+  }
+
+  const scrub = document.getElementById('vlb-scrub');
+  if (scrub) {
+    scrub.addEventListener('mousedown', () => { _vlbIsScrubbing = true; });
+    scrub.addEventListener('input', () => {
+      const v = window._liveVideoElement;
+      if (!v || !v.duration) return;
+      const t = parseFloat(scrub.value) * v.duration;
+      v.currentTime = t;
+      // Sync full state so live window seeks to same position
+      ipcRenderer.send('video-live-control', { action: 'sync', currentTime: t, paused: v.paused, playbackRate: v.playbackRate });
+    });
+    scrub.addEventListener('mouseup', () => { _vlbIsScrubbing = false; });
+    scrub.addEventListener('change', () => { _vlbIsScrubbing = false; });
+  }
+
+  const speedSelect = document.getElementById('vlb-speed');
+  if (speedSelect) {
+    speedSelect.addEventListener('change', () => {
+      const v = window._liveVideoElement;
+      const rate = parseFloat(speedSelect.value);
+      if (v) v.playbackRate = rate;
+      // Sync speed only (no currentTime to avoid stutter on rate change)
+      ipcRenderer.send('video-live-control', { action: 'sync', playbackRate: rate, paused: v ? v.paused : false });
+    });
+  }
+
+  const audioBtn = document.getElementById('vlb-audio-btn');
+  const audioPopover = document.getElementById('vlb-audio-popover');
+  if (audioBtn && audioPopover) {
+    audioBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      audioPopover.classList.toggle('active');
+    });
+    audioPopover.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const item = e.target.closest('.vlb-device-item');
+      if (!item) return;
+      const deviceId = item.dataset.deviceId || 'default';
+      // Update checkmarks and selected state
+      audioPopover.querySelectorAll('.vlb-device-item').forEach(el => {
+        const isThis = el === item;
+        el.classList.toggle('selected', isThis);
+        const chk = el.querySelector('.vlb-device-check');
+        if (chk) chk.textContent = isThis ? '\u2713' : '';
+      });
+      audioPopover.classList.remove('active');
+      // Highlight button when non-default device is chosen
+      audioBtn.classList.toggle('active-device', deviceId !== 'default');
+      // Apply to local preview video
+      if (window._liveVideoElement && typeof window._liveVideoElement.setSinkId === 'function') {
+        window._liveVideoElement.setSinkId(deviceId).catch(() => {});
+      }
+      // Tell live window to route its audio to the same device
+      ipcRenderer.send('video-live-control', { action: 'audio-output', deviceId });
+      // Persist atomically
+      await ipcRenderer.invoke('update-settings', { audioOutputDeviceId: deviceId });
+    });
+    // Close when clicking anywhere outside the bar
+    document.addEventListener('click', () => {
+      audioPopover.classList.remove('active');
+    });
+  }
+}
+
 async function displayMediaOnLive(media) {
   // Ensure the live window exists and liveMode is active — same as handleVerseDoubleClick
   if (!liveMode) {
@@ -8106,7 +8691,7 @@ async function displayMediaOnLive(media) {
   };
   
   // Send to external live window
-  ipcRenderer.send('update-live-window', {
+  const _liveUpdatePayload = {
     mediaPath: media.path,
     mediaType: media.type,
     mediaColor: media.color,
@@ -8122,7 +8707,9 @@ async function displayMediaOnLive(media) {
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out'],
     isMedia: true
-  });
+  };
+  window._lastLiveUpdateData = _liveUpdatePayload;
+  ipcRenderer.send('update-live-window', _liveUpdatePayload);
   
   const previewCanvas = document.getElementById('preview-canvas');
   const liveCanvas = document.getElementById('live-canvas');
@@ -8215,6 +8802,13 @@ async function displayMediaOnLive(media) {
       }
     }
   });
+
+  // Show or hide the video live control bar
+  if (isVideo) {
+    showVideoLiveBar();
+  } else {
+    hideVideoLiveBar();
+  }
 }
 
 // ========== TRANSITION SYSTEM ==========

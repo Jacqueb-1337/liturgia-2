@@ -55,31 +55,95 @@ body.dark-theme ::-webkit-scrollbar-thumb {
   background: transparent;
 }
 
-#control-buttons-container button {
+#control-buttons-container button,
+#dual-btn-container button {
   background: #f5f5f5;
   border: 1px solid #ccc;
   border-radius: 4px;
-  padding: 6px 12px;
+  padding: 0 12px;
+  height: 36px;
+  box-sizing: border-box;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1;
   transition: all 0.2s;
   color: #333;
 }
 
-#control-buttons-container button:hover {
+#control-buttons-container button:hover,
+#dual-btn-container button:hover {
   background: #e0e0e0;
   border-color: #999;
 }
 
-body.dark-theme #control-buttons-container button {
+#control-buttons-container button.active,
+#dual-btn-container button.active {
+  background: #0078d4;
+  border-color: #0078d4;
+  color: #fff;
+}
+
+body.dark-theme #control-buttons-container button,
+body.dark-theme #dual-btn-container button {
   background: #2a2a2a;
   border: 1px solid #444;
   color: #eee;
 }
 
-body.dark-theme #control-buttons-container button:hover {
+body.dark-theme #control-buttons-container button:hover,
+body.dark-theme #dual-btn-container button:hover {
   background: #333;
   border-color: #555;
+}
+
+body.dark-theme #control-buttons-container button.active,
+body.dark-theme #dual-btn-container button.active {
+  background: #0078d4;
+  border-color: #0078d4;
+  color: #fff;
+}
+
+/* Dual SVG icon inside the picker button */
+#dual-btn-container .dual-picker-btn {
+  padding: 0 10px;
+  height: 36px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Rounded on the right when toggle is hidden (picker is last visible) */
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
+/* When toggle button is visible, picker loses right radius */
+#dual-btn-container:has(button:not(.dual-picker-btn):not([style*="display: none"])) .dual-picker-btn {
+  border-radius: 0;
+}
+
+/* Dual toggle button — right side of the joined group */
+#dual-btn-container button:not(.dual-picker-btn) {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
+#dual-btn-container .dual-svg-icon {
+  width: 1em;
+  height: 1em;
+  display: block;
+  filter: invert(0);
+}
+
+body.dark-theme #dual-btn-container .dual-svg-icon {
+  filter: invert(1);
+}
+
+/* Dark theme: keep joined borders consistent */
+body.dark-theme #dual-btn-container .dual-picker-btn {
+  border-left: none;
+}
+body.dark-theme #dual-btn-container button:not(.dual-picker-btn) {
+  border-left: none;
 }
 
 /* Bottom Tabs */
@@ -280,9 +344,49 @@ body.dark-theme .song-item:hover {
   line-height: 16px; /* small line-height so the single line vertically centers with padding */
 }
 
-.song-item[title] {
-  cursor: help; /* indicates hover tooltip available */
-} 
+.song-item-title-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-hymnal-badge {
+  flex-shrink: 0;
+  margin-left: 6px;
+  font-size: 0.7em;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+#song-hymnal-filter {
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+body.dark-theme #song-hymnal-filter {
+  background: #2a2a2a;
+  color: #eee;
+  border-color: #444;
+}
+
+body.dark-theme .song-hymnal-badge {
+  opacity: 0.45;
+}
+
+.song-editor-field {
+  background: #fff;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+body.dark-theme .song-editor-field {
+  background: #2a2a2a;
+  color: #eee;
+  border-color: #444;
+}
 
 .search-highlight {
   background: yellow;
@@ -299,15 +403,19 @@ body.dark-theme .search-highlight {
 #search-autocomplete-input {
   background: #fff;
   border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 8px;
+  border-radius: 4px 0 0 4px;
+  border-right: none;
+  padding: 0 8px;
   font-size: 14px;
+  height: 36px;
+  box-sizing: border-box;
   transition: border-color 0.2s;
 }
 
 #search-autocomplete-input:focus {
   outline: none;
   border-color: #0078d4;
+  border-right: none;
 }
 
 body.dark-theme #search-autocomplete-input {
@@ -1274,6 +1382,42 @@ body.dark-theme .color-editor-btn-save:hover {
   background: #005a9e;
 }
 
+/* Video editor section divider */
+.video-editor-section-divider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 16px;
+  padding-top: 14px;
+  border-top: 1px solid #ddd;
+}
+
+.video-editor-section-divider > span:first-child {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #666;
+}
+
+.video-editor-section-note {
+  font-size: 11px;
+  color: #999;
+  line-height: 1.4;
+}
+
+body.dark-theme .video-editor-section-divider {
+  border-top-color: #444;
+}
+
+body.dark-theme .video-editor-section-divider > span:first-child {
+  color: #aaa;
+}
+
+body.dark-theme .video-editor-section-note {
+  color: #777;
+}
+
 /* Song Editor */
 #song-editor-modal {
   display: none;
@@ -1607,6 +1751,77 @@ body.dark-theme #verse-display {
   background: #23272a;
   color: #eee;
   border-color: #333;
+}
+
+/* Dual translation */
+.dual-translation-divider {
+  border: none;
+  border-top: 1px solid #ccc;
+  margin: 8px 0;
+}
+.secondary-verse-text {
+  color: #555;
+  font-size: 0.93em;
+}
+.dual-missing {
+  color: #999;
+  font-style: italic;
+}
+.dual-bible-picker-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dual-bible-picker-modal {
+  background: #fff;
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 220px;
+  max-width: 340px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+}
+.dual-bible-picker-modal h3 {
+  margin: 0 0 10px 0;
+  font-size: 1em;
+}
+.dual-bible-picker-list {
+  list-style: none;
+  margin: 0 0 10px 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.dual-bible-picker-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.dual-bible-picker-item:hover {
+  background: #f0f0f0;
+}
+.dual-bible-picker-cancel {
+  margin-top: 4px;
+  padding: 4px 12px;
+}
+body.dark-theme .dual-translation-divider {
+  border-top-color: #444;
+}
+body.dark-theme .secondary-verse-text {
+  color: #aaa;
+}
+body.dark-theme .dual-missing {
+  color: #666;
+}
+body.dark-theme .dual-bible-picker-modal {
+  background: #23272a;
+  color: #eee;
+}
+body.dark-theme .dual-bible-picker-item:hover {
+  background: #333;
 }
 
 /* Settings tabs */
@@ -2302,4 +2517,191 @@ body.dark-theme #website-modal .website-preset-btn {
 
 body.dark-theme #website-modal .website-preset-btn:hover {
   background: #3a4f74;
+}
+
+/* ===== VIDEO LIVE BAR ===== */
+#video-live-bar {
+  display: none;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 4px 8px;
+  background: #181818;
+  border-top: 1px solid #333;
+  font-size: 12px;
+  color: #ccc;
+  position: relative;
+}
+
+#video-live-bar.active {
+  display: flex;
+}
+
+.vlb-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.vlb-icon-btn {
+  width: 28px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2a2a2a;
+  color: #ccc;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.vlb-icon-btn:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+.vlb-icon-btn.active-device {
+  border-color: #0078d4;
+  color: #4da3ff;
+}
+
+.vlb-time {
+  font-size: 11px;
+  color: #999;
+  flex-shrink: 0;
+  min-width: 84px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.vlb-scrub {
+  flex: 1;
+  min-width: 40px;
+  cursor: pointer;
+  accent-color: #0078d4;
+  height: 4px;
+}
+
+.vlb-label {
+  font-size: 11px;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.vlb-select {
+  padding: 2px 5px;
+  background: #2a2a2a;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 1;
+  min-width: 60px;
+  max-width: 160px;
+}
+
+#vlb-audio-popover {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 8px;
+  background: #252525;
+  border: 1px solid #505050;
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.65);
+  min-width: 220px;
+  max-width: 340px;
+  z-index: 9999;
+  padding: 4px 0;
+}
+
+#vlb-audio-popover.active {
+  display: block;
+}
+
+#vlb-audio-popover-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 5px 14px 3px;
+}
+
+.vlb-device-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #ccc;
+  min-width: 0;
+}
+
+.vlb-device-item:hover {
+  background: #333;
+  color: #fff;
+}
+
+.vlb-device-item.selected {
+  color: #fff;
+}
+
+.vlb-device-item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vlb-device-check {
+  flex-shrink: 0;
+  width: 14px;
+  font-size: 12px;
+  color: #0078d4;
+}
+
+/* Light mode overrides — bar stays dark (media player style) in all themes */
+body:not(.dark-theme) #video-live-bar {
+  background: #1a1a1a;
+  border-top-color: #2a2a2a;
+  color: #ccc;
+}
+
+body:not(.dark-theme) .vlb-icon-btn {
+  background: #2a2a2a;
+  color: #ccc;
+  border-color: #555;
+}
+
+body:not(.dark-theme) .vlb-icon-btn:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+
+body:not(.dark-theme) .vlb-select {
+  background: #222;
+  color: #ddd;
+  border-color: #555;
+}
+
+body:not(.dark-theme) #vlb-audio-popover {
+  background: #222;
+  border-color: #555;
+}
+
+body:not(.dark-theme) .vlb-device-item {
+  color: #ccc;
+}
+
+body:not(.dark-theme) .vlb-device-item:hover {
+  background: #2e2e2e;
+  color: #fff;
 }

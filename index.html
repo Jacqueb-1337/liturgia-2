@@ -43,6 +43,39 @@
       min-width: 0;
     }
 
+    /* Hover overlay for preview canvas */
+    #preview-edit-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(0px);
+      -webkit-backdrop-filter: blur(0px);
+      background: rgba(0, 0, 0, 0);
+      opacity: 0;
+      transition: opacity 0.18s ease, backdrop-filter 0.18s ease, -webkit-backdrop-filter 0.18s ease;
+      cursor: pointer;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #slide-preview:hover #preview-edit-overlay {
+      opacity: 1;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      background: rgba(0, 0, 0, 0.35);
+      pointer-events: auto;
+    }
+    .preview-edit-overlay-label {
+      color: #fff;
+      font-size: 7cqw;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      user-select: none;
+    }
+
     /* Preview content with aspect ratio */
     #preview-container {
       position: relative;
@@ -246,16 +279,20 @@
       
       <!-- Slide preview + live view -->
       <div id="slide-container" style="flex: 1; display: flex; min-width: 0;">
-        <div id="slide-preview" style="flex: 1; overflow: hidden; min-width: 0; position: relative;">
+        <div id="slide-preview" style="flex: 1; overflow: hidden; min-width: 0; position: relative; container-type: size;">
           <canvas id="preview-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
-          <button id="transition-in-btn" class="transition-overlay-btn" title="Fade In Transition" style="position: absolute; top: 50%; left: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
-          <button id="transition-out-btn" class="transition-overlay-btn" title="Fade Out Transition" style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
+          <div id="preview-edit-overlay">
+            <span class="preview-edit-overlay-label">Edit Styles</span>
+          </div>
+          <button id="transition-in-btn" class="transition-overlay-btn" title="Fade In Transition" style="position: absolute; top: 50%; left: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold; z-index: 20;">+</button>
+          <button id="transition-out-btn" class="transition-overlay-btn" title="Fade Out Transition" style="position: absolute; top: 50%; right: 10px; transform: translateY(-50%); width: 35px; height: 35px; border-radius: 50%; background: rgba(0,120,212,0.9); color: white; border: 2px solid white; font-size: 24px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-weight: bold; z-index: 20;">+</button>
         </div>
         
         <!-- Resizer between preview and live -->
         <div class="resizer resizer-x" id="preview-resizer" style="width: 16px; cursor: col-resize; flex-shrink: 0;"></div>
         
-        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0; position: relative;">
+        <div id="live-panel-wrapper" style="flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;">
+        <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0; position: relative; min-height: 0;">
           <canvas id="live-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
           <!-- Website live panel with nav controls -->
           <div id="website-live-panel" class="website-panel">
@@ -284,6 +321,34 @@
             </div>
           </div>
         </div>
+        <div id="video-live-bar">
+          <div class="vlb-row">
+            <button id="vlb-play-pause" class="vlb-icon-btn" title="Play / Pause">
+              <svg id="vlb-icon-play" width="10" height="12" viewBox="0 0 10 12"><path d="M0 0 L10 6 L0 12 Z" fill="currentColor"/></svg>
+              <svg id="vlb-icon-pause" width="10" height="12" viewBox="0 0 10 12" style="display:none"><rect x="0" y="0" width="3.5" height="12" fill="currentColor"/><rect x="6.5" y="0" width="3.5" height="12" fill="currentColor"/></svg>
+            </button>
+            <span id="vlb-time" class="vlb-time">0:00 / 0:00</span>
+            <input type="range" id="vlb-scrub" class="vlb-scrub" min="0" max="1" step="0.0001" value="0">
+          </div>
+          <div class="vlb-row">
+            <span class="vlb-label">Speed</span>
+            <select id="vlb-speed" class="vlb-select">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+            <span style="flex:1"></span>
+            <button id="vlb-audio-btn" class="vlb-icon-btn" title="Audio Output">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            </button>
+          </div>
+          <div id="vlb-audio-popover"></div>
+        </div>
+        </div>
       </div>
     </div>
 
@@ -304,7 +369,10 @@
       <!-- Verses Tab Content -->
       <div id="verses-tab-content" class="tab-content" style="display: flex; flex-direction: column; flex: 1; min-height: 0;">
         <div id="scripture-search" class="scripture-search-row" style="flex-shrink: 0;">
-          <div id="search-box-container" class="search-box-container"></div>
+          <div id="search-dual-group" style="display: flex; align-items: flex-start; flex-shrink: 0;">
+            <div id="search-box-container" class="search-box-container"></div>
+            <div id="dual-btn-container" style="display: flex; align-items: center; flex-shrink: 0;"></div>
+          </div>
           <div class="ai-suggestion-column">
             <div class="ai-suggestion-hint-wrap">
               <span id="ai-suggestion-pill" class="ai-suggestion-pill tone-warn">Checking…</span>
@@ -327,6 +395,9 @@
       <div id="songs-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
         <div id="song-search" style="flex-shrink: 0; padding: 1em; display: flex; gap: 8px; align-items: center;">
           <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 6px; box-sizing: border-box;" />
+          <select id="song-hymnal-filter" title="Filter by hymnal" style="padding: 6px; max-width: 130px;">
+            <option value="">All hymnals</option>
+          </select>
           <button id="song-view-toggle" style="padding: 6px 12px; white-space: nowrap;" title="Toggle between full song and verse blocks">Verse Blocks</button>
           <button id="song-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Create new song">+</button>
         </div>
@@ -387,6 +458,16 @@
         <div style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 4px; font-weight: bold;">Author:</label>
           <input type="text" id="song-editor-author" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Author (optional)" />
+        </div>
+        <div style="margin-bottom: 16px; display: flex; gap: 8px;">
+          <div style="flex: 1;">
+            <label style="display: block; margin-bottom: 4px; font-weight: bold;">Hymnal:</label>
+            <input type="text" id="song-editor-hymnal" class="song-editor-field" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="Hymnal name (optional)" />
+          </div>
+          <div style="flex: 0 0 90px;">
+            <label style="display: block; margin-bottom: 4px; font-weight: bold;">Page:</label>
+            <input type="number" id="song-editor-page" class="song-editor-field" style="width: 100%; padding: 8px; box-sizing: border-box; border-radius: 4px;" placeholder="#" min="1" />
+          </div>
         </div>
         <div style="margin-bottom: 16px;">
           <label style="display: block; margin-bottom: 4px; font-weight: bold;">Lyrics:</label>
@@ -608,11 +689,6 @@
     </div>
 
     <div class="color-editor-field">
-      <label>Repeat Count (0 = infinite):</label>
-      <input type="number" id="video-repeat-count" min="0" step="1" value="0" class="color-editor-select" style="width:100%;">
-    </div>
-
-    <div class="color-editor-field">
       <label>Playback Speed:</label>
       <select id="video-playback-speed" class="color-editor-select">
         <option value="0.25">0.25x (very slow)</option>
@@ -625,10 +701,20 @@
       </select>
     </div>
 
+    <div class="video-editor-section-divider">
+      <span>When Displayed Directly</span>
+      <span class="video-editor-section-note">These settings only apply when the video is displayed as a media item &mdash; not when used as a slide background.</span>
+    </div>
+
+    <div class="color-editor-field">
+      <label>Loop Times (0 = infinite):</label>
+      <input type="number" id="video-repeat-count" min="0" step="1" value="0" class="color-editor-select" style="width:100%;">
+    </div>
+
     <div class="color-editor-field">
       <label style="display: flex; align-items: center; gap: 8px;">
-        <input type="checkbox" id="video-muted" checked>
-        Muted
+        <input type="checkbox" id="video-play-audio">
+        Play Audio
       </label>
     </div>
     

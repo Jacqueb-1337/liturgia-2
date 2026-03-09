@@ -134,6 +134,15 @@
       } catch (e) { /* ignore */ }
     })();
 
+    // Load saved audio output device so newly created videos use it automatically
+    window._audioOutputDeviceId = 'default';
+    (async () => {
+      try {
+        const s = await ipcRenderer.invoke('load-settings');
+        if (s && s.audioOutputDeviceId) window._audioOutputDeviceId = s.audioOutputDeviceId;
+      } catch (e) { /* ignore */ }
+    })();
+
     // Render text content to an offscreen canvas and return it
     function renderTextToCanvas(content, width, height) {
       // Delegate to buildTextCanvas which supports all style properties.
@@ -830,6 +839,7 @@
         if (!_newIsVideoMedia && window.currentVideo) {
           try { window.currentVideo.pause(); } catch (_) {}
           window.currentVideo = null;
+          window._liveVideoForControl = null;
         }
       }
 
@@ -963,6 +973,7 @@
           if (window.currentVideo) {
             window.currentVideo.pause();
             window.currentVideo = null;
+            window._liveVideoForControl = null;
           }
           
           const video = document.createElement('video');
@@ -980,13 +991,14 @@
             video.loop = false;
             let loopsDone = 0;
             video.addEventListener('ended', function onVideoEnded() {
-              if (window.currentVideo !== video) { video.removeEventListener('ended', onVideoEnded); return; }
+              if (window._liveVideoForControl !== video) { video.removeEventListener('ended', onVideoEnded); return; }
               loopsDone++;
               if (loopsDone < repeatCount) {
                 video.currentTime = 0;
                 video.play();
               } else {
-                // Finished all repeats — stay on last frame
+                // Finished all repeats — freeze on last frame but keep _liveVideoForControl
+                // so the IPC control bar can still seek/play the video.
                 window.currentVideo = null;
               }
             });
@@ -994,7 +1006,12 @@
 
           video.play();
           window.currentVideo = video;
-          
+          window._liveVideoForControl = video;
+          // Apply saved audio output device if set
+          if (window._audioOutputDeviceId && window._audioOutputDeviceId !== 'default' && typeof video.setSinkId === 'function') {
+            video.setSinkId(window._audioOutputDeviceId).catch(() => {});
+          }
+
           const objectFit = renderContent_content.objectFit || 'contain';
           
           // Use requestVideoFrameCallback when available: only draws when the video has a
@@ -1441,8 +1458,10 @@
       }
 
       const pad    = W * 0.04;
+      const isDual  = !!(content.secondaryText);
+      const primaryRegionH = isDual ? H * 0.52 : H;
       const availW = W - pad * 2;
-      const availH = H - pad * 2;
+      const availH = primaryRegionH - pad * 2;
       const lhMult = gl.lineHeight       || 1.2;
       const vpos   = gl.verticalPosition || 'center';
       let baseSize = H * 0.08;
@@ -1487,7 +1506,7 @@
 
         const lh = baseSize * lhMult;
         const totalH = lines.length * lh;
-        let startY = vpos === 'top' ? pad : vpos === 'bottom' ? H - pad - totalH : H / 2 - totalH / 2;
+        let startY = vpos === 'top' ? pad : vpos === 'bottom' ? primaryRegionH - pad - totalH : primaryRegionH / 2 - totalH / 2;
 
         lines.forEach((line, i) => {
           const lineY = startY + i * lh + baseSize / 2;
@@ -1527,8 +1546,100 @@
         bCtx.font = fStr(baseSize * mult, refSt);
         bCtx.fillStyle = refSt.color || '#fff';
         bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
-        drawTx(content.reference, W - pad, H - pad, refSt);
+        const _refY = isDual ? (primaryRegionH - pad * 0.5) : (H - pad);
+        drawTx(content.reference, W - pad, _refY, refSt);
       }
+
+      // Secondary translation
+      if (isDual) {
+        const dividerY = H * 0.56;
+        bCtx.save();
+        bCtx.globalAlpha = 0.4;
+        bCtx.strokeStyle = refSt.color || '#fff';
+        bCtx.lineWidth = 1;
+        bCtx.beginPath();
+        bCtx.moveTo(pad, dividerY);
+        bCtx.lineTo(W - pad, dividerY);
+        bCtx.stroke();
+        bCtx.restore();
+
+        const secAreaTop = dividerY + pad * 0.5;
+        const secAreaH = H - secAreaTop - pad * 0.5;
+
+        if (content.secondaryRef) {
+          const secRefMult = (refSt.sizeMultiplier || 0.7) * 0.8;
+          bCtx.font = fStr(baseSize * secRefMult, refSt);
+          bCtx.fillStyle = refSt.color || '#fff';
+          bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
+          bCtx.globalAlpha = 0.7;
+          drawTx(content.secondaryRef, W - pad, H - pad * 0.5, refSt);
+          bCtx.globalAlpha = 1.0;
+        }
+
+        if (content.secondaryText) {
+          const secTextColor = textSt.color || '#fff';
+          const secSubColor  = subSt.color  || '#ddd';
+          const secSubMult   = subSt.sizeMultiplier || 0.6;
+          const secTextFF    = textSt.fontFamily || 'Arial';
+          const secTextAlign = textSt.textAlign || 'center';
+          if ('letterSpacing' in bCtx)
+            bCtx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * norm}px` : '0px';
+          let secSize = H * 0.065;
+          const secTextLines = content.secondaryText.split('\n');
+          function buildSecLines(size) {
+            bCtx.font = fStr(size, textSt);
+            const all = [];
+            secTextLines.forEach(tl => {
+              const segs = parseVerseSegments(tl);
+              segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+              all.push(...wrapTextWithSubscripts(segs, availW, size, bCtx, secTextFF));
+            });
+            return all;
+          }
+          let secLines = buildSecLines(secSize);
+          while (true) {
+            const ts = secSize + 4, tl = buildSecLines(ts);
+            if (tl.length * ts * lhMult < secAreaH * 0.8 && ts < H * 0.12) { secSize = ts; secLines = tl; } else break;
+          }
+          while (secLines.length * secSize * lhMult > secAreaH && secSize > 14) { secSize -= 2; secLines = buildSecLines(secSize); }
+          const secLH = secSize * lhMult;
+          const secTotalH = secLines.length * secLH;
+          let secStartY = secAreaTop + secAreaH / 2 - secTotalH / 2;
+          bCtx.globalAlpha = 0.85;
+          secLines.forEach((line, i) => {
+            const lineY = secStartY + i * secLH + secSize / 2;
+            let totalW = 0;
+            line.forEach(seg => {
+              if (seg.isNumber) {
+                bCtx.font = fStr(secSize * secSubMult, subSt);
+                totalW += bCtx.measureText(seg.text + ' ').width;
+              } else {
+                const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+                bCtx.font = fStr(secSize, merged); totalW += bCtx.measureText(seg.text).width;
+              }
+            });
+            let x = secTextAlign === 'left' ? pad : secTextAlign === 'right' ? W - pad - totalW : W / 2 - totalW / 2;
+            bCtx.textBaseline = 'alphabetic';
+            line.forEach(seg => {
+              if (seg.isNumber) {
+                const ssz = secSize * secSubMult;
+                bCtx.font = fStr(ssz, subSt); bCtx.fillStyle = secSubColor; bCtx.textAlign = 'left';
+                drawTx(seg.text + ' ', x, lineY + ssz * 0.35, subSt);
+                bCtx.font = fStr(ssz, subSt); x += bCtx.measureText(seg.text + ' ').width;
+              } else {
+                const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+                bCtx.font = fStr(secSize, merged); bCtx.fillStyle = secTextColor; bCtx.textAlign = 'left';
+                drawTx(seg.text, x, lineY, merged);
+                bCtx.font = fStr(secSize, merged); x += bCtx.measureText(seg.text).width;
+              }
+            });
+            bCtx.textBaseline = 'middle';
+          });
+          bCtx.globalAlpha = 1.0;
+          if ('letterSpacing' in bCtx) bCtx.letterSpacing = '0px';
+        }
+      }
+
       bCtx.textBaseline = 'middle';
       return off;
     }
@@ -1810,6 +1921,7 @@
       // Stop any video draw loop. The RVFC-driven loop checks window.currentVideo !== video,
       // so nulling it is the only reliable way to stop it (cancelAnimationFrame won't work).
       if (window.currentVideo) { window.currentVideo = null; }
+      window._liveVideoForControl = null;
       if (window._liveBgVideo) {
         try { window._liveBgVideo.pause(); } catch (_) {}
         if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
@@ -2035,6 +2147,60 @@
     ipcRenderer.on('website-mirror-stop', () => {
       _mirrorEnabled = false;
       hideMirrorVideo();
+    });
+
+    // Video live bar control commands (sync state and audio routing)
+    ipcRenderer.on('video-live-control', (event, data) => {
+      // Use _liveVideoForControl so commands work even after loop count is exhausted
+      // (window.currentVideo is nulled when loops finish, but _liveVideoForControl persists).
+      const v = window._liveVideoForControl || window.currentVideo;
+      if (!v) return;
+      if (data.action === 'sync') {
+        // If loops were exhausted (currentVideo is null) and a play/seek arrives,
+        // restore currentVideo so the drawFrame loop resumes from the correct position.
+        if (!window.currentVideo) {
+          window.currentVideo = v;
+          // Re-trigger the draw loop by requesting a new frame.
+          if (typeof v.requestVideoFrameCallback === 'function') {
+            const _rld = () => {
+              if (window.currentVideo !== v) return;
+              const canvas = document.getElementById('liveCanvas');
+              if (!canvas) return;
+              const ctx = canvas.getContext('2d');
+              if (v.readyState >= 2) ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+              v.requestVideoFrameCallback(_rld);
+            };
+            v.requestVideoFrameCallback(_rld);
+          } else {
+            const _rld = () => {
+              if (window.currentVideo !== v) return;
+              const canvas = document.getElementById('liveCanvas');
+              if (!canvas) return;
+              const ctx = canvas.getContext('2d');
+              if (v.readyState >= 2) ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+              requestAnimationFrame(_rld);
+            };
+            requestAnimationFrame(_rld);
+          }
+        }
+        // Apply each state property only when present so callers can omit fields they don't want to force
+        if (typeof data.playbackRate === 'number') v.playbackRate = data.playbackRate;
+        if (typeof data.currentTime === 'number') v.currentTime = data.currentTime;
+        if (typeof data.paused === 'boolean') {
+          if (data.paused && !v.paused) v.pause();
+          else if (!data.paused && v.paused) { try { v.play(); } catch (e) {} }
+        }
+      } else if (data.action === 'audio-output' && typeof data.deviceId === 'string') {
+        window._audioOutputDeviceId = data.deviceId;
+        if (typeof v.setSinkId === 'function') {
+          v.setSinkId(data.deviceId).catch(() => {});
+        }
+      }
+      // Legacy individual-command support (for any older code paths)
+      else if (data.action === 'play') { try { v.play(); } catch (e) {} }
+      else if (data.action === 'pause') { v.pause(); }
+      else if (data.action === 'seek' && typeof data.time === 'number') { v.currentTime = data.time; }
+      else if (data.action === 'speed' && typeof data.rate === 'number') { v.playbackRate = data.rate; }
     });
     
     ipcRenderer.on('show-live-text', () => {

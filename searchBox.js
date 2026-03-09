@@ -45,7 +45,7 @@ function parseReference(input, books) {
   return { book, bookIndex, chapter, verse, verseEnd };
 }
 
-function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter, books, onToggleLive, onToggleClear, onToggleBlack }) {
+function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter, books, onToggleLive, onToggleClear, onToggleBlack, onToggleDual, onPickDual }) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
@@ -121,11 +121,44 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   // Store reference globally so renderer.js can update it
   window.blackButton = blackBtn;
 
+  // Dual picker button — always opens the bible selection dialog
+  const dualPickerBtn = document.createElement('button');
+  dualPickerBtn.title = 'Select secondary translation';
+  dualPickerBtn.className = 'dual-picker-btn';
+  const dualIcon = document.createElement('img');
+  dualIcon.src = 'dual.svg';
+  dualIcon.alt = 'Dual';
+  dualIcon.className = 'dual-svg-icon';
+  dualPickerBtn.appendChild(dualIcon);
+  dualPickerBtn.addEventListener('click', () => {
+    if (onPickDual) onPickDual();
+  });
+  window.dualPickerButton = dualPickerBtn;
+
+  // Dual toggle button — shows selected translation name, toggles active class (like Clear button)
+  const dualBtn = document.createElement('button');
+  dualBtn.title = 'Toggle dual translation on/off';
+  dualBtn.style.display = 'none'; // hidden until a secondary is selected
+  dualBtn.addEventListener('click', () => {
+    if (onToggleDual) onToggleDual();
+  });
+
+  // Store reference globally so renderer.js can update it
+  window.dualButton = dualBtn;
+
   if (buttonsContainer) {
     buttonsContainer.appendChild(goLiveBtn);
     buttonsContainer.appendChild(liveBtn);
     buttonsContainer.appendChild(clearBtn);
     buttonsContainer.appendChild(blackBtn);
+  }
+
+  // Dual button lives next to the scripture search bar (verses tab only)
+  const dualBtnContainer = document.getElementById('dual-btn-container');
+  if (dualBtnContainer) {
+    dualBtnContainer.innerHTML = '';
+    dualBtnContainer.appendChild(dualPickerBtn);
+    dualBtnContainer.appendChild(dualBtn);
   }
 
   container.appendChild(input);

@@ -146,6 +146,8 @@ let settingsWindow = null; // Reference to settings window for IPC communication
 let styleWindow = null;    // Reference to text-styling window
 let mainWindowReady = false;
 let mainWindowLoaded = false;
+let pendingMaximize = false;
+let pendingFullscreen = false;
 let rendererReady = false; // Set when renderer finishes DOMContentLoaded initialization
 let aiWorkerWindowReady = false;
 let sidecarInitialized = false;
@@ -897,8 +899,16 @@ function tryCloseSplashScreen() {
         setTimeout(() => {
           try { 
             if (mainWindow && !mainWindow.isDestroyed()) { 
-              mainWindow.setPosition(initialWindowX, initialWindowY);
-              mainWindow.show(); 
+              if (pendingMaximize) {
+                mainWindow.show();
+                mainWindow.maximize();
+              } else if (pendingFullscreen) {
+                mainWindow.show();
+                mainWindow.setFullScreen(true);
+              } else {
+                mainWindow.setPosition(initialWindowX, initialWindowY);
+                mainWindow.show();
+              }
               mainWindow.focus(); 
             } 
           } catch(e){ console.error('[main] Error showing main window:', e); }
@@ -1086,7 +1096,12 @@ function applySettingsPatch(patch) {
 }
 
 ipcMain.handle('update-settings', async (event, patch) => {
-  return applySettingsPatch(patch);
+  const result = await applySettingsPatch(patch);
+  // Notify the main renderer so it can refresh live state (e.g. keybinds)
+  if (patch.keybinds && mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('settings-updated', { keybinds: patch.keybinds });
+  }
+  return result;
 });
 
 async function persistAiSettings(patch = {}) {
@@ -1467,7 +1482,7 @@ ipcMain.handle('show-bible-import-dialog', async () => {
   const result = await dialog.showOpenDialog({
     title: 'Import Bible',
     filters: [
-      { name: 'Bible Files', extensions: ['json', 'xml', 'txt', 'tsv'] },
+      { name: 'Bible Files', extensions: ['json', 'xml', 'usfx', 'osis', 'usfm', 'sfm', 'txt', 'tsv', 'zip'] },
       { name: 'All Files', extensions: ['*'] }
     ],
     properties: ['openFile']
@@ -1476,10 +1491,32 @@ ipcMain.handle('show-bible-import-dialog', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('parse-bible-file', async (event, filePath) => {
+  const { parseBibleFile } = require('./scriptureData');
+  return await parseBibleFile(filePath);
+});
+
 ipcMain.handle('import-bible-file', async (event, filePath, versionId) => {
   const { importBibleFile } = require('./scriptureData');
   const storageDir = path.join(app.getPath('userData'), 'bibles');
   return await importBibleFile(filePath, versionId, storageDir);
+});
+
+ipcMain.handle('export-bible-file', async (event, versionId) => {
+  const storageDir = path.join(app.getPath('userData'), 'bibles');
+  const srcFile = path.join(storageDir, versionId, 'bible.json');
+  if (!require('fs').existsSync(srcFile)) throw new Error(`Bible file not found for version: ${versionId}`);
+  const result = await dialog.showSaveDialog({
+    title: 'Export Bible as JSON',
+    defaultPath: `${versionId}.json`,
+    filters: [
+      { name: 'JSON Files', extensions: ['json'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePath) return null;
+  require('fs').copyFileSync(srcFile, result.filePath);
+  return result.filePath;
 });
 
 ipcMain.handle('download-python', async (event) => {
@@ -1941,8 +1978,10 @@ async function createWindow() {
     if (typeof settings.darkTheme !== 'boolean') { settings.darkTheme = true; try { await writeSettingsSafe(settings); } catch (e) { console.warn('Failed to persist default darkTheme in createWindow', e); } }
   } catch (e) { console.warn('Default dark theme check failed', e); }
 
-  if (winState.maximized) mainWindow.maximize();
-  if (winState.fullscreen) mainWindow.setFullScreen(true);
+  // Defer maximize/fullscreen until after splash closes — calling maximize() on a hidden
+  // window causes Electron to make it visible through the native OS API, bypassing show: false.
+  pendingMaximize = !!winState.maximized;
+  pendingFullscreen = !!winState.fullscreen;
 
   // Keep splash window bounds in sync while present
   const syncSplashBounds = () => { try { if (splashWindow && mainWindow) splashWindow.setBounds(mainWindow.getBounds()); } catch(e){} };
@@ -2805,6 +2844,36 @@ ipcMain.on('website-mirror-stop', () => {
 // Legacy — no-ops so no errors if old sends arrive
 ipcMain.on('website-navigate', () => {});
 ipcMain.on('website-clear', () => {});
+
+// Forward video live control commands (pause/play/seek/speed) to live windows
+ipcMain.on('video-live-control', (event, data) => {
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('video-live-control', data);
+  }
+});
+
+// Move the live window to a different display (close all existing, open on new display)
+ipcMain.handle('set-live-display', async (event, displayId) => {
+  // Close all existing live windows
+  for (const [id, win] of liveWindows.entries()) {
+    if (!win.isDestroyed()) win.close();
+  }
+  liveWindows.clear();
+  // Open a new live window on the requested display
+  const displays = screen.getAllDisplays();
+  const display = displays.find(d => d.id == displayId) || displays[0];
+  if (display) {
+    createLiveWindowForDisplay(display);
+    // Persist the chosen display as default using atomic write
+    try {
+      const data = await fs.promises.readFile(settingsPath, 'utf8');
+      const settings = JSON.parse(data);
+      settings.defaultDisplay = display.id;
+      await writeSettingsSafe(settings);
+    } catch (e) { /* ignore settings save error */ }
+  }
+  return { ok: true };
+});
 
 // Text Styling Window
 ipcMain.on('open-style-window', (event, data) => {

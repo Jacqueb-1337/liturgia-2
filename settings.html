@@ -132,6 +132,36 @@
       opacity: 0.6;
       cursor: wait;
     }
+
+    .bible-action.export {
+      background: transparent;
+      color: #555;
+      border: 1px solid #bbb;
+    }
+
+    .bible-action.export:hover {
+      background: #f0f0f0;
+      border-color: #888;
+    }
+
+    body.dark-theme .bible-action.export {
+      color: #aaa;
+      border-color: #555;
+    }
+
+    body.dark-theme .bible-action.export:hover {
+      background: #333;
+      border-color: #777;
+    }
+
+    .bible-item-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .bible-item-actions .bible-action {
+      flex: 1;
+    }
     
     .bible-loading {
       text-align: center;
@@ -203,6 +233,28 @@
       margin-bottom: 12px;
     }
 
+    .bible-import-hint {
+      margin: 4px 0 6px;
+      font-size: 0.88em;
+      color: #555;
+    }
+    .bible-import-hint-list {
+      margin: 0 0 14px 18px;
+      padding: 0;
+      font-size: 0.85em;
+      color: #555;
+      line-height: 1.75;
+    }
+    .bible-import-hint-list code {
+      background: #f0f0f0;
+      border-radius: 3px;
+      padding: 0 4px;
+      font-size: 0.95em;
+    }
+    body.dark-theme .bible-import-hint { color: #999; }
+    body.dark-theme .bible-import-hint-list { color: #999; }
+    body.dark-theme .bible-import-hint-list code { background: #333; color: #ccc; }
+
     .bible-local-section {
       margin-bottom: 16px;
     }
@@ -236,6 +288,111 @@
     body.dark-theme .bible-local-heading { color: #777; }
     body.dark-theme .bible-local-tag { background: #1e3a5f; color: #90caf9; }
     body.dark-theme #bible-import-status { color: #81c784; }
+
+    /* Bible import summary modal */
+    .bible-import-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .bible-import-modal {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px 28px;
+      max-width: 560px;
+      width: 90%;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    }
+    .bible-import-modal-title {
+      margin: 0;
+      font-size: 1.1em;
+    }
+    .bible-import-modal-subtitle {
+      margin: 0;
+      font-size: 0.9em;
+      color: #555;
+    }
+    .bible-import-modal-list {
+      overflow-y: auto;
+      flex: 1;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-size: 0.85em;
+      line-height: 1.7;
+      max-height: 340px;
+    }
+    .bible-import-modal-list .book-row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #f0f0f0;
+      padding: 2px 0;
+    }
+    .bible-import-modal-list .book-row:last-child { border-bottom: none; }
+    .book-row-name { font-weight: 500; }
+    .book-row-stats { color: #888; }
+    .bible-import-modal-id-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .bible-import-modal-id-row label {
+      font-size: 0.85em;
+      font-weight: 600;
+      color: #444;
+    }
+    .bible-import-modal-id-row input {
+      padding: 7px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #fff;
+      color: #222;
+    }
+    .bible-import-modal-id-row input:focus {
+      outline: none;
+      border-color: #2196F3;
+      box-shadow: 0 0 0 2px rgba(33,150,243,0.15);
+    }
+    .bible-import-modal-id-hint {
+      font-size: 0.78em;
+      color: #888;
+    }
+    body.dark-theme .bible-import-modal-id-row label { color: #ccc; }
+    body.dark-theme .bible-import-modal-id-row input {
+      background: #1e2124;
+      color: #eee;
+      border-color: #444;
+    }
+    body.dark-theme .bible-import-modal-id-hint { color: #666; }
+
+    .bible-import-modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    body.dark-theme .bible-import-modal {
+      background: #23272a;
+      color: #eee;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+    body.dark-theme .bible-import-modal-subtitle { color: #aaa; }
+    body.dark-theme .bible-import-modal-list {
+      border-color: #444;
+      background: #2a2e31;
+    }
+    body.dark-theme .bible-import-modal-list .book-row { border-bottom-color: #333; }
+    body.dark-theme .book-row-stats { color: #777; }
 
     .muted-text { color: #666; font-size: 0.95em; }
     body.dark-theme .muted-text { color: #aaa; }
@@ -342,67 +499,107 @@
     #default-display { min-width:180px; height:40px; box-sizing:border-box }
 
     /* Keybinds styling */
+    .keybind-section {
+      margin-bottom: 2em;
+    }
+    .keybind-section-title {
+      font-size: 0.7em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #888;
+      margin-bottom: 0.5em;
+      padding-bottom: 0.4em;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    body.dark-theme .keybind-section-title {
+      color: #666;
+      border-bottom-color: #3a3a3a;
+    }
+    .keybind-subsection-title {
+      font-size: 0.75em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #aaa;
+      margin: 0.8em 0 0.4em;
+    }
+    body.dark-theme .keybind-subsection-title {
+      color: #666;
+    }
+    .keybind-list {
+      display: flex;
+      flex-direction: column;
+    }
     .keybind-row {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 1em;
-      padding: 1em;
-      background: #f5f5f5;
-      border-radius: 6px;
+      padding: 0.45em 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .keybind-row:last-child {
+      border-bottom: none;
     }
     body.dark-theme .keybind-row {
-      background: #333;
+      border-bottom-color: #2e2e2e;
     }
     .keybind-label {
-      flex: 1;
+      font-size: 0.9em;
       font-weight: 500;
       color: #333;
     }
     body.dark-theme .keybind-label {
-      color: #eee;
+      color: #ddd;
     }
     .keybind-input {
-      padding: 8px 12px;
+      padding: 4px 8px;
       border: 1px solid #ddd;
       border-radius: 4px;
-      min-width: 150px;
+      width: 110px;
       font-family: monospace;
+      font-size: 0.85em;
       background: #fff;
       color: #333;
+      text-align: center;
+      cursor: pointer;
+      flex-shrink: 0;
     }
     body.dark-theme .keybind-input {
-      background: #444;
+      background: #2a2a2a;
       color: #eee;
-      border-color: #555;
+      border-color: #444;
     }
     .keybind-input:focus {
       outline: none;
       border-color: #2196F3;
-      box-shadow: 0 0 4px rgba(33, 150, 243, 0.3);
+      box-shadow: 0 0 0 2px rgba(33,150,243,0.2);
     }
-    .keybind-description {
-      font-size: 0.9em;
-      color: #666;
-      margin-top: 0.25em;
+    /* Song selection grid */
+    .keybind-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.4em 1em;
     }
-    body.dark-theme .keybind-description {
-      color: #aaa;
+    .keybind-grid-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
     }
-
-    /* Panel descriptions styling */
-    .settings-panel > p {
-      color: #666;
+    .keybind-grid-label {
+      font-size: 0.82em;
+      font-weight: 600;
+      color: #777;
+      width: 2em;
+      flex-shrink: 0;
     }
-    body.dark-theme .settings-panel > p {
-      color: #aaa;
+    body.dark-theme .keybind-grid-label {
+      color: #888;
     }
-
-    /* Keybinds category styling */
-    #keybinds-list h3 {
-      color: #333;
-    }
-    body.dark-theme #keybinds-list h3 {
-      color: #eee;
+    .keybind-grid-item .keybind-input {
+      width: 100%;
+      flex: 1;
     }
 
   </style>
@@ -615,6 +812,17 @@
       </div>
       <div class="settings-panel" id="panel-bibles">
         <h2>Manage Bibles</h2>
+        <p class="bible-import-hint">Import a Bible from a local file. Supported formats:</p>
+        <ul class="bible-import-hint-list">
+          <li><strong>JSON</strong> &mdash; thiagobodruk/bible array format</li>
+          <li><strong>Zefania XML</strong> &mdash; .xml files with &lt;BIBLEBOOK&gt; structure</li>
+          <li><strong>USFX XML</strong> &mdash; .xml or .usfx (eBible.org &ldquo;_usfx.zip&rdquo; downloads)</li>
+          <li><strong>ZIP</strong> &mdash; import the .zip directly; the app will detect and extract the Bible data automatically</li>
+          <li><strong>OSIS XML</strong> &mdash; .osis</li>
+          <li><strong>USFM</strong> &mdash; .usfm / .sfm text marker format</li>
+          <li><strong>TSV</strong> &mdash; tab-separated: book, chapter, verse, text columns</li>
+          <li><strong>Plain text</strong> &mdash; one verse per line: <code>Genesis 1:1 In the beginning...</code></li>
+        </ul>
         <div class="bible-import-bar">
           <button class="btn" id="bible-import-btn">Import from file...</button>
           <span id="bible-import-status"></span>
@@ -643,5 +851,23 @@
     </div>
   </div>
   <script src="settings.js"></script>
+
+  <!-- Bible import summary/confirmation modal -->
+  <div id="bible-import-modal-overlay" class="bible-import-modal-overlay" style="display:none;">
+    <div class="bible-import-modal">
+      <h3 class="bible-import-modal-title">Import Preview</h3>
+      <p class="bible-import-modal-subtitle" id="bible-import-modal-subtitle"></p>
+      <div id="bible-import-modal-list" class="bible-import-modal-list"></div>
+      <div class="bible-import-modal-id-row">
+        <label for="bible-import-modal-id">Version ID</label>
+        <input type="text" id="bible-import-modal-id" placeholder="e.g. es_sparvg" maxlength="60" spellcheck="false" autocomplete="off" />
+        <span class="bible-import-modal-id-hint">Letters, numbers, underscores and hyphens only. Used as the folder name.</span>
+      </div>
+      <div class="bible-import-modal-actions">
+        <button class="btn primary" id="bible-import-modal-confirm">Import</button>
+        <button class="btn" id="bible-import-modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

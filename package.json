@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "4.1.4",
+  "version": "4.2.0",
   "author": "Jacqueb <noreply@github.com>",
   "main": "main.js",
   "description": "Liturgia — presentation software",
@@ -30,7 +30,7 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.png"
     },
     "linux": {
       "target": [

@@ -194,6 +194,216 @@ function parseVersePerLineTxt(txt) {
 }
 
 /**
+ * Parse USFX XML format (eBible.org primary download format).
+ * Structure: <usfx><book id="GEN"><h>Genesis</h><c id="1"/><p><v id="1"/>text</p></book></usfx>
+ */
+function parseUsfxXml(txt) {
+  const books = [];
+  const bookRe = /<book\s+id="([^"]+)"[^>]*>([\s\S]*?)<\/book>/gi;
+  let bookMatch;
+  while ((bookMatch = bookRe.exec(txt)) !== null) {
+    const bookId = bookMatch[1];
+    const bookContent = bookMatch[2];
+
+    // Try to get a friendly name from <h>, <toc1>, or <id> tag
+    const nameMatch = bookContent.match(/<h>([\s\S]*?)<\/h>/) ||
+                      bookContent.match(/<toc1>([\s\S]*?)<\/toc1>/) ||
+                      bookContent.match(/<id\b[^>]*>([\s\S]*?)<\/id>/);
+    const bookName = nameMatch ? nameMatch[1].replace(/<[^>]+>/g, '').trim() : bookId;
+
+    // Split content into chapters on <c id="N"/> markers
+    const chapSplit = bookContent.split(/<c\s+id="\d+"[^>]*\/>/i);
+    const chapters = [];
+    for (let i = 1; i < chapSplit.length; i++) {
+      const chapContent = chapSplit[i];
+      const verses = [];
+      // Collect verse text: everything after <v id="N"/> up to next <v id or end of chapter
+      const verseRe = /<v\s+id="\d+"[^>]*\/>([\s\S]*?)(?=<v\s+id="|$)/gi;
+      let vMatch;
+      while ((vMatch = verseRe.exec(chapContent)) !== null) {
+        verses.push(vMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+      }
+      if (verses.length > 0) chapters.push(verses);
+    }
+    if (bookName && chapters.length > 0) books.push({ name: bookName, chapters });
+  }
+  return books;
+}
+
+/**
+ * Parse OSIS XML format.
+ * Structure: <div type="book" osisID="Gen"><chapter osisID="Gen.1"><verse osisID="Gen.1.1">text</verse>
+ */
+function parseOsisXml(txt) {
+  const books = [];
+  // Match book divs
+  const bookRe = /<div\b[^>]*\btype="book"[^>]*>([\s\S]*?)<\/div>/gi;
+  let bookMatch;
+  while ((bookMatch = bookRe.exec(txt)) !== null) {
+    const bookContent = bookMatch[1];
+    const titleMatch = bookContent.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+    const osisIdMatch = bookMatch[0].match(/osisID="([^".]+)/i);
+    const bookName = titleMatch
+      ? titleMatch[1].replace(/<[^>]+>/g, '').trim()
+      : (osisIdMatch ? osisIdMatch[1] : 'Unknown');
+
+    const chapters = [];
+    const chapRe = /<chapter\b[^>]*>([\s\S]*?)<\/chapter>/gi;
+    let chapMatch;
+    while ((chapMatch = chapRe.exec(bookContent)) !== null) {
+      const chapContent = chapMatch[1];
+      const verses = [];
+      const verseRe = /<verse\b[^>]*>([\s\S]*?)<\/verse>/gi;
+      let verseMatch;
+      while ((verseMatch = verseRe.exec(chapContent)) !== null) {
+        verses.push(verseMatch[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+      }
+      if (verses.length > 0) chapters.push(verses);
+    }
+    if (bookName && chapters.length > 0) books.push({ name: bookName, chapters });
+  }
+  return books;
+}
+
+/**
+ * Parse USFM text format (common Bible translation format).
+ * \id GEN ..., \c 1, \v 1 verse text
+ */
+function parseUsfm(txt) {
+  const books = [];
+  let currentBook = null;
+  let currentChapter = null;
+  let currentVerseText = '';
+  let collectingVerse = false;
+
+  function flushVerse() {
+    if (collectingVerse && currentChapter && currentVerseText.trim()) {
+      currentChapter.push(currentVerseText.replace(/\s+/g, ' ').trim());
+    }
+    currentVerseText = '';
+    collectingVerse = false;
+  }
+
+  function flushChapter() {
+    flushVerse();
+    if (currentBook && currentChapter && currentChapter.length > 0) {
+      currentBook.chapters.push(currentChapter);
+    }
+    currentChapter = null;
+  }
+
+  const lines = txt.split('\n');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (line.startsWith('\\id ')) {
+      flushChapter();
+      if (currentBook && currentBook.chapters.length > 0) books.push(currentBook);
+      // Name comes from \h or \toc1 later; use id for now
+      currentBook = { name: line.slice(4).split(/\s/)[0], chapters: [] };
+      currentChapter = null;
+      collectingVerse = false;
+    } else if (line.startsWith('\\h ') || line.startsWith('\\h\t')) {
+      if (currentBook) {
+        const name = line.slice(3).trim();
+        if (name) currentBook.name = name;
+      }
+    } else if (line.startsWith('\\toc1 ')) {
+      // Use \toc1 as book name only if \h was not found yet
+      if (currentBook && /^[A-Z]{2,3}$/.test(currentBook.name)) {
+        currentBook.name = line.slice(6).trim() || currentBook.name;
+      }
+    } else if (line.startsWith('\\c ')) {
+      flushChapter();
+      currentChapter = [];
+    } else if (line.startsWith('\\v ')) {
+      flushVerse();
+      collectingVerse = true;
+      // Remove the "\v N " prefix to get verse text
+      currentVerseText = line.replace(/^\\v\s+\d+\s*/, '').replace(/\\[a-z]+\*?\s*/g, '').trim();
+    } else if (collectingVerse && !line.startsWith('\\')) {
+      // Continuation of verse text (no backslash marker)
+      currentVerseText += ' ' + line;
+    } else if (collectingVerse && line.startsWith('\\')) {
+      // Inline style marker (e.g. \wj Jesus\wj*) — strip and continue if it's inline
+      const inline = /^\\(?:wj|nd|bk|add|tl|dc|k|sls|sig|pb|qs|b|qr)\b/.test(line);
+      if (inline) {
+        currentVerseText += ' ' + line.replace(/\\[a-z]+\*?\s*/g, '').trim();
+      } else {
+        // Paragraph-level marker — flush current verse and stop collecting
+        flushVerse();
+      }
+    }
+  }
+  flushChapter();
+  if (currentBook && currentBook.chapters.length > 0) books.push(currentBook);
+  return books;
+}
+
+/**
+ * Parse TSV (tab-separated values) Bible format.
+ * Expected columns: book_id/book  chapter  verse  text
+ * Handles: with or without header row, 3 or 4 columns.
+ */
+function parseTsv(txt) {
+  const verseMap = new Map();
+  const bookOrder = [];
+  let headerSkipped = false;
+
+  for (const rawLine of txt.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cols = line.split('\t');
+    if (cols.length < 3) continue;
+
+    // Skip header row if it exists
+    if (!headerSkipped && isNaN(parseInt(cols[1], 10))) {
+      headerSkipped = true;
+      continue;
+    }
+    headerSkipped = true;
+
+    let bookId, chap, verse, verseText;
+    if (cols.length >= 4) {
+      [bookId, chap, verse, verseText] = cols;
+    } else {
+      // 3-column: "GEN 1:1" style in first column
+      const m = cols[0].match(/^(.+?)\s+(\d+):(\d+)$/);
+      if (!m) continue;
+      bookId = m[1]; chap = m[2]; verse = m[3]; verseText = cols[1];
+    }
+
+    const chapNum = parseInt(chap, 10);
+    const verseNum = parseInt(verse, 10);
+    if (!bookId || isNaN(chapNum) || isNaN(verseNum)) continue;
+
+    if (!verseMap.has(bookId)) {
+      verseMap.set(bookId, new Map());
+      bookOrder.push(bookId);
+    }
+    const bookChaps = verseMap.get(bookId);
+    if (!bookChaps.has(chapNum)) bookChaps.set(chapNum, new Map());
+    bookChaps.get(chapNum).set(verseNum, (verseText || '').trim());
+  }
+
+  return bookOrder.map(bookId => {
+    const bookChaps = verseMap.get(bookId);
+    const maxChap = Math.max(...bookChaps.keys());
+    const chapters = [];
+    for (let c = 1; c <= maxChap; c++) {
+      const chapVerses = bookChaps.get(c) || new Map();
+      const maxVerse = chapVerses.size > 0 ? Math.max(...chapVerses.keys()) : 0;
+      const verses = [];
+      for (let v = 1; v <= maxVerse; v++) {
+        verses.push(chapVerses.get(v) || '');
+      }
+      chapters.push(verses);
+    }
+    return { name: bookId, chapters };
+  });
+}
+
+/**
  * Normalize any supported Bible source format into [{name, chapters:[[]]}].
  * @param {string} txt    - raw file content
  * @param {string} filePath - original file path (used for extension hint)
@@ -214,9 +424,33 @@ function normalizeBibleData(txt, filePath) {
     } catch (_) { /* fall through to other parsers */ }
   }
 
+  // --- USFX XML (eBible.org format) ---
+  if (ext === '.usfx' || txt.includes('<usfx') || txt.includes('<USFX')) {
+    const books = parseUsfxXml(txt);
+    if (books.length > 0) return books;
+  }
+
+  // --- OSIS XML ---
+  if (ext === '.osis' || txt.includes('<osis') || txt.includes('<OSIS')) {
+    const books = parseOsisXml(txt);
+    if (books.length > 0) return books;
+  }
+
   // --- Zefania XML ---
   if (ext === '.xml' || txt.includes('<XMLBIBLE') || txt.includes('<ZEFANIA_XML') || txt.includes('<BIBLEBOOK')) {
     const books = parseZefaniaXml(txt);
+    if (books.length > 0) return books;
+  }
+
+  // --- USFM text ---
+  if (ext === '.usfm' || ext === '.sfm' || txt.includes('\\id ')) {
+    const books = parseUsfm(txt);
+    if (books.length > 0) return books;
+  }
+
+  // --- TSV (tab-separated) ---
+  if (ext === '.tsv' || ext === '.csv') {
+    const books = parseTsv(txt);
     if (books.length > 0) return books;
   }
 
@@ -224,7 +458,63 @@ function normalizeBibleData(txt, filePath) {
   const books = parseVersePerLineTxt(txt);
   if (books.length > 0) return books;
 
-  throw new Error('Could not recognize Bible file format. Expected JSON array, Zefania XML, or verse-per-line text.');
+  throw new Error('Could not recognize Bible file format. Supported: JSON, Zefania XML, USFX XML, OSIS XML, USFM, TSV, or verse-per-line text.');
+}
+
+/**
+ * Extract the primary Bible data file from a ZIP archive.
+ * Priority: *_usfx.xml > any .xml (non-metadata) > .usfm/.sfm > .txt > .tsv > .json
+ * @param {string} filePath - path to the .zip file
+ * @returns {{ text: string, name: string }} extracted text and the entry filename
+ */
+async function extractBibleFromZip(filePath) {
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip(filePath);
+  const entries = zip.getEntries().filter(e => !e.isDirectory);
+
+  const METADATA_RE = /metadata|booknames|parms|copr|vernacular|signature|readme|license/i;
+  const priorities = [
+    e => /usfx[^/\\]*\.xml$/i.test(e.entryName),
+    e => /\.xml$/i.test(e.entryName) && !METADATA_RE.test(e.entryName),
+    e => /\.(usfm|sfm)$/i.test(e.entryName),
+    e => /\.txt$/i.test(e.entryName) && !METADATA_RE.test(e.entryName),
+    e => /\.tsv$/i.test(e.entryName),
+    e => /\.json$/i.test(e.entryName),
+    e => /\.xml$/i.test(e.entryName),
+  ];
+
+  for (const test of priorities) {
+    const entry = entries.find(test);
+    if (entry) {
+      return { text: entry.getData().toString('utf8'), name: entry.entryName };
+    }
+  }
+  throw new Error('No recognizable Bible file found inside ZIP.');
+}
+
+/**
+ * Parse a Bible file and return summary information without saving.
+ * @param {string} filePath - source file path
+ * @returns {{ books: Array, summary: Array<{name, chapters, verses}> }}
+ */
+async function parseBibleFile(filePath) {
+  let txt, resolvedPath;
+  if (path.extname(filePath).toLowerCase() === '.zip') {
+    const { text, name } = await extractBibleFromZip(filePath);
+    txt = text;
+    resolvedPath = name;
+  } else {
+    txt = await fs.promises.readFile(filePath, 'utf8');
+    resolvedPath = filePath;
+  }
+  const books = normalizeBibleData(txt, resolvedPath);
+  if (!books || books.length === 0) throw new Error('No Bible books found in file.');
+  const summary = books.map(b => ({
+    name: b.name,
+    chapters: b.chapters.length,
+    verses: b.chapters.reduce((sum, ch) => sum + ch.length, 0)
+  }));
+  return { books, summary };
 }
 
 /**
@@ -235,8 +525,16 @@ function normalizeBibleData(txt, filePath) {
  * @returns {string} path to saved bible.json
  */
 async function importBibleFile(filePath, versionId, storageDir) {
-  const txt = await fs.promises.readFile(filePath, 'utf8');
-  const books = normalizeBibleData(txt, filePath);
+  let txt, resolvedPath;
+  if (path.extname(filePath).toLowerCase() === '.zip') {
+    const { text, name } = await extractBibleFromZip(filePath);
+    txt = text;
+    resolvedPath = name;
+  } else {
+    txt = await fs.promises.readFile(filePath, 'utf8');
+    resolvedPath = filePath;
+  }
+  const books = normalizeBibleData(txt, resolvedPath);
   if (!books || books.length === 0) throw new Error('No Bible books found in file.');
 
   const destDir = path.join(storageDir, versionId);
@@ -273,5 +571,6 @@ module.exports = {
   downloadRemainingChapters,
   generateAllVerseKeys,
   normalizeBibleData,
+  parseBibleFile,
   importBibleFile
 };

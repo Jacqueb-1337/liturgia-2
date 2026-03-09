@@ -260,7 +260,9 @@ async function loadKeybinds() {
     'next-verse': 'ArrowRight',
     'prev-verse': 'ArrowLeft',
     'go-live': 'Enter',
-    'select-chorus-1': 'Alt+c',
+    'focus-search': 'Ctrl+f',
+    'toggle-clear': '',
+    'toggle-black': '',
     'select-verse-1': 'Alt+1',
     'select-verse-2': 'Alt+2',
     'select-verse-3': 'Alt+3',
@@ -270,6 +272,7 @@ async function loadKeybinds() {
     'select-verse-7': 'Alt+7',
     'select-verse-8': 'Alt+8',
     'select-verse-9': 'Alt+9',
+    'select-chorus-1': 'Alt+c',
     'select-chorus-2': '',
     'select-chorus-3': '',
     'select-chorus-4': '',
@@ -279,73 +282,87 @@ async function loadKeybinds() {
     'select-chorus-8': '',
     'select-chorus-9': ''
   };
-  
+
+  const labelMap = {
+    'prev-verse': 'Previous Verse',
+    'next-verse': 'Next Verse',
+    'go-live': 'Go Live',
+    'focus-search': 'Focus Search Bar',
+    'toggle-clear': 'Toggle Clear',
+    'toggle-black': 'Toggle Black',
+  };
+
   const saved = settings.keybinds || {};
   const keybinds = { ...defaultKeybinds, ...saved };
-  
-  // Organize keybinds by category for better UI
-  const categories = {
-    'Navigation': ['prev-verse', 'next-verse', 'go-live'],
-    'Song Selection': ['select-verse-1', 'select-verse-2', 'select-verse-3', 'select-verse-4', 'select-verse-5', 'select-verse-6', 'select-verse-7', 'select-verse-8', 'select-verse-9', 'select-chorus-1', 'select-chorus-2', 'select-chorus-3', 'select-chorus-4', 'select-chorus-5', 'select-chorus-6', 'select-chorus-7', 'select-chorus-8', 'select-chorus-9']
-  };
-  
-  // Display keybinds by category
-  for (const [category, bindIds] of Object.entries(categories)) {
-    const categoryDiv = document.createElement('div');
-    categoryDiv.style.marginBottom = '2em';
-    
-    const categoryTitle = document.createElement('h3');
-    categoryTitle.textContent = category;
-    categoryTitle.style.marginBottom = '1em';
-    categoryTitle.style.fontSize = '1.1em';
-    categoryTitle.style.fontWeight = '600';
-    categoryTitle.style.color = '#333';
-    categoryDiv.appendChild(categoryTitle);
-    
-    const categoryBody = document.createElement('div');
-    categoryBody.style.display = 'flex';
-    categoryBody.style.flexDirection = 'column';
-    categoryBody.style.gap = '0.75em';
-    
-    bindIds.forEach(bindId => {
-      if (keybinds.hasOwnProperty(bindId)) {
-        const row = document.createElement('div');
-        row.className = 'keybind-row';
-        row.setAttribute('data-bind-id', bindId);
-        
-        // Format label nicely
-        const labelText = bindId
-          .split('-')
-          .map((word, i) => i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word)
-          .join(' ');
-        
-        const labelEl = document.createElement('div');
-        labelEl.className = 'keybind-label';
-        labelEl.textContent = labelText;
-        
-        const input = document.createElement('input');
-        input.className = 'keybind-input';
-        input.type = 'text';
-        input.value = keybinds[bindId];
-        input.placeholder = 'Click to set...';
-        input.readOnly = true;
-        input.setAttribute('data-bind-id', bindId);
-        
-        // Record keybind on click
-        input.addEventListener('click', (e) => {
-          e.stopPropagation();
-          recordKeybind(input);
-        });
-        
-        row.appendChild(labelEl);
-        row.appendChild(input);
-        categoryBody.appendChild(row);
-      }
-    });
-    
-    categoryDiv.appendChild(categoryBody);
-    keybindsList.appendChild(categoryDiv);
+
+  function makeInput(bindId) {
+    const input = document.createElement('input');
+    input.className = 'keybind-input';
+    input.type = 'text';
+    input.value = keybinds[bindId] || '';
+    input.placeholder = '—';
+    input.readOnly = true;
+    input.setAttribute('data-bind-id', bindId);
+    input.addEventListener('click', (e) => { e.stopPropagation(); recordKeybind(input); });
+    return input;
   }
+
+  // Navigation & Controls section
+  const navSection = document.createElement('div');
+  navSection.className = 'keybind-section';
+  const navTitle = document.createElement('div');
+  navTitle.className = 'keybind-section-title';
+  navTitle.textContent = 'Navigation & Controls';
+  navSection.appendChild(navTitle);
+
+  const navList = document.createElement('div');
+  navList.className = 'keybind-list';
+  ['prev-verse', 'next-verse', 'go-live', 'focus-search', 'toggle-clear', 'toggle-black'].forEach(bindId => {
+    const row = document.createElement('div');
+    row.className = 'keybind-row';
+    row.setAttribute('data-bind-id', bindId);
+    const label = document.createElement('span');
+    label.className = 'keybind-label';
+    label.textContent = labelMap[bindId] || bindId;
+    row.appendChild(label);
+    row.appendChild(makeInput(bindId));
+    navList.appendChild(row);
+  });
+  navSection.appendChild(navList);
+  keybindsList.appendChild(navSection);
+
+  // Song Section Selection — grid layout
+  const songSection = document.createElement('div');
+  songSection.className = 'keybind-section';
+  const songTitle = document.createElement('div');
+  songTitle.className = 'keybind-section-title';
+  songTitle.textContent = 'Song Section Selection';
+  songSection.appendChild(songTitle);
+
+  function makeGridGroup(label, ids) {
+    const sub = document.createElement('div');
+    sub.className = 'keybind-subsection-title';
+    sub.textContent = label;
+    songSection.appendChild(sub);
+    const grid = document.createElement('div');
+    grid.className = 'keybind-grid';
+    ids.forEach(bindId => {
+      const item = document.createElement('div');
+      item.className = 'keybind-grid-item';
+      item.setAttribute('data-bind-id', bindId);
+      const lbl = document.createElement('span');
+      lbl.className = 'keybind-grid-label';
+      lbl.textContent = bindId.replace('select-verse-', 'V').replace('select-chorus-', 'C');
+      item.appendChild(lbl);
+      item.appendChild(makeInput(bindId));
+      grid.appendChild(item);
+    });
+    songSection.appendChild(grid);
+  }
+
+  makeGridGroup('Verses', Array.from({length: 9}, (_, i) => `select-verse-${i + 1}`));
+  makeGridGroup('Choruses', Array.from({length: 9}, (_, i) => `select-chorus-${i + 1}`));
+  keybindsList.appendChild(songSection);
 }
 
 // Record a keybind by listening for key/mouse events
@@ -1721,13 +1738,16 @@ async function renderLocalBiblesList(localIds) {
         <span class="bible-name">${displayName}<span class="bible-local-tag">local</span></span>
         <span class="bible-status downloaded">Downloaded</span>
       </div>
-      <button class="bible-action ${isSelected ? 'selected' : 'select'}" data-version="${versionId}"
-              ${isSelected ? 'disabled' : ''}>
-        ${isSelected ? 'Currently Active' : 'Select'}
-      </button>
+      <div class="bible-item-actions">
+        <button class="bible-action ${isSelected ? 'selected' : 'select'}" data-version="${versionId}"
+                ${isSelected ? 'disabled' : ''}>
+          ${isSelected ? 'Currently Active' : 'Select'}
+        </button>
+        <button class="bible-action export" data-export-version="${versionId}">Export JSON</button>
+      </div>
     `;
 
-    const btn = item.querySelector('.bible-action');
+    const btn = item.querySelector('.bible-action[data-version]');
     btn.addEventListener('click', async () => {
       const fileName = `${versionId}.json`;
       await selectBible(fileName);
@@ -1735,6 +1755,26 @@ async function renderLocalBiblesList(localIds) {
       const localIds2 = await loadLocalBibles();
       await renderLocalBiblesList(localIds2);
       if (allBibleFiles && allBibleFiles.length > 0) renderBiblesList(allBibleFiles);
+    });
+
+    const exportBtn = item.querySelector('.bible-action.export');
+    exportBtn.addEventListener('click', async () => {
+      exportBtn.disabled = true;
+      exportBtn.textContent = 'Saving...';
+      try {
+        const savedPath = await ipcRenderer.invoke('export-bible-file', versionId);
+        if (savedPath) {
+          exportBtn.textContent = 'Saved!';
+          setTimeout(() => { exportBtn.textContent = 'Export JSON'; exportBtn.disabled = false; }, 2000);
+        } else {
+          exportBtn.textContent = 'Export JSON';
+          exportBtn.disabled = false;
+        }
+      } catch (err) {
+        console.error('Bible export failed:', err);
+        exportBtn.textContent = 'Error';
+        setTimeout(() => { exportBtn.textContent = 'Export JSON'; exportBtn.disabled = false; }, 2000);
+      }
     });
 
     container.appendChild(item);
@@ -1745,35 +1785,88 @@ async function handleBibleImport() {
   const statusEl = document.getElementById('bible-import-status');
   statusEl.textContent = '';
 
-  // Open file dialog
+  // Step 1: Open file dialog
   const filePath = await ipcRenderer.invoke('show-bible-import-dialog');
   if (!filePath) return;
 
-  // Derive a default version ID from the filename
-  const baseName = path.basename(filePath, path.extname(filePath))
-    .replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').toLowerCase();
-
-  // Ask user for a version identifier
-  const versionId = window.prompt(
-    'Enter a short version ID for this Bible (used as folder name):\nExample: en_nasb, fr_ls, pt_acf',
-    baseName
-  );
-  if (!versionId || !versionId.trim()) return;
-  const cleanId = versionId.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-
+  // Step 2: Parse the file
   const btn = document.getElementById('bible-import-btn');
   btn.disabled = true;
-  btn.textContent = 'Importing...';
-  statusEl.textContent = '';
+  btn.textContent = 'Parsing...';
+  let parseResult;
+  try {
+    parseResult = await ipcRenderer.invoke('parse-bible-file', filePath);
+  } catch (err) {
+    statusEl.style.color = '#f44336';
+    statusEl.textContent = `Parse failed: ${err.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Import from file...';
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Import from file...';
 
+  // Step 3: Populate and show confirmation modal
+  const { summary } = parseResult;
+  const totalVerses = summary.reduce((s, b) => s + b.verses, 0);
+  const overlay = document.getElementById('bible-import-modal-overlay');
+  document.getElementById('bible-import-modal-subtitle').textContent =
+    `${summary.length} book${summary.length !== 1 ? 's' : ''} found, ${totalVerses.toLocaleString()} verses total.`;
+  document.getElementById('bible-import-modal-list').innerHTML = summary.map(b =>
+    `<div class="book-row">
+       <span class="book-row-name">${b.name}</span>
+       <span class="book-row-stats">${b.chapters} ch, ${b.verses.toLocaleString()} v</span>
+     </div>`
+  ).join('');
+
+  // Pre-fill version ID from filename
+  const baseName = path.basename(filePath, path.extname(filePath))
+    .replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').toLowerCase();
+  const idInput = document.getElementById('bible-import-modal-id');
+  idInput.value = baseName;
+  overlay.style.display = 'flex';
+  setTimeout(() => idInput.select(), 60);
+
+  // Step 4: Wait for confirm or cancel
+  const confirmed = await new Promise(resolve => {
+    const confirmBtn = document.getElementById('bible-import-modal-confirm');
+    const cancelBtn = document.getElementById('bible-import-modal-cancel');
+    function doConfirm() { cleanup(); resolve(true); }
+    function doCancel() { cleanup(); resolve(false); }
+    function onOverlayClick(e) { if (e.target === overlay) { cleanup(); resolve(false); } }
+    function onKeyDown(e) { if (e.key === 'Escape') doCancel(); }
+    function cleanup() {
+      confirmBtn.removeEventListener('click', doConfirm);
+      cancelBtn.removeEventListener('click', doCancel);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.style.display = 'none';
+    }
+    confirmBtn.addEventListener('click', doConfirm);
+    cancelBtn.addEventListener('click', doCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKeyDown);
+  });
+
+  if (!confirmed) return;
+
+  // Step 5: Validate version ID from the modal input
+  const rawId = idInput.value.trim();
+  if (!rawId) {
+    statusEl.style.color = '#f44336';
+    statusEl.textContent = 'Version ID is required.';
+    return;
+  }
+  const cleanId = rawId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  // Step 6: Import and refresh list
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
   try {
     await ipcRenderer.invoke('import-bible-file', filePath, cleanId);
-
     statusEl.style.color = '';
     statusEl.textContent = `Imported as "${cleanId}" successfully.`;
     setTimeout(() => { statusEl.textContent = ''; }, 4000);
-
-    // Refresh local list
     const localIds = await loadLocalBibles();
     await renderLocalBiblesList(localIds);
   } catch (err) {
