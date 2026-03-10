@@ -197,14 +197,23 @@ class VoskTranscriber:
         SetLogLevel(-1)
         self.model = Model(str(model_dir))
 
-    def create_recognizer(self):
+    def create_recognizer(self, word_list=None):
         if self.model is None:
             raise RuntimeError("model-not-loaded")
 
         vosk = importlib.import_module("vosk")
         KaldiRecognizer = getattr(vosk, "KaldiRecognizer")
 
-        recognizer = KaldiRecognizer(self.model, self.cfg.sample_rate)
+        if word_list and isinstance(word_list, list):
+            # Constrain recognition to Bible book names + number words so the acoustic model
+            # prefers e.g. "malachi" over "maliki" or "male cats", "exodus" over "x oh x".
+            # "[unk]" is always included so anything outside the list still passes through.
+            words = list(word_list)
+            if "[unk]" not in words:
+                words.insert(0, "[unk]")
+            recognizer = KaldiRecognizer(self.model, self.cfg.sample_rate, json.dumps(words))
+        else:
+            recognizer = KaldiRecognizer(self.model, self.cfg.sample_rate)
         recognizer.SetWords(True)
         return recognizer
 
@@ -272,9 +281,10 @@ async def handle_connection(ws, transcriber: VoskTranscriber):
                             return
                         continue
 
+                word_list = payload.get("wordList")
                 if transcriber.model is not None:
                     try:
-                        recognizer = transcriber.create_recognizer()
+                        recognizer = transcriber.create_recognizer(word_list=word_list)
                     except Exception as exc:
                         if not await safe_send(ws, {"type": "status", "message": f"error: {exc}"}):
                             return

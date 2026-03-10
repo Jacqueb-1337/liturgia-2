@@ -997,7 +997,7 @@ function rerenderPreviewForStyles() {
         lctx.fillStyle = '#000';
         lctx.fillRect(0, 0, liveCanvas.width, liveCanvas.height);
       } else if (clearMode) {
-        const noText = { ...updatedLive, number: '', text: '', reference: '' };
+        const noText = { ...updatedLive, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
         renderToCanvas(liveCanvas, noText, noText.width || 1920, noText.height || 1080);
       } else {
         renderToCanvas(liveCanvas, updatedLive, updatedLive.width || 1920, updatedLive.height || 1080);
@@ -1223,7 +1223,7 @@ function toggleClear() {
       if (liveCanvas) {
         const width = window.currentContent.width;
         const height = window.currentContent.height;
-        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '' };
+        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
         renderToCanvas(liveCanvas, contentWithoutText, width, height);
       }
     }
@@ -1251,7 +1251,7 @@ function toggleClear() {
       if (liveCanvas) {
         const width = window.currentContent.width;
         const height = window.currentContent.height;
-        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '' };
+        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
         renderToCanvas(liveCanvas, contentWithoutText, width, height);
       }
     }
@@ -1654,18 +1654,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       const clampedSchedule = Math.max(100, Math.min(scheduleWidthPx, Math.max(150, window.innerWidth - 400)));
       const clampedPreview = Math.max(10, Math.min(previewPercent, 90));
 
-      // Allow verse panel to expand/shrink when window height changes.
-      const heightDelta = window.innerHeight - (_lastWindowInnerHeight || window.innerHeight);
+      // Verse panel keeps its absolute pixel height when the window grows — only clamp it
+      // if the window shrinks so much that the verse panel would overflow.
       const windowMaxVerse = Math.max(100, window.innerHeight - 100);
-      let desiredVerse = verseHeightPx;
-      if (heightDelta > 0) {
-        // Window grew: add delta to verse height but don't exceed window available area
-        desiredVerse = Math.min(windowMaxVerse, verseHeightPx + heightDelta);
-      } else if (heightDelta < 0) {
-        // Window shrunk: reduce verse height but respect minimums
-        desiredVerse = Math.max(50, Math.min(verseHeightPx + heightDelta, windowMaxVerse));
-      }
-      const clampedVerse = Math.max(50, Math.min(desiredVerse, windowMaxVerse));
+      const clampedVerse = Math.max(50, Math.min(verseHeightPx, windowMaxVerse));
+      // Top section always recomputed from the current window height.
+      const newTop = Math.max(50, window.innerHeight - clampedVerse - 16);
+      const topSection = document.getElementById('top-section');
+      const currentTopHeight = topSection ? Math.round(topSection.getBoundingClientRect().height) : 0;
 
       let changed = false;
       if (clampedSchedule !== scheduleWidthPx) {
@@ -1677,9 +1673,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('live-panel-wrapper').style.flex = `${100 - clampedPreview} 1 0%`;
         changed = true;
       }
-      if (clampedVerse !== verseHeightPx) {
-        const newTop = Math.max(50, window.innerHeight - clampedVerse - 16);
-        document.getElementById('top-section').style.flex = `0 0 ${newTop}px`;
+      // Update top+verse whenever either changed or top section needs to fill new window height
+      if (clampedVerse !== verseHeightPx || Math.abs(newTop - currentTopHeight) > 2) {
+        if (topSection) topSection.style.flex = `0 0 ${newTop}px`;
         versePanel.style.flex = `0 0 ${clampedVerse}px`;
         changed = true;
       }
@@ -2114,10 +2110,11 @@ async function loadSecondaryBible(bibleFileName, { enable = true, quiet = false 
       window.dualButton.textContent = getSecondaryDisplayName();
       window.dualButton.classList.toggle('active', dualTranslationEnabled);
     }
-    if (!quiet) {
+    if (enable) {
+      // Always refresh the display when dual is active so verses show dual content on startup.
       updateVerseDisplay();
       if (selectedIndices.length > 0 && currentTab === 'verses') await updatePreview(selectedIndices);
-      if (enable) safeStatus(`Dual translation: ${getSecondaryDisplayName()} enabled`);
+      if (!quiet) safeStatus(`Dual translation: ${getSecondaryDisplayName()} enabled`);
     }
   } catch (err) {
     console.error('Failed to load secondary bible:', err);
@@ -3002,7 +2999,6 @@ async function updatePreview(verseOrIndices) {
     
     _fittedIndices = indices;
     if (indices.length === 1) {
-      numberText = allVerses[indices[0]].key.split(':')[1];
       refText = `${allVerses[indices[0]].key} (${getPrimaryDisplayLabel()})`;
     } else if (indices.length > 1) {
       refText = `${allVerses[indices[0]].key} - ${allVerses[indices[indices.length - 1]].key} (${getPrimaryDisplayLabel()})`;
@@ -3087,7 +3083,7 @@ async function updateLive(verseOrIndices) {
   });
   const textContent = parts.join(' ');
   
-  const numberText = indicesToShow.length === 1 ? allVerses[indicesToShow[0]].key.split(':')[1] : '';
+  const numberText = '';
   const refText = indicesToShow.length === 1 ? `${allVerses[indicesToShow[0]].key} (${getPrimaryDisplayLabel()})` : `${allVerses[indicesToShow[0]].key} - ${allVerses[indicesToShow[indicesToShow.length-1]].key} (${getPrimaryDisplayLabel()})`;
   const showHint = indicesToShow.length < indices.length ? `Showing ${indicesToShow.length} of ${indices.length} selected` : null;
   const _liveSec = buildSecondaryForCanvas(indicesToShow);
@@ -3130,7 +3126,9 @@ async function updateLive(verseOrIndices) {
         ...window.currentContent,
         number: '',
         text: '',
-        reference: ''
+        reference: '',
+        secondaryText: '',
+        secondaryRef: ''
       };
       renderToCanvas(liveCanvas, contentWithoutText, width, height);
     } else {

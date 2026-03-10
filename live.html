@@ -612,7 +612,8 @@
         return (a.backgroundPath || '') === (b.backgroundPath || '');
       }
 
-      return false;
+      // Neither content has any background — both are plain black, so they're equal
+      return true;
     }
 
     // Helper: file URL helper that delegates to preload-exposed paths.fileUrlFor
@@ -797,6 +798,9 @@
           currentAnimationFrameId = requestAnimationFrame(animate);
         } else {
           currentAnimationFrameId = null;
+          // Re-render with new content so the new text is shown on the final background.
+          // backgroundsEqual(newContent, newContent) will be true, so no infinite crossfade.
+          renderContent(newContent);
         }
       };
 

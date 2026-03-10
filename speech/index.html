@@ -583,10 +583,10 @@
       return out;
     }
 
-    function sendSidecarControl(type) {
+    function sendSidecarControl(type, extra) {
       if (!state.sidecarSocket || state.sidecarSocket.readyState !== WebSocket.OPEN) return;
       try {
-        state.sidecarSocket.send(JSON.stringify({ type }));
+        state.sidecarSocket.send(JSON.stringify(extra ? { type, ...extra } : { type }));
       } catch (_) {
       }
     }
@@ -1555,7 +1555,7 @@
         state.browserNoSpeechWhileMeterCount = 0;
         await connectSidecar();
         state.useBrowserSpeech = false;
-        sendSidecarControl("start");
+        sendSidecarControl("start", { wordList: buildRecognitionWordList() });
         setPill(statusLatency, "Latency: sidecar", "ok");
         log("Backend mode: Vosk sidecar only.", "warn");
         startAudioWatchdog();
@@ -1656,10 +1656,35 @@
       { key:"ruth", aliases:["ruth"] },
       { key:"1samuel", aliases:["1 samuel", "first samuel", "one samuel"] },
       { key:"2samuel", aliases:["2 samuel", "second samuel", "two samuel"] },
+      { key:"1kings", aliases:["1 kings", "first kings", "one kings"] },
+      { key:"2kings", aliases:["2 kings", "second kings", "two kings"] },
+      { key:"1chronicles", aliases:["1 chronicles", "first chronicles", "one chronicles"] },
+      { key:"2chronicles", aliases:["2 chronicles", "second chronicles", "two chronicles"] },
+      { key:"ezra", aliases:["ezra"] },
+      { key:"nehemiah", aliases:["nehemiah", "neh"] },
+      { key:"esther", aliases:["esther", "est"] },
+      { key:"job", aliases:["job"] },
       { key:"psalms", aliases:["psalms", "psalm", "ps"] },
       { key:"proverbs", aliases:["proverbs", "prov"] },
+      { key:"ecclesiastes", aliases:["ecclesiastes", "eccl", "eccles"] },
+      { key:"songofsolomon", aliases:["song of solomon", "song of songs", "songs", "song", "sos"] },
       { key:"isaiah", aliases:["isaiah", "isa"] },
       { key:"jeremiah", aliases:["jeremiah", "jer"] },
+      { key:"lamentations", aliases:["lamentations", "lam"] },
+      { key:"ezekiel", aliases:["ezekiel", "ezek", "eze"] },
+      { key:"daniel", aliases:["daniel", "dan"] },
+      { key:"hosea", aliases:["hosea", "hos"] },
+      { key:"joel", aliases:["joel"] },
+      { key:"amos", aliases:["amos"] },
+      { key:"obadiah", aliases:["obadiah", "obad"] },
+      { key:"jonah", aliases:["jonah", "jon"] },
+      { key:"micah", aliases:["micah", "mic"] },
+      { key:"nahum", aliases:["nahum", "nah"] },
+      { key:"habakkuk", aliases:["habakkuk", "hab"] },
+      { key:"zephaniah", aliases:["zephaniah", "zeph", "zep"] },
+      { key:"haggai", aliases:["haggai", "hag"] },
+      { key:"zechariah", aliases:["zechariah", "zech", "zec"] },
+      { key:"malachi", aliases:["malachi", "mal"] },
       { key:"matthew", aliases:["matthew", "matt", "mt"] },
       { key:"mark", aliases:["mark", "mk"] },
       { key:"luke", aliases:["luke", "lk"] },
@@ -1690,6 +1715,29 @@
     ];
 
     const ALIAS_FLAT = BOOKS.flatMap(b => b.aliases.map(a => ({ key: b.key, alias: a }))).sort((a, b) => b.alias.length - a.alias.length);
+
+    // Build a Vosk grammar word list from all known book names, number words, and connectors.
+    // Sending this with the "start" command biases Vosk's decoder toward Bible book names so that
+    // e.g. "malachi" is recognised as "malachi" rather than "maliki" or "male cats",
+    // and "exodus" is recognised correctly rather than "x oh x".
+    // [unk] is always included so unrecognised sounds still pass through.
+    function buildRecognitionWordList() {
+      const words = new Set(["[unk]"]);
+      for (const item of ALIAS_FLAT) {
+        words.add(item.alias);
+        for (const w of item.alias.split(" ")) { if (w) words.add(w); }
+      }
+      for (const name of dynamicBookNames) {
+        const n = normalize(name);
+        if (!n) continue;
+        words.add(n);
+        for (const w of n.split(" ")) { if (w) words.add(w); }
+      }
+      for (const [w] of NUM_WORDS) words.add(w);
+      for (const [w] of NUM_HOMOPHONES) words.add(w);
+      ["chapter", "verse", "and", "through", "to", "the", "of", "colon"].forEach(w => words.add(w));
+      return [...words];
+    }
 
     // Book names from the currently loaded Bible (populated at runtime via IPC).
     // For English Bibles these will match the alias table above; for other languages they

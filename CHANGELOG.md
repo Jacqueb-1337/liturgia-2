@@ -1,5 +1,15 @@
 # Changelog
 
+## 4.2.1 - 2026-03-10
+
+- fix: verse overlay/ghosting on live display — backgroundsEqual now returns true when both contents have no background, preventing spurious crossfade
+- fix: crossfade animation now re-renders with new content text after completing
+- fix: removed duplicate external verse number (inline subscript number is sufficient)
+- fix: dual translation not rendering on app reopen — display now refreshes when dual mode is restored from saved state
+- fix: clear/black mode no longer leaves secondary translation text and divider visible on preview canvas
+- feat: speech recognition — all OT books (Malachi, Kings, Chronicles, minor prophets, etc.) added to alias table
+- feat: speech recognition — Vosk grammar word list sent at session start to bias decoder toward Bible book names (fixes misrecognitions like "malachi" → "maliki", "exodus" → "x oh x")
+
 ## 4.1.0 - 2026-03-02
 
 - feat: multi-format Bible importer — supports Zefania XML, verse-per-line TXT, and JSON formats
