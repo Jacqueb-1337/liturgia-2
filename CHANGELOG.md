@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.0.4 - 2026-03-12
+
+- fix: all global keybinds (go-live Enter, prev/next verse, etc.) are now suppressed when any modal or editor overlay is open — pressing Enter in the song editor no longer triggers Go Live
+
 ## 5.0.3 - 2026-03-12
 
 - fix: crash on startup caused by stray double comma in crash dialog message string

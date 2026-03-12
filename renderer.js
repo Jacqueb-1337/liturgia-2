@@ -1846,8 +1846,39 @@ ipcRenderer.on('prepare-renderer-report', async () => {
     }
   });
 
+  // Returns true when any modal/overlay/editor is currently open so global
+  // keybinds should be fully suppressed (they never steal Enter, arrows, etc.)
+  function isAnyModalOpen() {
+    // 1. Active focus is inside a modal container
+    const active = document.activeElement;
+    if (active && active.closest(
+      '#song-editor-modal, #setup-modal, #token-entry-modal, #update-modal, ' +
+      '#color-editor-modal, #image-editor-modal, #video-editor-modal, ' +
+      '#gif-editor-modal, #transition-editor-modal, .dual-bible-picker-modal, ' +
+      '.song-editor-panel, [role="dialog"]'
+    )) return true;
+    // 2. Modals shown via style.display
+    if (['song-editor-modal', 'setup-modal', 'token-entry-modal',
+         'update-modal', 'transition-editor-modal'].some(id => {
+      const m = document.getElementById(id);
+      return m && m.style.display === 'flex';
+    })) return true;
+    // 3. Modals shown via .active class
+    if (document.querySelector(
+      '#color-editor-modal.active, #image-editor-modal.active, ' +
+      '#video-editor-modal.active, #gif-editor-modal.active'
+    )) return true;
+    // 4. Dual bible picker (appended dynamically)
+    if (document.querySelector('.dual-bible-picker-modal')) return true;
+    return false;
+  }
+
   // Keyboard navigation - use keybinds system
   window.addEventListener('keydown', (e) => {
+    // Suppress ALL global keybinds when any modal / editor panel is open.
+    // This also fixes Enter (go-live) firing inside the song editor textarea.
+    if (isAnyModalOpen()) return;
+
     // Check for go-live keybind first, before text input check (should work globally)
     if (matchesKeybind(keybinds['go-live'], e)) {
       e.preventDefault();
