@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "author": "Jacqueb <contact@jacqueb.me>",
   "main": "main.js",
   "description": "Liturgia — presentation software",

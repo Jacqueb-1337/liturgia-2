@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.0.1 - 2026-03-12
+
+- fix: sidecar stderr (Vosk internal warnings) no longer triggers the "Errors detected" toast — downgraded from console.error to console.warn
+
 ## 5.0.0 - 2026-03-12
 
 - feat: style editor — draggable safe-area overlay on canvas preview; resize from any edge or corner, move by dragging interior

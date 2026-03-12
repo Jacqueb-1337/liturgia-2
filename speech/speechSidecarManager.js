@@ -562,7 +562,7 @@ class SpeechSidecarManager extends EventEmitter {
         text.split(/\r?\n/).forEach((line) => {
           const trimmed = line.trim();
           if (trimmed) {
-            console.error(`[sidecar:${child.pid}] ${trimmed}`);
+            console.warn(`[sidecar:${child.pid}] ${trimmed}`);
             this.parseSidecarLogLine(trimmed);
           }
         });
