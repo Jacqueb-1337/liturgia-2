@@ -2312,7 +2312,7 @@ async function createWindow() {
         ...(process.env.NODE_ENV !== 'production' ? [
           { role: 'toggledevtools' },
           {
-            label: 'Open AI Speech Debugger',
+            label: 'Open Speech Debugger',
             click: () => { openSpeechDebuggerWindow(); }
           }
         ] : [])

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Liturgia Network Display</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background: #000;
+      overflow: hidden;
+      width: 100%; height: 100%;
+    }
+    #gif-bg {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      object-fit: cover; display: none; z-index: 0;
+    }
+    #bg-canvas {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh; z-index: 1;
+    }
+    #text-canvas {
+      position: absolute; top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      pointer-events: none; z-index: 2;
+    }
+    #status {
+      position: absolute; bottom: 8px; right: 10px;
+      color: #333; font-family: Arial, sans-serif; font-size: 11px;
+      z-index: 999; user-select: none;
+    }
+    #status.connected { color: #2a2; }
+    #status.connecting { color: #aa0; }
+    #status.disconnected { color: #a22; }
+  </style>
+</head>
+<body>
+  <img id="gif-bg" alt="">
+  <canvas id="bg-canvas"></canvas>
+  <canvas id="text-canvas"></canvas>
+  <div id="status" class="connecting">Connecting...</div>
+  <script>
+    const bgCanvas  = document.getElementById('bg-canvas');
+    const bgCtx     = bgCanvas.getContext('2d');
+    const textCanvas = document.getElementById('text-canvas');
+    const textCtx   = textCanvas.getContext('2d');
+    const gifBg     = document.getElementById('gif-bg');
+    const statusEl  = document.getElementById('status');
+
+    // ── URL option flags ──────────────────────────────────────────────
+    const _urlParams    = new URLSearchParams(location.search);
+    // t=1 : no black background fill — text floats over a transparent surface
+    //        (use with OBS "transparent background" checkbox)
+    const transparentMode = _urlParams.get('t') === '1';
+    // c=1 : treat black-mode commands as clear instead of filling the screen black
+    //        (essential for lower-thirds overlays)
+    const blackAsClear    = _urlParams.get('c') === '1';
+
+    if (transparentMode) {
+      document.documentElement.style.background = 'transparent';
+      document.body.style.background = 'transparent';
+    }
+
+    let currentContent = null;
+    let currentMode    = 'normal';
+    let isBlack = false;
+    let isClear = false;
+    let bgVideoEl    = null;
+    let bgVideoToken = 0;
+    let currentAnimId = null;
+    let prevTextCanvas = null;
+    let textAnimId     = null;
+    function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+    // ── Canvas resize ──────────────────────────────────────────────────
+    function resize() {
+      const W = window.innerWidth, H = window.innerHeight;
+      if (bgCanvas.width !== W || bgCanvas.height !== H) {
+        bgCanvas.width  = W;
+        bgCanvas.height = H;
+      }
+      if (textCanvas.width !== W || textCanvas.height !== H) {
+        textCanvas.width  = W;
+        textCanvas.height = H;
+      }
+    }
+    resize();
+    window.addEventListener('resize', () => {
+      resize();
+      if (currentContent && !isBlack && !isClear) {
+        if (textAnimId) { cancelAnimationFrame(textAnimId); textAnimId = null; }
+        prevTextCanvas = null;
+        renderContent(currentContent);
+      }
+    });
+
+    // ── Media URL helper ───────────────────────────────────────────────
+    // Convert any local absolute path into an HTTP URL via the /media endpoint.
+    // Paths that are already HTTP URLs or data: URIs pass through unchanged.
+    function mediaUrl(p) {
+      if (!p) return null;
+      if (/^https?:\/\//.test(p) || /^data:/.test(p)) return p;
+      return `${location.protocol}//${location.host}/media?path=${encodeURIComponent(p)}`;
+    }
+
+    // ── Rendering helpers ──────────────────────────────────────────────
+
+    function applyColorToCanvas(ctx, colorCSS, W, H) {
+      if (colorCSS.startsWith('linear-gradient')) {
+        const m = colorCSS.match(/linear-gradient\((\d+)deg,\s*([^,]+),\s*(.+)\)/);
+        if (m) {
+          const rad = (parseInt(m[1]) - 90) * Math.PI / 180;
+          const grd = ctx.createLinearGradient(
+            W/2 + Math.cos(rad)*W/2, H/2 + Math.sin(rad)*H/2,
+            W/2 - Math.cos(rad)*W/2, H/2 - Math.sin(rad)*H/2
+          );
+          grd.addColorStop(0, m[2].trim());
+          grd.addColorStop(1, m[3].trim());
+          ctx.fillStyle = grd;
+        } else { ctx.fillStyle = '#000'; }
+      } else if (colorCSS.startsWith('radial-gradient')) {
+        const m = colorCSS.match(/radial-gradient\(circle,\s*([^,]+),\s*(.+)\)/);
+        if (m) {
+          const grd = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)/2);
+          grd.addColorStop(0, m[1].trim());
+          grd.addColorStop(1, m[2].trim());
+          ctx.fillStyle = grd;
+        } else { ctx.fillStyle = '#000'; }
+      } else {
+        ctx.fillStyle = colorCSS;
+      }
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    function drawImageWithSettings(ctx, img, W, H, settings) {
+      const bgSize = settings.bgSize || 'cover';
+      let scale;
+      if (bgSize === 'cover')         scale = Math.max(W/img.width, H/img.height);
+      else if (bgSize === 'contain')  scale = Math.min(W/img.width, H/img.height);
+      else if (bgSize === '100% 100%') { ctx.drawImage(img, 0, 0, W, H); return; }
+      else                             scale = 1;
+      const dw = img.width * scale, dh = img.height * scale;
+      ctx.drawImage(img, (W-dw)/2, (H-dh)/2, dw, dh);
+    }
+
+    function parseVerseSegments(text) {
+      const segs = [];
+      const regex = /(\d+)\s{2}/g;
+      let last = 0, m;
+      while ((m = regex.exec(text)) !== null) {
+        if (m.index > last) {
+          const t = text.substring(last, m.index).trim();
+          if (t) segs.push({ isNumber: false, text: t });
+        }
+        segs.push({ isNumber: true, text: m[1] });
+        last = regex.lastIndex;
+      }
+      if (last < text.length) {
+        const t = text.substring(last).trim();
+        if (t) segs.push({ isNumber: false, text: t });
+      }
+      return segs;
+    }
+
+    function parseInlineMarkdownWords(s) {
+      const out = [];
+      if (!s) return out;
+      const re = /(\*\*|__)([\s\S]+?)\1|(\*|_)([\s\S]+?)\3/g;
+      let last = 0, m;
+      while ((m = re.exec(s)) !== null) {
+        if (m.index > last) {
+          s.substring(last, m.index).split(' ').forEach((w, i, a) => {
+            if (w) out.push({ text: i < a.length-1 ? w+' ' : w, bold: false, italic: false });
+          });
+        }
+        const isBold = !!(m[1] && m[2]);
+        const content = isBold ? m[2] : m[4];
+        content.split(' ').forEach((w, i, a) => {
+          if (w) out.push({ text: i < a.length-1 ? w+' ' : w, bold: isBold, italic: !isBold });
+        });
+        last = re.lastIndex;
+      }
+      if (last < s.length) {
+        s.substring(last).split(' ').forEach((w, i, a) => {
+          if (w) out.push({ text: i < a.length-1 ? w+' ' : w, bold: false, italic: false });
+        });
+      }
+      if (!out.length && s.trim()) out.push({ text: s, bold: false, italic: false });
+      return out;
+    }
+
+    function wrapTextWithSubscripts(segments, maxW, baseSize, ctx2d, fontFamily) {
+      const lines = [];
+      let line = [], lineW = 0;
+      const subSize = baseSize * 0.6;
+      segments.forEach(seg => {
+        if (seg.isNumber) {
+          ctx2d.font = `${subSize}px "${fontFamily}"`;
+          const w = ctx2d.measureText(seg.text + ' ').width;
+          if (lineW + w > maxW && line.length) { lines.push(line); line = []; lineW = 0; }
+          line.push(seg); lineW += w;
+        } else {
+          const words = seg.words || [];
+          words.forEach((wo, idx) => {
+            const wt   = typeof wo === 'string' ? wo : wo.text;
+            const test = wt + (idx < words.length - 1 ? ' ' : '');
+            const fStr = typeof wo === 'string'
+              ? `${baseSize}px "${fontFamily}"`
+              : `${wo.italic?'italic ':''}${wo.bold?'bold ':''}${baseSize}px "${fontFamily}"`;
+            ctx2d.font = fStr;
+            const w = ctx2d.measureText(test).width;
+            if (lineW + w > maxW && line.length) { lines.push(line); line = []; lineW = 0; }
+            if (typeof wo === 'string') line.push({ isNumber: false, text: test });
+            else                         line.push({ isNumber: false, text: test, bold: !!wo.bold, italic: !!wo.italic });
+            lineW += w;
+          });
+        }
+      });
+      if (line.length) lines.push(line);
+      return lines;
+    }
+
+    // ── Full-styled text canvas builder (kept identical to live.html) ──
+    function buildTextCanvas(content, W, H) {
+      const off  = document.createElement('canvas');
+      off.width  = W; off.height = H;
+      const bCtx = off.getContext('2d');
+      bCtx.clearRect(0, 0, W, H);
+      if (!content) return off;
+
+      const styles = content.styles || {};
+      const textSt = styles.text      || {};
+      const numSt  = styles.number    || styles.title || {};
+      const subSt  = styles.subscript || {};
+      const refSt  = styles.reference || {};
+      const gl     = styles.global    || {};
+      const norm   = H / 1080;
+
+      function fStr(size, st) {
+        const w  = st && st.fontWeight === 'bold'   ? 'bold '   : '';
+        const it = st && st.fontStyle  === 'italic' ? 'italic ' : '';
+        const ff = (st && st.fontFamily) || 'Arial';
+        return `${it}${w}${size}px "${ff}"`;
+      }
+      function applyFx(st) {
+        const bl = ((st && st.shadowBlur)  || 0) * norm;
+        const sx = ((st && st.shadowX)     || 0) * norm;
+        const sy = ((st && st.shadowY)     || 0) * norm;
+        if (bl > 0 || sx !== 0 || sy !== 0) {
+          bCtx.shadowColor = (st && st.shadowColor) || '#000';
+          bCtx.shadowBlur  = bl; bCtx.shadowOffsetX = sx; bCtx.shadowOffsetY = sy;
+        }
+      }
+      function clearFx() {
+        bCtx.shadowColor = 'transparent';
+        bCtx.shadowBlur = 0; bCtx.shadowOffsetX = 0; bCtx.shadowOffsetY = 0;
+      }
+      function drawTx(text, x, y, st) {
+        applyFx(st);
+        const sw = ((st && st.strokeWidth) || 0) * norm;
+        if (sw > 0) {
+          bCtx.strokeStyle = (st && st.strokeColor) || '#000';
+          bCtx.lineWidth = sw; bCtx.lineJoin = 'round';
+          bCtx.strokeText(text, x, y);
+        }
+        bCtx.fillText(text, x, y);
+        clearFx();
+      }
+
+      const sa            = gl.safeArea || { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
+      const areaLeft      = W * sa.x;
+      const areaTop       = H * sa.y;
+      const areaRight     = areaLeft + W * sa.w;
+      const areaBottom    = areaTop  + H * sa.h;
+      const isDual        = !!(content.secondaryText);
+      const primaryBottom = isDual ? H * 0.52 : areaBottom;
+      const availW        = areaRight - areaLeft;
+      const availH        = primaryBottom - areaTop;
+      const lhMult = gl.lineHeight       || 1.2;
+      const vpos   = gl.verticalPosition || 'center';
+      let baseSize = H * 0.08;
+
+      if (content.number) {
+        const mult = numSt.sizeMultiplier || 0.6;
+        bCtx.font      = fStr(baseSize * mult, numSt);
+        bCtx.fillStyle = numSt.color || '#fff';
+        bCtx.textAlign = 'left'; bCtx.textBaseline = 'top';
+        drawTx(content.number, areaLeft, areaTop, numSt);
+      }
+
+      if (content.text) {
+        const textColor = textSt.color || '#fff';
+        const subColor  = subSt.color  || '#ddd';
+        const subMult   = subSt.sizeMultiplier || 0.6;
+        const textFF    = textSt.fontFamily || 'Arial';
+        const textAlign = textSt.textAlign || 'center';
+        if ('letterSpacing' in bCtx)
+          bCtx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * norm}px` : '0px';
+
+        const textLines = content.text.split('\n');
+        function buildLines(size) {
+          bCtx.font = fStr(size, textSt);
+          const all = [];
+          textLines.forEach(tl => {
+            const segs = parseVerseSegments(tl);
+            segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+            all.push(...wrapTextWithSubscripts(segs, availW, size, bCtx, textFF));
+          });
+          return all;
+        }
+        let lines = buildLines(baseSize);
+        while (true) {
+          const ts = baseSize + 4, tl = buildLines(ts);
+          if (tl.length * ts * lhMult < availH * 0.82 && ts < H * 0.15) { baseSize = ts; lines = tl; } else break;
+        }
+        while (lines.length * baseSize * lhMult > availH && baseSize > 20) { baseSize -= 2; lines = buildLines(baseSize); }
+
+        const lh     = baseSize * lhMult;
+        const totalH = lines.length * lh;
+        let startY   = vpos === 'top'    ? areaTop
+                     : vpos === 'bottom' ? primaryBottom - totalH
+                     :                    (areaTop + primaryBottom) / 2 - totalH / 2;
+
+        lines.forEach((line, i) => {
+          const lineY = startY + i * lh + baseSize / 2;
+          let totalW = 0;
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              bCtx.font = fStr(baseSize * subMult, subSt);
+              totalW += bCtx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+              bCtx.font = fStr(baseSize, merged); totalW += bCtx.measureText(seg.text).width;
+            }
+          });
+          let x = textAlign === 'left'  ? areaLeft
+                : textAlign === 'right' ? areaRight - totalW
+                :                        W / 2 - totalW / 2;
+          bCtx.textBaseline = 'alphabetic';
+          line.forEach(seg => {
+            if (seg.isNumber) {
+              const ssz = baseSize * subMult;
+              bCtx.font = fStr(ssz, subSt); bCtx.fillStyle = subColor; bCtx.textAlign = 'left';
+              drawTx(seg.text + ' ', x, lineY + ssz * 0.35, subSt);
+              bCtx.font = fStr(ssz, subSt); x += bCtx.measureText(seg.text + ' ').width;
+            } else {
+              const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+              bCtx.font = fStr(baseSize, merged); bCtx.fillStyle = textColor; bCtx.textAlign = 'left';
+              drawTx(seg.text, x, lineY, merged);
+              bCtx.font = fStr(baseSize, merged); x += bCtx.measureText(seg.text).width;
+            }
+          });
+          bCtx.textBaseline = 'middle';
+        });
+        if ('letterSpacing' in bCtx) bCtx.letterSpacing = '0px';
+      }
+
+      if (content.reference) {
+        const mult = refSt.sizeMultiplier || 0.7;
+        bCtx.font = fStr(baseSize * mult, refSt);
+        bCtx.fillStyle = refSt.color || '#fff';
+        bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
+        const _refY = isDual ? primaryBottom : areaBottom;
+        drawTx(content.reference, areaRight, _refY, refSt);
+      }
+
+      if (isDual) {
+        const dividerY = H * 0.56;
+        bCtx.save();
+        bCtx.globalAlpha = 0.4;
+        bCtx.strokeStyle = refSt.color || '#fff';
+        bCtx.lineWidth = 1;
+        bCtx.beginPath(); bCtx.moveTo(areaLeft, dividerY); bCtx.lineTo(areaRight, dividerY);
+        bCtx.stroke();
+        bCtx.restore();
+
+        const secAreaTop = dividerY + areaTop * 0.5;
+        const secAreaH   = areaBottom - secAreaTop;
+
+        if (content.secondaryRef) {
+          const secRefMult = (refSt.sizeMultiplier || 0.7) * 0.8;
+          bCtx.font = fStr(baseSize * secRefMult, refSt);
+          bCtx.fillStyle = refSt.color || '#fff';
+          bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
+          bCtx.globalAlpha = 0.7;
+          drawTx(content.secondaryRef, areaRight, areaBottom, refSt);
+          bCtx.globalAlpha = 1.0;
+        }
+
+        if (content.secondaryText) {
+          const secTextColor = textSt.color || '#fff';
+          const secSubColor  = subSt.color  || '#ddd';
+          const secSubMult   = subSt.sizeMultiplier || 0.6;
+          const secTextFF    = textSt.fontFamily || 'Arial';
+          const secTextAlign = textSt.textAlign || 'center';
+          if ('letterSpacing' in bCtx)
+            bCtx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * norm}px` : '0px';
+          let secSize = H * 0.065;
+          const secLines_src = content.secondaryText.split('\n');
+          function buildSecLines(size) {
+            bCtx.font = fStr(size, textSt);
+            const all = [];
+            secLines_src.forEach(tl => {
+              const segs = parseVerseSegments(tl);
+              segs.forEach(s => { if (!s.isNumber) s.words = parseInlineMarkdownWords(s.text); });
+              all.push(...wrapTextWithSubscripts(segs, availW, size, bCtx, secTextFF));
+            });
+            return all;
+          }
+          let secLines = buildSecLines(secSize);
+          while (true) {
+            const ts = secSize + 4, tl = buildSecLines(ts);
+            if (tl.length * ts * lhMult < secAreaH * 0.8 && ts < H * 0.12) { secSize = ts; secLines = tl; } else break;
+          }
+          while (secLines.length * secSize * lhMult > secAreaH && secSize > 14) { secSize -= 2; secLines = buildSecLines(secSize); }
+          const secLH     = secSize * lhMult;
+          const secTotalH = secLines.length * secLH;
+          let secStartY   = secAreaTop + secAreaH / 2 - secTotalH / 2;
+          bCtx.globalAlpha = 0.85;
+          secLines.forEach((line, i) => {
+            const lineY = secStartY + i * secLH + secSize / 2;
+            let totalW = 0;
+            line.forEach(seg => {
+              if (seg.isNumber) { bCtx.font = fStr(secSize * secSubMult, subSt); totalW += bCtx.measureText(seg.text + ' ').width; }
+              else {
+                const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+                bCtx.font = fStr(secSize, merged); totalW += bCtx.measureText(seg.text).width;
+              }
+            });
+            let x = secTextAlign === 'left'  ? areaLeft
+                  : secTextAlign === 'right' ? areaRight - totalW
+                  :                           W / 2 - totalW / 2;
+            bCtx.textBaseline = 'alphabetic';
+            line.forEach(seg => {
+              if (seg.isNumber) {
+                const ssz = secSize * secSubMult;
+                bCtx.font = fStr(ssz, subSt); bCtx.fillStyle = secSubColor; bCtx.textAlign = 'left';
+                drawTx(seg.text + ' ', x, lineY + ssz * 0.35, subSt);
+                bCtx.font = fStr(ssz, subSt); x += bCtx.measureText(seg.text + ' ').width;
+              } else {
+                const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
+                bCtx.font = fStr(secSize, merged); bCtx.fillStyle = secTextColor; bCtx.textAlign = 'left';
+                drawTx(seg.text, x, lineY, merged);
+                bCtx.font = fStr(secSize, merged); x += bCtx.measureText(seg.text).width;
+              }
+            });
+            bCtx.textBaseline = 'middle';
+          });
+          bCtx.globalAlpha = 1.0;
+          if ('letterSpacing' in bCtx) bCtx.letterSpacing = '0px';
+        }
+      }
+
+      bCtx.textBaseline = 'middle';
+      return off;
+    }
+
+    // ── renderContent ──────────────────────────────────────────────────
+    function renderContent(content) {
+      currentContent = content;
+      const W = bgCanvas.width, H = bgCanvas.height;
+
+      // Stop previous video loop
+      bgVideoToken++;
+      if (bgVideoEl) {
+        bgVideoEl.pause();
+        if (bgVideoEl.parentNode) bgVideoEl.parentNode.removeChild(bgVideoEl);
+        bgVideoEl = null;
+      }
+      if (currentAnimId) { cancelAnimationFrame(currentAnimId); currentAnimId = null; }
+      gifBg.style.display = 'none';
+
+      const media = content.backgroundMedia
+        || (content.isMedia ? {
+              type: content.mediaType, path: content.mediaPath, color: content.mediaColor,
+              bgSize: content.bgSize, bgRepeat: content.bgRepeat, bgPosition: content.bgPosition
+           } : null);
+
+      const glStyle       = (content.styles && content.styles.global) || {};
+      const overlayOpacity = glStyle.overlayOpacity !== undefined ? glStyle.overlayOpacity : 0.4;
+      const bgBlur        = parseFloat(glStyle.bgBlur) || 0;
+      const norm          = H / 1080;
+
+      function renderText() {
+        if (textAnimId) { cancelAnimationFrame(textAnimId); textAnimId = null; }
+        if (isClear) { textCtx.clearRect(0, 0, W, H); prevTextCanvas = null; return; }
+        const newOff = buildTextCanvas(content, W, H);
+        const tIn   = content.transitionIn  || { duration: 0.4, type: 'fade' };
+        const tOut  = content.transitionOut || tIn;
+        const inDur  = Math.max((tIn.duration  || 0.4) * 1000, 50);
+        const outDur = Math.max((tOut.duration || 0.4) * 1000, 50);
+        const inType  = tIn.type  || 'fade';
+        const outType = tOut.type || 'fade';
+        const oldOff  = prevTextCanvas;
+        prevTextCanvas = newOff;
+        function doIn() {
+          const start = Date.now();
+          const tick = () => {
+            const p = Math.min((Date.now() - start) / inDur, 1), e = easeInOutCubic(p);
+            textCtx.clearRect(0, 0, W, H); textCtx.save();
+            if      (inType === 'slide-left')  { textCtx.drawImage(newOff,  (1-e)*W, 0); }
+            else if (inType === 'slide-right') { textCtx.drawImage(newOff, -(1-e)*W, 0); }
+            else if (inType === 'slide-up')    { textCtx.drawImage(newOff, 0,  (1-e)*H); }
+            else if (inType === 'slide-down')  { textCtx.drawImage(newOff, 0, -(1-e)*H); }
+            else { textCtx.globalAlpha = e; textCtx.drawImage(newOff, 0, 0); }
+            textCtx.restore();
+            if (p < 1) { textAnimId = requestAnimationFrame(tick); }
+            else { textCtx.clearRect(0, 0, W, H); textCtx.drawImage(newOff, 0, 0); textAnimId = null; }
+          };
+          textAnimId = requestAnimationFrame(tick);
+        }
+        if (oldOff) {
+          const start = Date.now();
+          const tick = () => {
+            const p = Math.min((Date.now() - start) / outDur, 1), e = easeInOutCubic(p);
+            textCtx.clearRect(0, 0, W, H); textCtx.save();
+            if      (outType === 'slide-left')  { textCtx.drawImage(oldOff, -e*W, 0); }
+            else if (outType === 'slide-right') { textCtx.drawImage(oldOff,  e*W, 0); }
+            else if (outType === 'slide-up')    { textCtx.drawImage(oldOff, 0, -e*H); }
+            else if (outType === 'slide-down')  { textCtx.drawImage(oldOff, 0,  e*H); }
+            else { textCtx.globalAlpha = 1-e; textCtx.drawImage(oldOff, 0, 0); }
+            textCtx.restore();
+            if (p < 1) { textAnimId = requestAnimationFrame(tick); }
+            else { textCtx.clearRect(0, 0, W, H); doIn(); }
+          };
+          textAnimId = requestAnimationFrame(tick);
+        } else {
+          doIn();
+        }
+      }
+      function applyOverlay() {
+        bgCtx.fillStyle = `rgba(0,0,0,${overlayOpacity})`;
+        bgCtx.fillRect(0, 0, W, H);
+      }
+
+      if (!media) {
+        if (transparentMode) {
+          bgCtx.clearRect(0, 0, W, H);
+        } else {
+          bgCtx.fillStyle = '#000';
+          bgCtx.fillRect(0, 0, W, H);
+          applyOverlay();
+        }
+        renderText();
+        return;
+      }
+
+      if (media.type === 'COLOR') {
+        if (transparentMode) {
+          bgCtx.clearRect(0, 0, W, H);
+        } else {
+          applyColorToCanvas(bgCtx, media.color || '#000', W, H);
+        }
+        renderText();
+        return;
+      }
+
+      const src = mediaUrl(media.path);
+      if (!src) {
+        if (transparentMode) { bgCtx.clearRect(0, 0, W, H); } else { bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, W, H); applyOverlay(); }
+        renderText(); return;
+      }
+
+      const extRaw = (media.path || '').split('.').pop().toUpperCase();
+      const isVideo = ['MP4','WEBM','OGG','MOV','AVI'].includes(extRaw);
+      const isGif   = extRaw === 'GIF';
+
+      if (isGif) {
+        bgCtx.clearRect(0, 0, W, H);
+        if (transparentMode) { renderText(); return; }
+        const gifSize = media.bgSize || 'cover';
+        gifBg.style.objectFit      = gifSize === 'contain' ? 'contain' : gifSize === 'fill' ? 'fill' : 'cover';
+        gifBg.style.objectPosition = media.bgPosition || 'center';
+        gifBg.style.filter         = bgBlur > 0 ? `blur(${bgBlur * norm}px)` : 'none';
+        if (gifBg.dataset.src !== src) { gifBg.src = src; gifBg.dataset.src = src; }
+        gifBg.style.display = 'block';
+        applyOverlay(); renderText(); return;
+      }
+
+      if (isVideo) {
+        if (transparentMode) { bgCtx.clearRect(0, 0, W, H); renderText(); return; }
+        const vid = document.createElement('video');
+        vid.src   = src;
+        vid.muted = true; vid.loop = true;
+        vid.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;visibility:hidden;';
+        document.body.appendChild(vid);
+        vid.play().catch(() => {});
+        bgVideoEl = vid;
+        const myToken = bgVideoToken;
+        const bgSize  = media.bgSize || 'contain';
+        const useRVFC = typeof vid.requestVideoFrameCallback === 'function';
+        const drawFrame = () => {
+          if (bgVideoToken !== myToken) {
+            vid.pause();
+            if (vid.parentNode) vid.parentNode.removeChild(vid);
+            return;
+          }
+          bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, W, H);
+          if (vid.readyState >= 2) {
+            let scale = bgSize === 'cover'
+              ? Math.max(W / vid.videoWidth, H / vid.videoHeight)
+              : Math.min(W / vid.videoWidth, H / vid.videoHeight);
+            const dw = vid.videoWidth * scale, dh = vid.videoHeight * scale;
+            if (bgBlur > 0) bgCtx.filter = `blur(${bgBlur * norm}px)`;
+            bgCtx.drawImage(vid, (W-dw)/2, (H-dh)/2, dw, dh);
+            bgCtx.filter = 'none';
+          }
+          bgCtx.fillStyle = `rgba(0,0,0,${overlayOpacity})`; bgCtx.fillRect(0, 0, W, H);
+          if (useRVFC) vid.requestVideoFrameCallback(drawFrame);
+          else         currentAnimId = requestAnimationFrame(drawFrame);
+        };
+        if (useRVFC) vid.requestVideoFrameCallback(drawFrame); else drawFrame();
+        renderText(); return;
+      }
+
+      // Static image
+      const img = new Image();
+      img.onload = () => {
+        if (transparentMode) { bgCtx.clearRect(0, 0, W, H); renderText(); return; }
+        bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, W, H);
+        if (bgBlur > 0) bgCtx.filter = `blur(${bgBlur * norm}px)`;
+        drawImageWithSettings(bgCtx, img, W, H, { bgSize: media.bgSize || 'cover', bgPosition: media.bgPosition || 'center' });
+        bgCtx.filter = 'none';
+        applyOverlay(); renderText();
+      };
+      img.onerror = () => {
+        if (transparentMode) { bgCtx.clearRect(0, 0, W, H); } else { bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, W, H); applyOverlay(); }
+        renderText();
+      };
+      img.src = src;
+    }
+
+    // ── Mode handling ──────────────────────────────────────────────────
+    function setMode(mode) {
+      // When blackAsClear is active, black mode is re-mapped to clear so the display
+      // becomes fully transparent instead of filling the screen with black.
+      if (blackAsClear && mode === 'black') mode = 'clear';
+      currentMode = mode;
+      isBlack = mode === 'black';
+      isClear = mode === 'clear';
+      const W = bgCanvas.width, H = bgCanvas.height;
+      if (isBlack) {
+        bgVideoToken++;
+        if (bgVideoEl) { bgVideoEl.pause(); if (bgVideoEl.parentNode) bgVideoEl.parentNode.removeChild(bgVideoEl); bgVideoEl = null; }
+        if (currentAnimId) { cancelAnimationFrame(currentAnimId); currentAnimId = null; }
+        if (textAnimId) { cancelAnimationFrame(textAnimId); textAnimId = null; }
+        prevTextCanvas = null;
+        gifBg.style.display = 'none';
+        bgCtx.fillStyle = '#000'; bgCtx.fillRect(0, 0, W, H);
+        textCtx.clearRect(0, 0, W, H);
+      } else if (isClear) {
+        if (textAnimId) { cancelAnimationFrame(textAnimId); textAnimId = null; }
+        prevTextCanvas = null;
+        // In transparent mode, also clear the background canvas so it becomes truly transparent
+        if (transparentMode) bgCtx.clearRect(0, 0, W, H);
+        textCtx.clearRect(0, 0, W, H);
+      } else {
+        if (currentContent) renderContent(currentContent);
+      }
+    }
+
+    // ── WebSocket connection with auto-reconnect ───────────────────────
+    let ws = null;
+    let reconnectDelay = 500;
+    const MAX_DELAY = 15000;
+
+    function connect() {
+      const wsUrl = `ws://${location.host}`;
+      statusEl.className = 'connecting';
+      statusEl.textContent = 'Connecting...';
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        statusEl.className = 'disconnected';
+        statusEl.textContent = 'Connection failed';
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_DELAY);
+        return;
+      }
+
+      ws.onopen = () => {
+        statusEl.className = 'connected';
+        statusEl.textContent = 'Connected';
+        reconnectDelay = 500;
+        setTimeout(() => {
+          if (statusEl.className === 'connected') statusEl.textContent = '';
+        }, 4000);
+      };
+
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch (e) { return; }
+        if (msg.type === 'content') {
+          isBlack = false; isClear = false;
+          renderContent(msg.data);
+        } else if (msg.type === 'mode') {
+          setMode(msg.mode);
+        } else if (msg.type === 'sync') {
+          // On connect: restore current state
+          if (msg.mode) setMode(msg.mode);
+          if (msg.payload && msg.mode !== 'black') renderContent(msg.payload);
+        }
+      };
+
+      ws.onclose = () => {
+        ws = null;
+        statusEl.className = 'connecting';
+        statusEl.textContent = `Reconnecting in ${(reconnectDelay/1000).toFixed(1)}s...`;
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_DELAY);
+      };
+
+      ws.onerror = () => {};
+    }
+
+    connect();
+  </script>
+</body>
+</html>

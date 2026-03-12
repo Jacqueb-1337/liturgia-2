@@ -1461,11 +1461,15 @@
         clearFx();
       }
 
-      const pad    = W * 0.04;
-      const isDual  = !!(content.secondaryText);
-      const primaryRegionH = isDual ? H * 0.52 : H;
-      const availW = W - pad * 2;
-      const availH = primaryRegionH - pad * 2;
+      const sa         = gl.safeArea || { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
+      const areaLeft   = W * sa.x;
+      const areaTop    = H * sa.y;
+      const areaRight  = areaLeft + W * sa.w;
+      const areaBottom = areaTop  + H * sa.h;
+      const isDual     = !!(content.secondaryText);
+      const primaryBottom = isDual ? H * 0.52 : areaBottom;
+      const availW     = areaRight - areaLeft;
+      const availH     = primaryBottom - areaTop;
       const lhMult = gl.lineHeight       || 1.2;
       const vpos   = gl.verticalPosition || 'center';
       let baseSize = H * 0.08;
@@ -1477,7 +1481,7 @@
         bCtx.fillStyle = numSt.color || '#fff';
         bCtx.textAlign = 'left';
         bCtx.textBaseline = 'top';
-        drawTx(content.number, pad, pad, numSt);
+        drawTx(content.number, areaLeft, areaTop, numSt);
       }
 
       // Main text
@@ -1510,7 +1514,7 @@
 
         const lh = baseSize * lhMult;
         const totalH = lines.length * lh;
-        let startY = vpos === 'top' ? pad : vpos === 'bottom' ? primaryRegionH - pad - totalH : primaryRegionH / 2 - totalH / 2;
+        let startY = vpos === 'top' ? areaTop : vpos === 'bottom' ? primaryBottom - totalH : (areaTop + primaryBottom) / 2 - totalH / 2;
 
         lines.forEach((line, i) => {
           const lineY = startY + i * lh + baseSize / 2;
@@ -1524,7 +1528,7 @@
               bCtx.font = fStr(baseSize, merged); totalW += bCtx.measureText(seg.text).width;
             }
           });
-          let x = textAlign === 'left' ? pad : textAlign === 'right' ? W - pad - totalW : W / 2 - totalW / 2;
+          let x = textAlign === 'left' ? areaLeft : textAlign === 'right' ? areaRight - totalW : W / 2 - totalW / 2;
           bCtx.textBaseline = 'alphabetic';
           line.forEach(seg => {
             if (seg.isNumber) {
@@ -1550,8 +1554,8 @@
         bCtx.font = fStr(baseSize * mult, refSt);
         bCtx.fillStyle = refSt.color || '#fff';
         bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
-        const _refY = isDual ? (primaryRegionH - pad * 0.5) : (H - pad);
-        drawTx(content.reference, W - pad, _refY, refSt);
+        const _refY = isDual ? primaryBottom : areaBottom;
+        drawTx(content.reference, areaRight, _refY, refSt);
       }
 
       // Secondary translation
@@ -1562,13 +1566,13 @@
         bCtx.strokeStyle = refSt.color || '#fff';
         bCtx.lineWidth = 1;
         bCtx.beginPath();
-        bCtx.moveTo(pad, dividerY);
-        bCtx.lineTo(W - pad, dividerY);
+        bCtx.moveTo(areaLeft, dividerY);
+        bCtx.lineTo(areaRight, dividerY);
         bCtx.stroke();
         bCtx.restore();
 
-        const secAreaTop = dividerY + pad * 0.5;
-        const secAreaH = H - secAreaTop - pad * 0.5;
+        const secAreaTop = dividerY + areaTop * 0.5;
+        const secAreaH   = areaBottom - secAreaTop;
 
         if (content.secondaryRef) {
           const secRefMult = (refSt.sizeMultiplier || 0.7) * 0.8;
@@ -1576,7 +1580,7 @@
           bCtx.fillStyle = refSt.color || '#fff';
           bCtx.textAlign = 'right'; bCtx.textBaseline = 'alphabetic';
           bCtx.globalAlpha = 0.7;
-          drawTx(content.secondaryRef, W - pad, H - pad * 0.5, refSt);
+          drawTx(content.secondaryRef, areaRight, areaBottom, refSt);
           bCtx.globalAlpha = 1.0;
         }
 
@@ -1622,7 +1626,7 @@
                 bCtx.font = fStr(secSize, merged); totalW += bCtx.measureText(seg.text).width;
               }
             });
-            let x = secTextAlign === 'left' ? pad : secTextAlign === 'right' ? W - pad - totalW : W / 2 - totalW / 2;
+            let x = secTextAlign === 'left' ? areaLeft : secTextAlign === 'right' ? areaRight - totalW : W / 2 - totalW / 2;
             bCtx.textBaseline = 'alphabetic';
             line.forEach(seg => {
               if (seg.isNumber) {

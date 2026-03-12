@@ -1453,7 +1453,12 @@
         state.liveRms = state.liveRms * 0.84 + rms * 0.16;
         if (rms >= CFG.speechThreshold) state.lastSpeechAt = Date.now();
 
-        sendSidecarAudio(chunk);
+        // Gate audio sent to Vosk: only send during active speech + hold window.
+        // Sending silence/noise causes Vosk to hallucinate short words (e.g. book
+        // abbreviations like Hag/Heb/Hab) from the biased grammar word list.
+        const inSpeechWindow = state.liveRms >= CFG.speechFloorForDecode ||
+                               (Date.now() - state.lastSpeechAt) < CFG.speechHoldMs;
+        if (inSpeechWindow) sendSidecarAudio(chunk);
       };
     }
 

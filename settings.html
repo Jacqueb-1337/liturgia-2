@@ -676,7 +676,7 @@
     <div class="sidebar">
       <button class="active" data-panel="general">General</button>
       <button data-panel="display">Display</button>
-      <button data-panel="ai">AI Features</button>
+      <button data-panel="ai">Speech Recognition</button>
       <button data-panel="about">About</button>
       <button data-panel="relay">Cloud Relay</button>
       <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
@@ -743,23 +743,23 @@
         <span class="save-status" data-panel="about"></span>
       </div>
       <div class="settings-panel" id="panel-ai">
-        <h2>AI Features</h2>
+        <h2>Speech Recognition</h2>
         <p class="muted-text">All speech recognition and verse suggestions run locally via the bundled Vosk sidecar. Use this tab to monitor the backend, switch models, and test your microphone.</p>
         <div class="ai-enable-row">
           <label class="toggle-label">
             <input id="ai-enable-toggle" type="checkbox" />
             <span class="toggle-ui"></span>
-            Enable AI speech assistant
+            Enable speech recognition
           </label>
           <span id="ai-enable-status" class="ai-enable-status muted-text">Checking…</span>
         </div>
         <div class="ai-enable-note muted-text">Disabling stops the speech sidecar, microphone meter, and live verse suggestions.</div>
-        <div id="ai-runtime-missing" class="ai-warning">Desktop runtime bridge unavailable. Re-open Settings from the main Liturgia window to manage AI features.</div>
+        <div id="ai-runtime-missing" class="ai-warning">Desktop runtime bridge unavailable. Re-open Settings from the main Liturgia window to manage speech recognition.</div>
         
         <!-- Python Requirement Warning -->
         <div id="ai-python-missing" class="ai-warning" style="display: none;">
           <div style="margin-bottom: 8px;">
-            <strong>Python 3.7+ is required for AI features</strong>
+            <strong>Python 3.7+ is required for speech recognition</strong>
           </div>
           <div class="muted-text" style="margin-bottom: 12px; font-size: 0.9em;">
             The speech recognition backend depends on Python and libraries (vosk, websockets, numpy) that are not bundled with Liturgia.

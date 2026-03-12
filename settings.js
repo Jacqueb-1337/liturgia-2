@@ -154,12 +154,19 @@ window.addEventListener('DOMContentLoaded', () => {
             const email = (license.email) || (license.token_payload && license.token_payload.email) || (license.user_row && license.user_row.email) || null;
             let displayEmail = email;
             if (!displayEmail) {
-              // Try to read mirrored token from settings as a fallback
+              // Try settings-mirrored token first, then secure storage
               try {
                 const s = await ipcRenderer.invoke('load-settings');
                 if (s && s.auth && s.auth.token) {
                   const p = decodeJwtPayload(s.auth.token);
                   if (p && p.email) displayEmail = p.email;
+                }
+                if (!displayEmail) {
+                  const secTok = await ipcRenderer.invoke('secure-get-token');
+                  if (secTok) {
+                    const p = decodeJwtPayload(secTok);
+                    if (p && (p.email || p.sub)) displayEmail = p.email || p.sub;
+                  }
                 }
               } catch (e) { /* ignore */ }
             }
@@ -1688,6 +1695,13 @@ document.getElementById('close-live-window').addEventListener('click', async () 
             const p = decodeJwtPayload(s.auth.token);
             if (p && p.email) displayEmail = p.email;
           }
+          if (!displayEmail) {
+            const secTok = await ipcRenderer.invoke('secure-get-token');
+            if (secTok) {
+              const p = decodeJwtPayload(secTok);
+              if (p && (p.email || p.sub)) displayEmail = p.email || p.sub;
+            }
+          }
         } catch (e) {}
       }
       ai.textContent = displayEmail || 'Signed in';
@@ -2276,6 +2290,7 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
     const isDark = document.body.classList.contains('dark-theme');
     ipcRenderer.send('open-style-window', {
       previewStyles: ds.perDisplayStyles ? { ...ds.perDisplayStyles } : (s && s.previewStyles ? { ...s.previewStyles } : {}),
+      globalStyles: s && s.previewStyles ? { ...s.previewStyles } : {},
       content: content,
       darkMode: isDark,
       bgSnapshot: null,

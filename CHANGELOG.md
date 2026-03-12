@@ -1,5 +1,16 @@
 # Changelog
 
+## 5.0.0 - 2026-03-12
+
+- feat: style editor — draggable safe-area overlay on canvas preview; resize from any edge or corner, move by dragging interior
+- feat: style editor — per-section sync-from-global (↻) and reset-to-defaults (↺) buttons for per-display overrides
+- feat: style editor — song inline-lyrics toggle collapses line breaks into a single flowing block
+- fix: style editor — per-display preview no longer shows a black canvas when opened without active live content; displays placeholder text instead
+- feat: network display now respects the safe area setting; text no longer overflows when safe area is adjusted
+- fix: relay heartbeat re-registers session automatically on 404 (session expired) instead of looping in failure
+- fix: speech recognition noise gate (JS + Python RMS) prevents Vosk from hallucinating Bible book abbreviations (Hag, Heb, Hab) from microphone silence
+- refactor: all user-facing "AI" labels renamed to "Speech Recognition" (settings panel, toggles, status messages)
+
 ## 4.2.1 - 2026-03-10
 
 - fix: verse overlay/ghosting on live display — backgroundsEqual now returns true when both contents have no background, preventing spurious crossfade

@@ -96,7 +96,7 @@ function applyDynamicBibleMeta() {
 }
 
 const desktopRuntime = (typeof window !== 'undefined') ? window.desktopRuntime : null;
-const AI_HINT_MESSAGE = 'Live suggestions will appear once Liturgia hears you.';
+const AI_HINT_MESSAGE = 'Verse suggestions will appear once Liturgia hears you.';
 const aiSuggestionState = { 
   enabled: true, 
   disposers: [], 
@@ -605,7 +605,7 @@ function initAiSuggestionPanel() {
 
   if (!desktopRuntime || typeof desktopRuntime.onSuggestions !== 'function') {
     panel.classList.add('ai-suggestion-panel-disabled');
-    if (ui.subtitle) ui.subtitle.textContent = 'Speech runtime unavailable in this window.';
+    if (ui.subtitle) ui.subtitle.textContent = 'Speech recognition unavailable in this window.';
     if (ui.pill) {
       ui.pill.textContent = 'Unavailable';
       ui.pill.classList.add('tone-err');
@@ -657,7 +657,7 @@ function initAiSuggestionPanel() {
       } else if (status.statusMessage) {
         ui.subtitle.textContent = status.statusMessage.replace(/-/g, ' ');
       } else {
-        ui.subtitle.textContent = 'Speech assistant warming up…';
+        ui.subtitle.textContent = 'Speech recognition warming up…';
       }
     }
   };
@@ -764,7 +764,14 @@ ipcRenderer.on('songs-imported', (event, info) => {
   const total  = info && info.totalFound ? info.totalFound : 0;
   const source = (info && info.source) || 'easyworship';
   const label  = source === 'videopsalm' ? 'VideoPsalm' : 'EasyWorship';
-  alert(`${label} import complete: found ${total} song(s), imported ${added} new song(s).`);
+  // Use a non-blocking in-app toast instead of alert() — native alert() causes
+  // Electron on Windows to lose pointer focus on the BrowserWindow, making the
+  // UI unresponsive until the app is restarted.
+  const _t = document.createElement('div');
+  _t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0078d4;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;';
+  _t.textContent = `${label}: found ${total} song(s), imported ${added} new song(s).`;
+  document.body.appendChild(_t);
+  setTimeout(() => { try { document.body.removeChild(_t); } catch (e) {} }, 4000);
   // Refresh songs list from disk
   loadSongs();
 });
@@ -895,7 +902,7 @@ function parseCanvasStyleFromB64(b64) {
 }
 
 function parseGlobalStyleFromB64(b64) {
-  const def = { overlayOpacity: 0.4, bgBlur: 0, lineHeight: 1.2, verticalPosition: 'center' };
+  const def = { overlayOpacity: 0.4, bgBlur: 0, lineHeight: 1.2, verticalPosition: 'center', safeArea: { x: 0.04, y: 0.04, w: 0.92, h: 0.92 }, songInline: false };
   if (!b64) return def;
   try {
     const css = decodeURIComponent(escape(atob(b64)));
@@ -906,6 +913,13 @@ function parseGlobalStyleFromB64(b64) {
       bgBlur:           getN(/bg-blur\s*:\s*([\d.]+)/i, 0),
       lineHeight:       getN(/line-height\s*:\s*([\d.]+)/i, 1.2),
       verticalPosition: getS(/vertical-position\s*:\s*([^;]+)/i, 'center'),
+      safeArea: {
+        x: getN(/safe-area-x\s*:\s*([\d.]+)/i, 0.04),
+        y: getN(/safe-area-y\s*:\s*([\d.]+)/i, 0.04),
+        w: getN(/safe-area-w\s*:\s*([\d.]+)/i, 0.92),
+        h: getN(/safe-area-h\s*:\s*([\d.]+)/i, 0.92),
+      },
+      songInline: /song-inline\s*:\s*1/.test(css),
     };
   } catch { return def; }
 }
@@ -2589,9 +2603,20 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
 
     const isDual = !!(content.secondaryText);
     const primaryRegionH = isDual ? displayHeight * 0.52 : displayHeight;
-    const padding = displayWidth * 0.04;
-    const availableWidth  = displayWidth  - padding * 2;
-    const availableHeight = primaryRegionH - padding * 2;
+    const _sa = globalStyle.safeArea || {};
+    const _saX = _sa.x !== undefined ? _sa.x : 0.04;
+    const _saY = _sa.y !== undefined ? _sa.y : 0.04;
+    const _saW = _sa.w !== undefined ? _sa.w : 0.92;
+    const _saH = _sa.h !== undefined ? _sa.h : 0.92;
+    const areaLeft   = displayWidth  * _saX;
+    const areaTop    = displayHeight * _saY;
+    const areaRight  = areaLeft + displayWidth  * _saW;
+    const areaBottom = areaTop  + displayHeight * _saH;
+    const areaWidth  = displayWidth  * _saW;
+    const areaHeight = displayHeight * _saH;
+    const padding = areaLeft; // legacy alias for secondary section
+    const availableWidth  = areaWidth;
+    const availableHeight = isDual ? primaryRegionH - areaTop * 2 : areaHeight;
     let baseFontSize = displayHeight * 0.08;
 
     const lhMult  = globalStyle.lineHeight        || 1.2;
@@ -2640,7 +2665,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       ctx.fillStyle  = (numberStyle && numberStyle.color) || '#fff';
       ctx.textAlign  = 'left';
       ctx.textBaseline = 'top';
-      drawTextEx(content.number, padding, padding, numberStyle);
+      drawTextEx(content.number, areaLeft, areaTop, numberStyle);
     }
 
     // ── Main text ──────────────────────────────────────────────────────
@@ -2653,7 +2678,10 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       if ('letterSpacing' in ctx)
         ctx.letterSpacing = (textStyle && textStyle.letterSpacing) ? `${textStyle.letterSpacing * _normScale}px` : '0px';
 
-      const textLines = content.text.split('\n');
+      const _rawText = (content.type === 'song' && globalStyle.songInline)
+        ? (content.text || '').replace(/\n+/g, ' ').trim()
+        : content.text;
+      const textLines = _rawText.split('\n');
 
       function buildLines(size) {
         ctx.font = fontStr(size, textStyle);
@@ -2679,7 +2707,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
 
       const lineHeight  = baseFontSize * lhMult;
       const totalHeight = lines.length * lineHeight;
-      let startY = vpos === 'top' ? padding : vpos === 'bottom' ? primaryRegionH - padding - totalHeight : primaryRegionH / 2 - totalHeight / 2;
+      let startY = vpos === 'top' ? areaTop : vpos === 'bottom' ? areaBottom - totalHeight : (isDual ? primaryRegionH / 2 - totalHeight / 2 : areaTop + areaHeight / 2 - totalHeight / 2);
 
       lines.forEach((line, i) => {
         const lineY = startY + i * lineHeight + baseFontSize / 2;
@@ -2695,7 +2723,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
             totalW += ctx.measureText(seg.text).width;
           }
         });
-        let x = textAlign === 'left' ? padding : textAlign === 'right' ? displayWidth - padding - totalW : displayWidth / 2 - totalW / 2;
+        let x = textAlign === 'left' ? areaLeft : textAlign === 'right' ? areaRight - totalW : areaLeft + areaWidth / 2 - totalW / 2;
 
         ctx.textBaseline = 'alphabetic';
         line.forEach(seg => {
@@ -2730,16 +2758,16 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'alphabetic';
-      const _refY = isDual ? (primaryRegionH - padding * 0.5) : (displayHeight - padding);
-      drawTextEx(content.reference, displayWidth - padding, _refY, referenceStyle);
+      const _refY = isDual ? (primaryRegionH - areaTop * 0.5) : areaBottom;
+      drawTextEx(content.reference, areaRight, _refY, referenceStyle);
     }
 
     // ── Hint ──────────────────────────────────────────────────────────
     if (content.showHint) {
       ctx.font = fontStr(baseFontSize * 0.6, null);
       ctx.fillStyle = '#ddd'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-      const _hintY = isDual ? (primaryRegionH - padding * 0.5) : (displayHeight - padding);
-      ctx.fillText(content.showHint, displayWidth - padding, _hintY - baseFontSize * 1.1);
+      const _hintY = isDual ? (primaryRegionH - areaTop * 0.5) : areaBottom;
+      ctx.fillText(content.showHint, areaRight, _hintY - baseFontSize * 1.1);
     }
 
     // ── Secondary translation ──────────────────────────────────────────
@@ -2750,8 +2778,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
       ctx.strokeStyle = (referenceStyle && referenceStyle.color) || '#fff';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(padding, dividerY);
-      ctx.lineTo(displayWidth - padding, dividerY);
+      ctx.moveTo(areaLeft, dividerY);
+      ctx.lineTo(areaRight, dividerY);
       ctx.stroke();
       ctx.restore();
 
@@ -2765,7 +2793,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
         ctx.textAlign = 'right';
         ctx.textBaseline = 'alphabetic';
         ctx.globalAlpha = 0.7;
-        drawTextEx(content.secondaryRef, displayWidth - padding, displayHeight - padding * 0.5, referenceStyle);
+        drawTextEx(content.secondaryRef, areaRight, areaBottom, referenceStyle);
         ctx.globalAlpha = 1.0;
       }
 
@@ -2812,7 +2840,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
               totalW += ctx.measureText(seg.text).width;
             }
           });
-          let x = secTextAlign === 'left' ? padding : secTextAlign === 'right' ? displayWidth - padding - totalW : displayWidth / 2 - totalW / 2;
+          let x = secTextAlign === 'left' ? areaLeft : secTextAlign === 'right' ? areaRight - totalW : areaLeft + areaWidth / 2 - totalW / 2;
           ctx.textBaseline = 'alphabetic';
           line.forEach(seg => {
             if (seg.isNumber) {
@@ -3196,6 +3224,7 @@ async function updateLive(verseOrIndices) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
     const styles = getCanvasStylesFor('verse');
     window.currentContent = {
+      type: 'verse',
       number: numberText,
       text: textContent,
       reference: refText,
@@ -3991,6 +4020,13 @@ async function validateTokenAndActivate(token, serverUrl) {
       try { console.info('runCheck: license-status response', j); } catch(e) {}
       // Mark as authoritative server response
       try { j.source = j.source || 'server'; } catch(e) {}
+      // If server didn't return email, decode it from JWT locally
+      if (!j.email) {
+        try {
+          const payload = decodeJwtPayload(token);
+          if (payload && (payload.email || payload.sub)) j.email = payload.email || payload.sub;
+        } catch(e) { /* ignore */ }
+      }
       // Broadcast license status to main->live window
       ipcRenderer.send('license-status-update', j);
       // Update fixed founder immediately in this renderer (avoid timing race)
@@ -4066,13 +4102,14 @@ async function ensureAuthSetup() {
       return; // proceed
     }
     
-    // Don't clear token on server errors (5xx) - keep it for retry
+    // Don't clear token on server errors (5xx) or network errors (offline) - keep it for retry
     const reason = result && result.reason ? result.reason : '';
     const isServerError = reason && reason.match(/^http-5/);  // 500-599 errors
+    const isNetworkError = reason === 'error' || reason === 'no-server';  // fetch threw (offline, DNS failure, etc.)
     
-    if (isServerError) {
-      // Server error - don't clear the valid token, just mark license inactive and proceed with app
-      console.warn('License server error (' + reason + '), proceeding without active license');
+    if (isServerError || isNetworkError) {
+      // Server unreachable or network error - don't clear the valid token, proceed with app
+      console.warn('License check failed (' + reason + '), proceeding offline without active license verification');
       scheduleLicensePolling();
       return;
     }
@@ -5357,9 +5394,11 @@ async function loadSongs() {
     renderSongList(allSongs);
     populateHymnalFilter();
     
-    // Add scroll handler for virtual scrolling
+    // Add scroll handler for virtual scrolling — guard against duplicate
+    // registrations since loadSongs() is called after every import.
     const songListContainer = document.getElementById('song-list');
-    if (songListContainer) {
+    if (songListContainer && !songListContainer._scrollHandlerAdded) {
+      songListContainer._scrollHandlerAdded = true;
       songListContainer.addEventListener('scroll', () => {
         // Re-render with current filtered state (preserve search results)
         renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
@@ -5669,6 +5708,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
     const styles = getCanvasStylesFor('song');
     window.currentContent = {
+      type: 'song',
       number: '',
       text: verseData.text,
       reference: `${verseData.title} - ${verseData.section}`,
@@ -6377,10 +6417,18 @@ async function processSongImportFiles(files) {
             renderSongList(allSongs);
             populateHymnalFilter();
           } catch {}
-          alert(`EasyWorship database: found ${result.total} song(s), imported ${result.added} new song(s).`);
+          const _ti = document.createElement('div');
+          _ti.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0078d4;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;';
+          _ti.textContent = `EasyWorship: found ${result.total} song(s), imported ${result.added} new song(s).`;
+          document.body.appendChild(_ti);
+          setTimeout(() => { try { document.body.removeChild(_ti); } catch (e) {} }, 4000);
         } else {
           if (result && result.error) console.warn('[import-ew-db-file]', result.error);
-          alert(`No new songs found in ${fileName}${result ? ` (${result.total} found, all duplicates)` : ''}.`);
+          const _ti2 = document.createElement('div');
+          _ti2.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#555;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;';
+          _ti2.textContent = `No new songs found in ${fileName}${result ? ` (${result.total} found, all duplicates)` : ''}.`;
+          document.body.appendChild(_ti2);
+          setTimeout(() => { try { document.body.removeChild(_ti2); } catch (e) {} }, 4000);
         }
         continue; // already saved — skip the shared save below
 

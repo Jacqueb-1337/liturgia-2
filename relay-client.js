@@ -115,9 +115,15 @@ class RelayClient extends EventEmitter {
         this.request('POST', '/heartbeat.php', {
           token: this.token,
           session_id: this.sessionId
-        }).catch(err => {
-          console.warn('[relay] Heartbeat failed:', err.message);
-          // Don't treat heartbeat failure as fatal - could be network hiccup
+        }, 10000, true).catch(err => {
+          // If session expired on the server, re-register to get a new session
+          if (err.message && (err.message.includes('Session not found') || err.message.includes('HTTP 404'))) {
+            console.warn('[relay] Session expired, re-registering...');
+            this.sessionId = null;
+            this.register().catch(e => console.warn('[relay] Re-registration failed:', e.message));
+          } else {
+            console.warn('[relay] Heartbeat failed:', err.message);
+          }
         });
       }
     }, 30000);
@@ -175,7 +181,7 @@ class RelayClient extends EventEmitter {
     this.emit('disconnected');
   }
 
-  async request(method, path, data = null, timeout = 10000) {
+  async request(method, path, data = null, timeout = 10000, quiet = false) {
     return new Promise((resolve, reject) => {
       const url = new URL(this.relayUrl + path);
       const isHttps = url.protocol === 'https:';
@@ -202,7 +208,10 @@ class RelayClient extends EventEmitter {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(json);
             } else {
-              console.error('[relay] Request failed:', {
+              // Use warn (not error) for quiet callers like heartbeat so these
+              // expected failures don't trigger the error-report-prompt toast.
+              const log = quiet ? console.warn : console.error;
+              log('[relay] Request failed:', {
                 status: res.statusCode,
                 path: path,
                 response: json
