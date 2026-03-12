@@ -736,6 +736,7 @@ let secondaryBibleFile = null;    // secondary translation filename
 let secondaryVerseMap = new Map(); // key → {key, text} for fast lookup
 let dualTranslationEnabled = false;
 let previewStyles = { verseNumber: '', verseText: '', verseReference: '', verseSubscript: '' };
+let cachedDisplaySettings = {}; // Cache of settings.displaySettings for per-display style overrides
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
@@ -795,6 +796,9 @@ async function loadAndApplySettings() {
   if (settings && settings.previewStyles) {
     previewStyles = settings.previewStyles;
     applyPreviewStyles();
+  }
+  if (settings && settings.displaySettings) {
+    cachedDisplaySettings = settings.displaySettings;
   }
   // Load keybinds with defaults
   const defaultKeybinds = {
@@ -924,6 +928,32 @@ function getCanvasStylesFor(type) {
   return map;
 }
 
+// Build a { [displayId]: parsedStyles } map for per-display style overrides.
+// Returns null if no display has per-display styles enabled.
+function getPerDisplayStyleOverrides(type) {
+  const overrides = {};
+  for (const [displayId, ds] of Object.entries(cachedDisplaySettings)) {
+    if (!ds || !ds.perDisplayStylesEnabled || !ds.perDisplayStyles) continue;
+    const raw = ds.perDisplayStyles;
+    const parsed = {};
+    if (type === 'verse') {
+      if (raw.verseText)      parsed.text      = parseCanvasStyleFromB64(raw.verseText);
+      if (raw.verseNumber)    parsed.number    = parseCanvasStyleFromB64(raw.verseNumber);
+      if (raw.verseReference) parsed.reference = parseCanvasStyleFromB64(raw.verseReference);
+      if (raw.verseSubscript) parsed.subscript = parseCanvasStyleFromB64(raw.verseSubscript);
+    } else {
+      const t = raw.songText      || raw.verseText;
+      const r = raw.songReference || raw.verseReference;
+      if (t) parsed.text      = parseCanvasStyleFromB64(t);
+      if (r) parsed.reference = parseCanvasStyleFromB64(r);
+      if (raw.verseSubscript) parsed.subscript = parseCanvasStyleFromB64(raw.verseSubscript);
+    }
+    if (raw.global) parsed.global = parseGlobalStyleFromB64(raw.global);
+    if (Object.keys(parsed).length > 0) overrides[String(displayId)] = parsed;
+  }
+  return Object.keys(overrides).length > 0 ? overrides : null;
+}
+
 // -----------------------------------------------------------------------
 // Text Styling Modal
 // -----------------------------------------------------------------------
@@ -988,6 +1018,8 @@ function rerenderPreviewForStyles() {
   // Also update the live canvas (right preview) and push to the actual live window
   if (window.currentContent) {
     const updatedLive = { ...window.currentContent, styles: newStyles };
+    const _displayStyleOverrides = getPerDisplayStyleOverrides(type);
+    if (_displayStyleOverrides) updatedLive._displayStyleOverrides = _displayStyleOverrides;
     const liveCanvas = document.getElementById('live-canvas');
     if (liveCanvas) {
       if (blackMode) {
@@ -1047,12 +1079,22 @@ function setupTextStyleModal() {
   ipcRenderer.on('styles-updated', (event, newStyles) => {
     // Full replacement for the keys the style window manages —
     // clear them first so a Reset All (which sends {}) correctly removes overrides.
-    ['verseText', 'verseNumber', 'verseSubscript', 'verseReference', 'global'].forEach(k => delete previewStyles[k]);
+    ['verseText', 'verseNumber', 'verseSubscript', 'verseReference', 'songText', 'songTitle', 'songReference', 'global'].forEach(k => delete previewStyles[k]);
     Object.keys(newStyles).forEach(k => {
       if (newStyles[k]) previewStyles[k] = newStyles[k];
     });
     applyPreviewStyles();
     rerenderPreviewForStyles();
+  });
+
+  ipcRenderer.on('display-styles-updated', (event, { displayId, styles }) => {
+    cachedDisplaySettings[String(displayId)] = cachedDisplaySettings[String(displayId)] || {};
+    cachedDisplaySettings[String(displayId)].perDisplayStyles = styles;
+  });
+
+  ipcRenderer.on('display-setting-changed', (event, { displayId, key, value }) => {
+    cachedDisplaySettings[String(displayId)] = cachedDisplaySettings[String(displayId)] || {};
+    cachedDisplaySettings[String(displayId)][key] = value;
   });
 }
 
@@ -1688,7 +1730,59 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Listen for report requests from main and prepare renderer payload
-  ipcRenderer.on('prepare-renderer-report', async () => {
+  // Show a non-blocking toast when main process detects errors
+ipcRenderer.on('error-report-prompt', (event, data) => {
+  // De-duplicate: only one toast per session
+  if (document.getElementById('_err-report-toast')) return;
+
+  // Prefer errors passed from main process; fall back to renderer's own log
+  const passedErrors = data && Array.isArray(data.errors) && data.errors.length ? data.errors : null;
+  const rendererErrors = (window.appLogs || []).filter(l => l.level === 'error').map(l => `[${l.ts}] ${l.msg}`);
+  const allErrors = passedErrors || rendererErrors;
+  const errorText = allErrors.length ? allErrors.join('\n') : '(no error details captured)';
+
+  const toast = document.createElement('div');
+  toast.id = '_err-report-toast';
+  toast.style.cssText = [
+    'position:fixed', 'bottom:20px', 'right:20px', 'z-index:9999',
+    'border:1px solid #c0392b', 'border-radius:8px', 'padding:16px 18px',
+    'box-shadow:0 4px 24px rgba(0,0,0,0.45)', 'max-width:360px',
+    'backdrop-filter:blur(12px)', '-webkit-backdrop-filter:blur(12px)'
+  ].join(';');
+  toast.className = 'song-editor-panel'; // inherits theming (dark/light)
+  toast.innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px;color:#e74c3c;">Errors detected</div>
+    <div style="font-size:0.9em;margin-bottom:8px;">One or more errors occurred. Save a diagnostic report to share with support?</div>
+    <div style="margin-bottom:10px;">
+      <button id="_err-toggle" style="background:none;border:none;padding:0;font-size:0.8em;cursor:pointer;color:#e74c3c;text-decoration:underline;">Show errors</button>
+      <pre id="_err-detail" style="display:none;margin-top:6px;font-size:0.75em;line-height:1.5;white-space:pre-wrap;word-break:break-all;overflow-y:auto;max-height:110px;background:rgba(0,0,0,0.2);border-radius:4px;padding:6px 8px;"></pre>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button id="_err-dismiss" class="btn">Dismiss</button>
+      <button id="_err-save" class="btn" style="background:#c0392b;color:#fff;">Save Report</button>
+    </div>
+  `;
+  document.body.appendChild(toast);
+
+  // Populate error text safely without innerHTML injection
+  toast.querySelector('#_err-detail').textContent = errorText;
+
+  let detailVisible = false;
+  toast.querySelector('#_err-toggle').addEventListener('click', () => {
+    detailVisible = !detailVisible;
+    toast.querySelector('#_err-detail').style.display = detailVisible ? 'block' : 'none';
+    toast.querySelector('#_err-toggle').textContent = detailVisible ? 'Hide errors' : 'Show errors';
+  });
+
+  const remove = () => { try { document.body.removeChild(toast); } catch (e) {} };
+  toast.querySelector('#_err-dismiss').addEventListener('click', remove);
+  toast.querySelector('#_err-save').addEventListener('click', async () => {
+    remove();
+    try { await ipcRenderer.invoke('trigger-save-report'); } catch (e) { console.error('Failed to trigger save report:', e); }
+  });
+});
+
+ipcRenderer.on('prepare-renderer-report', async () => {
     try {
       const docHtml = document.documentElement.outerHTML;
       const previewCanvas = document.getElementById('preview-canvas');
@@ -3150,6 +3244,7 @@ async function updateLive(verseOrIndices) {
     totalSelected: indices.length,
     backgroundMedia: backgroundMedia,
     styles: getCanvasStylesFor('verse'),
+    _displayStyleOverrides: getPerDisplayStyleOverrides('verse') || undefined,
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out'],
     ..._liveSec
@@ -5595,6 +5690,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     totalSelected: 1,
     backgroundMedia: backgroundMedia,
     styles: getCanvasStylesFor('song'),
+    _displayStyleOverrides: getPerDisplayStyleOverrides('song') || undefined,
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   });

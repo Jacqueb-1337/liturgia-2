@@ -24,5 +24,12 @@ contextBridge.exposeInMainWorld('desktopRuntime', {
     return () => ipcRenderer.removeListener('ai:suggestions', listener);
   },
   setAiEnabled: (enabled) => ipcRenderer.invoke('ai:set-enabled', !!enabled),
-  getAiEnabled: () => ipcRenderer.invoke('ai:get-enabled')
+  getAiEnabled: () => ipcRenderer.invoke('ai:get-enabled'),
+  onPrepareReport: (handler) => {
+    if (typeof handler !== 'function') return () => {};
+    const listener = (_e) => handler();
+    ipcRenderer.on('prepare-speech-report', listener);
+    return () => ipcRenderer.removeListener('prepare-speech-report', listener);
+  },
+  sendReport: (payload) => ipcRenderer.send('speech-report', payload)
 });

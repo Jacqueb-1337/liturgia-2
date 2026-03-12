@@ -1,11 +1,12 @@
 {
   "name": "liturgia",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "author": "Jacqueb <contact@jacqueb.me>",
   "main": "main.js",
   "description": "Liturgia — presentation software",
   "scripts": {
     "start": "electron .",
+    "dev": "set NODE_ENV=development && electron .",
     "prebuild": "node scripts/clean-old-exe.js",
     "postinstall": "electron-builder install-app-deps",
     "build": "electron-builder",

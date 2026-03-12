@@ -37,6 +37,13 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 13px; }
 
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.25); border-radius: 6px; border: 2px solid var(--bg); background-clip: content-box; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(0,120,212,0.55); background-clip: content-box; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+
     body {
       background: var(--bg);
       color: var(--text);
@@ -70,10 +77,9 @@
     }
 
     .style-section {
-      border-bottom: 1px solid var(--separator);
-      padding: 7px 0 9px;
+      padding: 0 0 10px;
+      margin-bottom: 4px;
     }
-    .style-section:last-child { border-bottom: none; }
 
     .style-section-title {
       font-size: 10px;
@@ -81,7 +87,14 @@
       text-transform: uppercase;
       letter-spacing: 0.07em;
       color: var(--section-label);
-      margin-bottom: 5px;
+      background: var(--separator);
+      border-left: 3px solid var(--accent);
+      padding: 4px 7px;
+      margin: 0 -10px 6px;
+      display: block;
+    }
+    body.dark .style-section-title {
+      background: rgba(255,255,255,0.05);
     }
 
     .style-row {
@@ -262,6 +275,28 @@
     }
     .font-opt:hover { background: var(--hover); border-color: var(--input-border); }
     .font-opt.active { border-color: var(--accent); background: rgba(0,120,212,0.1); }
+
+    /* Tabs */
+    .sw-tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--separator);
+      margin: 4px -10px 0;
+      padding: 0 10px;
+    }
+    .sw-tab {
+      padding: 5px 12px;
+      font-size: 12px;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      margin-bottom: -1px;
+    }
+    .sw-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .sw-tab:hover:not(.active) { color: var(--text); }
+    .sw-tab-panel { display: none; }
+    .sw-tab-panel.active { display: block; }
   </style>
 </head>
 <body>
@@ -312,6 +347,14 @@
         </div>
       </div>
     </div>
+
+    <!-- Tab bar -->
+    <div class="sw-tab-bar">
+      <button class="sw-tab active" data-tab="verses">Verses</button>
+      <button class="sw-tab" data-tab="songs">Songs</button>
+    </div>
+
+    <div id="tab-verses" class="sw-tab-panel active">
 
     <!-- Main Text -->
     <div class="style-section">
@@ -575,6 +618,159 @@
       </div>
     </div>
 
+    </div><!-- /tab-verses -->
+
+    <div id="tab-songs" class="sw-tab-panel">
+
+      <!-- Song Text (Lyrics) -->
+      <div class="style-section">
+        <div class="style-section-title">Song Text (Lyrics)</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-text-color" value="#ffffff">
+          </div>
+          <div class="style-field">
+            <label>Font</label>
+            <button class="btn-font" id="sg-text-font-btn">Arial</button>
+            <input type="hidden" id="sg-text-font" value="Arial">
+          </div>
+          <button class="btn-toggle" id="sg-text-bold" title="Bold"><b>B</b></button>
+          <button class="btn-toggle" id="sg-text-italic" title="Italic"><em>I</em></button>
+        </div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Align</label>
+            <div class="align-group">
+              <button class="btn-toggle" id="sg-text-align-left" data-val="left">L</button>
+              <button class="btn-toggle active" id="sg-text-align-center" data-val="center">C</button>
+              <button class="btn-toggle" id="sg-text-align-right" data-val="right">R</button>
+            </div>
+          </div>
+          <div class="style-field">
+            <label>Spc</label>
+            <select id="sg-text-letterspacing">
+              <option value="0">Default</option>
+              <option value="1">+1px</option>
+              <option value="2">+2px</option>
+              <option value="3">+3px</option>
+              <option value="5">+5px</option>
+              <option value="8">+8px</option>
+            </select>
+          </div>
+        </div>
+        <div class="sub-label">Shadow</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-text-shadow-color" value="#000000">
+          </div>
+          <div class="style-field">
+            <label>Blur</label>
+            <input type="range" id="sg-text-shadow-blur" min="0" max="30" step="1" value="0">
+            <span class="range-val" id="sg-text-shadow-blur-val">0</span>
+          </div>
+          <div class="style-field">
+            <label>X</label>
+            <input type="range" id="sg-text-shadow-x" min="-20" max="20" step="1" value="0">
+            <span class="range-val" id="sg-text-shadow-x-val">0</span>
+          </div>
+          <div class="style-field">
+            <label>Y</label>
+            <input type="range" id="sg-text-shadow-y" min="-20" max="20" step="1" value="0">
+            <span class="range-val" id="sg-text-shadow-y-val">0</span>
+          </div>
+        </div>
+        <div class="sub-label">Outline</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-text-stroke-color" value="#000000">
+          </div>
+          <div class="style-field">
+            <label>Width</label>
+            <select id="sg-text-stroke-width">
+              <option value="0">None</option>
+              <option value="1">1px</option>
+              <option value="2">2px</option>
+              <option value="3">3px</option>
+              <option value="4">4px</option>
+              <option value="6">6px</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Song Reference (Title + Section at bottom) -->
+      <div class="style-section">
+        <div class="style-section-title">Song Reference (bottom-right)</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-reference-color" value="#ffffff">
+          </div>
+          <div class="style-field">
+            <label>Size</label>
+            <select id="sg-reference-size">
+              <option value="">Default</option>
+              <option value="0.45em">Small</option>
+              <option value="0.6em">Medium</option>
+              <option value="0.75em">Large</option>
+              <option value="0.9em">X-Large</option>
+            </select>
+          </div>
+          <div class="style-field">
+            <label>Font</label>
+            <button class="btn-font" id="sg-reference-font-btn">Arial</button>
+            <input type="hidden" id="sg-reference-font" value="Arial">
+          </div>
+          <button class="btn-toggle" id="sg-reference-bold" title="Bold"><b>B</b></button>
+          <button class="btn-toggle" id="sg-reference-italic" title="Italic"><em>I</em></button>
+        </div>
+        <div class="sub-label">Shadow</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-reference-shadow-color" value="#000000">
+          </div>
+          <div class="style-field">
+            <label>Blur</label>
+            <input type="range" id="sg-reference-shadow-blur" min="0" max="30" step="1" value="0">
+            <span class="range-val" id="sg-reference-shadow-blur-val">0</span>
+          </div>
+          <div class="style-field">
+            <label>X</label>
+            <input type="range" id="sg-reference-shadow-x" min="-20" max="20" step="1" value="0">
+            <span class="range-val" id="sg-reference-shadow-x-val">0</span>
+          </div>
+          <div class="style-field">
+            <label>Y</label>
+            <input type="range" id="sg-reference-shadow-y" min="-20" max="20" step="1" value="0">
+            <span class="range-val" id="sg-reference-shadow-y-val">0</span>
+          </div>
+        </div>
+        <div class="sub-label">Outline</div>
+        <div class="style-row">
+          <div class="style-field">
+            <label>Color</label>
+            <input type="color" id="sg-reference-stroke-color" value="#000000">
+          </div>
+          <div class="style-field">
+            <label>Width</label>
+            <select id="sg-reference-stroke-width">
+              <option value="0">None</option>
+              <option value="1">1px</option>
+              <option value="2">2px</option>
+              <option value="3">3px</option>
+              <option value="4">4px</option>
+              <option value="6">6px</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /tab-songs -->
+
   </div>
 
   <div id="footer">
@@ -607,6 +803,9 @@ let initContent = null;
 let localStyles  = {};
 let bgSnapshot   = null;
 let _activeFontTarget = null; // id of hidden font input currently being picked
+let _isPerDisplay = false;
+let _displayId    = null;
+let _activeTab    = 'verses';
 
 // â”€â”€ Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function pathToFileURL(p) {
@@ -900,6 +1099,33 @@ function readControlsToLocalStyles() {
     lineHeight:     document.getElementById('ts-global-lineheight').value,
     verticalPosition: getActiveToggle(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom'], 'center'),
   });
+  localStyles.songText = toB64Style({
+    color:          document.getElementById('sg-text-color').value,
+    fontFamily:     document.getElementById('sg-text-font').value,
+    bold:           document.getElementById('sg-text-bold').classList.contains('active'),
+    italic:         document.getElementById('sg-text-italic').classList.contains('active'),
+    letterSpacing:  document.getElementById('sg-text-letterspacing').value,
+    textAlign:      getActiveToggle(['sg-text-align-left','sg-text-align-center','sg-text-align-right'], 'center'),
+    shadowColor:    document.getElementById('sg-text-shadow-color').value,
+    shadowBlur:     document.getElementById('sg-text-shadow-blur').value,
+    shadowX:        document.getElementById('sg-text-shadow-x').value,
+    shadowY:        document.getElementById('sg-text-shadow-y').value,
+    strokeColor:    document.getElementById('sg-text-stroke-color').value,
+    strokeWidth:    document.getElementById('sg-text-stroke-width').value,
+  });
+  localStyles.songReference = toB64Style({
+    color:       document.getElementById('sg-reference-color').value,
+    sizeEm:      document.getElementById('sg-reference-size').value,
+    fontFamily:  document.getElementById('sg-reference-font').value,
+    bold:        document.getElementById('sg-reference-bold').classList.contains('active'),
+    italic:      document.getElementById('sg-reference-italic').classList.contains('active'),
+    shadowColor: document.getElementById('sg-reference-shadow-color').value,
+    shadowBlur:  document.getElementById('sg-reference-shadow-blur').value,
+    shadowX:     document.getElementById('sg-reference-shadow-x').value,
+    shadowY:     document.getElementById('sg-reference-shadow-y').value,
+    strokeColor: document.getElementById('sg-reference-stroke-color').value,
+    strokeWidth: document.getElementById('sg-reference-stroke-width').value,
+  });
 }
 
 // â”€â”€ Populate controls from localStyles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -996,6 +1222,39 @@ function populateControls() {
   setActiveToggleGroup(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom'], g.verticalPosition || 'center');
   const lhEl = document.getElementById('ts-global-lineheight');
   if (lhEl) lhEl.value = String(g.lineHeight);
+
+  // Song Text
+  setColor('sg-text-color', localStyles.songText || localStyles.verseText, '#ffffff');
+  setFont('sg-text-font', 'sg-text-font-btn', localStyles.songText || localStyles.verseText);
+  const sgt = styleFromB64(localStyles.songText || localStyles.verseText);
+  setToggle('sg-text-bold', sgt.fontWeight === 'bold');
+  setToggle('sg-text-italic', sgt.fontStyle === 'italic');
+  setActiveToggleGroup(['sg-text-align-left','sg-text-align-center','sg-text-align-right'], sgt.textAlign || 'center');
+  setSelect('sg-text-letterspacing', String(sgt.letterSpacing || 0));
+  setRange('sg-text-shadow-blur', 'sg-text-shadow-blur-val', sgt.shadowBlur || 0, '');
+  setRange('sg-text-shadow-x',    'sg-text-shadow-x-val',    sgt.shadowX    || 0, '');
+  setRange('sg-text-shadow-y',    'sg-text-shadow-y-val',    sgt.shadowY    || 0, '');
+  const sgtscEl = document.getElementById('sg-text-shadow-color');
+  if (sgtscEl) sgtscEl.value = sgt.shadowColor || '#000000';
+  setSelect('sg-text-stroke-width', String(sgt.strokeWidth || 0));
+  const sgtskEl = document.getElementById('sg-text-stroke-color');
+  if (sgtskEl) sgtskEl.value = sgt.strokeColor || '#000000';
+
+  // Song Reference
+  setColor('sg-reference-color', localStyles.songReference || localStyles.verseReference, '#ffffff');
+  setSize('sg-reference-size', localStyles.songReference || localStyles.verseReference);
+  setFont('sg-reference-font', 'sg-reference-font-btn', localStyles.songReference || localStyles.verseReference);
+  const sgr = styleFromB64(localStyles.songReference || localStyles.verseReference);
+  setToggle('sg-reference-bold',   sgr.fontWeight === 'bold');
+  setToggle('sg-reference-italic', sgr.fontStyle === 'italic');
+  setRange('sg-reference-shadow-blur', 'sg-reference-shadow-blur-val', sgr.shadowBlur || 0, '');
+  setRange('sg-reference-shadow-x',    'sg-reference-shadow-x-val',    sgr.shadowX    || 0, '');
+  setRange('sg-reference-shadow-y',    'sg-reference-shadow-y-val',    sgr.shadowY    || 0, '');
+  const sgrscEl = document.getElementById('sg-reference-shadow-color');
+  if (sgrscEl) sgrscEl.value = sgr.shadowColor || '#000000';
+  setSelect('sg-reference-stroke-width', String(sgr.strokeWidth || 0));
+  const sgrskEl = document.getElementById('sg-reference-stroke-color');
+  if (sgrskEl) sgrskEl.value = sgr.strokeColor || '#000000';
 }
 
 // â”€â”€ Canvas text rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1052,6 +1311,15 @@ function wrapTextWithSubscripts(ctx, segs, maxW, baseSize, subMult, fontFamily) 
 
 // â”€â”€ Main canvas render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildStylesObj() {
+  if (_activeTab === 'songs') {
+    return {
+      text:      styleFromB64(localStyles.songText      || localStyles.verseText),
+      title:     styleFromB64(localStyles.songTitle     || localStyles.verseNumber),
+      reference: styleFromB64(localStyles.songReference || localStyles.verseReference),
+      subscript: styleFromB64(localStyles.verseSubscript),
+      global:    globalFromB64(localStyles.global),
+    };
+  }
   return {
     text:      styleFromB64(localStyles.verseText),
     number:    styleFromB64(localStyles.verseNumber),
@@ -1276,7 +1544,12 @@ ipcRenderer.on('style-window-init', (event, data) => {
   localStyles = data.previewStyles ? { ...data.previewStyles } : {};
   initContent = data.content   || null;
   bgSnapshot  = data.bgSnapshot || null;
+  _isPerDisplay = !!data.displayId;
+  _displayId    = data.displayId || null;
   if (data.darkMode) document.body.classList.add('dark');
+  if (_isPerDisplay && data.displayIndex != null) {
+    document.title = `Text Styling - Window ${data.displayIndex}`;
+  }
   populateControls();
   rerenderCanvas();
 });
@@ -1299,6 +1572,12 @@ document.addEventListener('DOMContentLoaded', () => {
   wireRange('ts-reference-shadow-blur', 'ts-reference-shadow-blur-val', '');
   wireRange('ts-reference-shadow-x',    'ts-reference-shadow-x-val',    '');
   wireRange('ts-reference-shadow-y',    'ts-reference-shadow-y-val',    '');
+  wireRange('sg-text-shadow-blur', 'sg-text-shadow-blur-val', '');
+  wireRange('sg-text-shadow-x',    'sg-text-shadow-x-val',    '');
+  wireRange('sg-text-shadow-y',    'sg-text-shadow-y-val',    '');
+  wireRange('sg-reference-shadow-blur', 'sg-reference-shadow-blur-val', '');
+  wireRange('sg-reference-shadow-x',    'sg-reference-shadow-x-val',    '');
+  wireRange('sg-reference-shadow-y',    'sg-reference-shadow-y-val',    '');
 
   // Wire toggle groups / simple toggles
   wireToggleGroup(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom']);
@@ -1308,6 +1587,11 @@ document.addEventListener('DOMContentLoaded', () => {
   wireToggle('ts-number-bold');
   wireToggle('ts-reference-bold');
   wireToggle('ts-reference-italic');
+  wireToggleGroup(['sg-text-align-left','sg-text-align-center','sg-text-align-right']);
+  wireToggle('sg-text-bold');
+  wireToggle('sg-text-italic');
+  wireToggle('sg-reference-bold');
+  wireToggle('sg-reference-italic');
 
   // Wire select & color inputs
   ['ts-global-lineheight',
@@ -1315,13 +1599,16 @@ document.addEventListener('DOMContentLoaded', () => {
    'ts-number-color','ts-number-size','ts-number-shadow-color','ts-number-stroke-width','ts-number-stroke-color',
    'ts-subscript-color','ts-subscript-size','ts-subscript-shadow-color',
    'ts-reference-color','ts-reference-size','ts-reference-shadow-color','ts-reference-stroke-width','ts-reference-stroke-color',
+   'sg-text-color','sg-text-letterspacing','sg-text-shadow-color','sg-text-stroke-width','sg-text-stroke-color',
+   'sg-reference-color','sg-reference-size','sg-reference-shadow-color','sg-reference-stroke-width','sg-reference-stroke-color',
   ].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.addEventListener('input', onControlChange); el.addEventListener('change', onControlChange); }
   });
 
   // Wire font picker buttons
-  ['ts-text-font-btn','ts-number-font-btn','ts-subscript-font-btn','ts-reference-font-btn'].forEach(btnId => {
+  ['ts-text-font-btn','ts-number-font-btn','ts-subscript-font-btn','ts-reference-font-btn',
+   'sg-text-font-btn','sg-reference-font-btn'].forEach(btnId => {
     const btn = document.getElementById(btnId);
     if (!btn) return;
     const targetId = btnId.replace('-btn', '');
@@ -1332,6 +1619,18 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         openFontPicker(targetId, btn);
       }
+    });
+  });
+
+  // Tab switching
+  document.querySelectorAll('.sw-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const t = tab.dataset.tab;
+      if (t === _activeTab) return;
+      _activeTab = t;
+      document.querySelectorAll('.sw-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+      document.querySelectorAll('.sw-tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + t));
+      rerenderCanvas();
     });
   });
 
@@ -1351,8 +1650,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     readControlsToLocalStyles();
-    await ipcRenderer.invoke('update-settings', { previewStyles: localStyles });
-    ipcRenderer.send('styles-changed', { ...localStyles });
+    if (_isPerDisplay) {
+      const s = await ipcRenderer.invoke('load-settings');
+      const displaySettings = (s && s.displaySettings) || {};
+      displaySettings[String(_displayId)] = displaySettings[String(_displayId)] || {};
+      displaySettings[String(_displayId)].perDisplayStyles = { ...localStyles };
+      await ipcRenderer.invoke('update-settings', { displaySettings });
+      ipcRenderer.send('styles-changed-display', { displayId: _displayId, styles: { ...localStyles } });
+    } else {
+      await ipcRenderer.invoke('update-settings', { previewStyles: localStyles });
+      ipcRenderer.send('styles-changed', { ...localStyles });
+    }
     window.close();
   });
 });

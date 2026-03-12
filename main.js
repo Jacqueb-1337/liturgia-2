@@ -1,5 +1,8 @@
 // main.js
 
+// Force production mode when running via npm start (not packaged)
+if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
+
 const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } = require('electron');
 const RtfParser = require('rtf-parser');
 
@@ -29,14 +32,92 @@ function _pushMainLog(level, args) {
 const _origConsoleLog = console.log;
 const _origConsoleWarn = console.warn;
 const _origConsoleError = console.error;
+let _notifyError = null;     // Assigned after renderer is ready; fires debounced error-report-prompt IPC
+let _errorNotifyTimer = null;
+let _errorPromptShown = false;
+let _errorBaseline = 0;      // Error count at arm-time; only errors above this trigger the prompt
 console.log = function(...args) { _pushMainLog('log', args); _origConsoleLog.apply(console, args); };
 console.warn = function(...args) { _pushMainLog('warn', args); _origConsoleWarn.apply(console, args); };
-console.error = function(...args) { _pushMainLog('error', args); _origConsoleError.apply(console, args); };
+console.error = function(...args) { _pushMainLog('error', args); _origConsoleError.apply(console, args); try { if (_notifyError) _notifyError(); } catch(e) {} };
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const crypto = require('crypto');
 const RemoteServer = require('./remote-server');
 const RelayClient = require('./relay-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
+
+// --- Emergency crash report writer ---
+// Writes a minimal diagnostic report to Documents synchronously.
+// Safe to call before app is ready (falls back to os.homedir/Documents).
+function _writeEmergencyCrashReport(source, err) {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let docsDir;
+    try { docsDir = app.getPath('documents'); } catch (e) {
+      docsDir = path.join(os.homedir(), 'Documents');
+    }
+    const reportPath = path.join(docsDir, `liturgia-crash-${timestamp}.txt`);
+    const parts = [];
+    parts.push('=== REPORT: LITURGIA DIAGNOSTIC REPORT ===');
+    parts.push('=== METADATA ===');
+    parts.push(JSON.stringify({
+      platform: process.platform, arch: process.arch, node: process.version,
+      reportType: 'CRASH', source, 'Report Generated': new Date().toISOString()
+    }, null, 2));
+    parts.push('=== CRASH ERROR ===');
+    parts.push(err ? (err.stack || String(err)) : 'Unknown error');
+    parts.push('=== MAIN LOGS ===');
+    parts.push(JSON.stringify(mainLogs, null, 2));
+    parts.push('=== END OF REPORT ===');
+    fs.writeFileSync(reportPath, parts.join('\n\n'), 'utf8');
+    return reportPath;
+  } catch (e) {
+    try {
+      const fallback = path.join(os.homedir(), `liturgia-crash-${Date.now()}.txt`);
+      fs.writeFileSync(fallback, (err ? (err.stack || String(err)) : 'Unknown') + '\n\n---\n\n' + JSON.stringify(mainLogs), 'utf8');
+      return fallback;
+    } catch (e2) { return null; }
+  }
+}
+
+// Shared fatal error handler for both uncaughtException and unhandledRejection.
+// Always writes the crash report, shows a notification (whenever possible), and exits.
+function _handleFatalError(source, err) {
+  _origConsoleError(`[CRASH] ${source}:`, err && err.stack ? err.stack : String(err));
+  const reportPath = _writeEmergencyCrashReport(source, err);
+
+  const showAndExit = () => {
+    try {
+      // dialog.showMessageBoxSync works without a parent BrowserWindow
+      dialog.showMessageBoxSync({
+        type: 'error',
+        title: 'Liturgia crashed',
+        message: 'Liturgia encountered an unexpected error and needs to close.',
+        detail: `A crash report has been saved to:\n${reportPath || 'unknown location'}\n\nError: ${err && err.message ? err.message : String(err)}`,
+        buttons: ['OK']
+      });
+    } catch (e) {}
+    process.exit(1);
+  };
+
+  if (app.isReady()) {
+    showAndExit();
+  } else {
+    // App not ready yet: wait for ready, then show dialog and exit.
+    // Safety net ensures we always exit even if ready never fires.
+    const exitTimer = setTimeout(() => process.exit(1), 6000);
+    app.once('ready', () => { clearTimeout(exitTimer); showAndExit(); });
+  }
+}
+
+process.on('uncaughtException', (err) => {
+  _handleFatalError('uncaughtException', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  _handleFatalError('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)));
+});
 
 // Helper to determine the best icon path for windows/taskbar (works in dev and packaged)
 function getIconPath() {
@@ -155,6 +236,21 @@ let initialWindowX = 100;
 let initialWindowY = 100;
 let defaultBible = 'en_kjv.json'; // Default Bible
 const liveWindows = new Map(); // keyed by display id
+// Per-display network display servers
+// Map<displayId, {server, clients:Set, port, lastPayload, lastMode, lastError}>
+const displayNetServers = new Map();
+
+// Merge per-display style overrides into a payload's styles object.
+// override is { text, number, title, reference, subscript, global } — any field may be null/undefined.
+function mergeStylesForDisplay(data, override) {
+  if (!override || !data.styles) return data;
+  const merged = { ...data.styles };
+  for (const key of ['text', 'number', 'title', 'reference', 'subscript']) {
+    if (override[key] != null) merged[key] = override[key];
+  }
+  if (override.global != null) merged.global = { ...data.styles.global, ...override.global };
+  return { ...data, styles: merged };
+}
 let speechWindow = null;
 let aiSpeechWorkerWindow = null;
 let aiWorkerSuppressed = false;
@@ -1188,7 +1284,31 @@ ipcMain.handle('ai:set-enabled', async (_event, desiredState) => {
 ipcMain.handle('renderer-ready', async () => {
   console.log('[main] Renderer initialization complete');
   rendererReady = true;
-  
+
+  // Arm the error notifier now that the renderer is ready.
+  // Record a baseline so that console.error calls made during the rest of the
+  // startup sequence (relay, speech sidecar, etc.) are ignored — only new
+  // errors occurring after full startup are surfaced to the user.
+  // We delay arming by 15 s so all normal boot-time errors are absorbed.
+  setTimeout(() => {
+    _errorBaseline = mainLogs.filter(l => l.level === 'error').length;
+    _notifyError = () => {
+      if (_errorPromptShown || !mainWindow || mainWindow.isDestroyed()) return;
+      const newErrors = mainLogs.filter(l => l.level === 'error').slice(_errorBaseline);
+      if (newErrors.length === 0) return;
+      clearTimeout(_errorNotifyTimer);
+      _errorNotifyTimer = setTimeout(() => {
+        try {
+          if (!_errorPromptShown && mainWindow && !mainWindow.isDestroyed()) {
+            _errorPromptShown = true;
+            const payload = newErrors.map(l => `[${l.ts}] ${l.msg}`);
+            mainWindow.webContents.send('error-report-prompt', { errors: payload });
+          }
+        } catch (e) {}
+      }, 3000);
+    };
+  }, 15000);
+
   // Send next stage message
   try {
     splashWindow.webContents.send('splash:update-status', { message: 'Initializing speech...', progress: 65 });
@@ -1660,10 +1780,39 @@ ipcMain.handle('focus-main-window', async () => {
   }
 });
 
+// Allow renderer to invoke Save Report (used by the error-report-prompt toast)
+ipcMain.handle('trigger-save-report', async () => {
+  try { await startSaveReport(); } catch (err) { console.error('trigger-save-report failed:', err); }
+});
+
+// Open the standalone report viewer window, optionally pre-loading a .litrep file
+let reportViewerWindow = null;
+async function openReportViewerWindow(filePath) {
+  if (reportViewerWindow && !reportViewerWindow.isDestroyed()) {
+    reportViewerWindow.focus();
+    if (filePath) reportViewerWindow.webContents.send('load-report-file', filePath);
+    return;
+  }
+  const { resolveProjectPath } = require('./lib/paths');
+  reportViewerWindow = new BrowserWindow({
+    width: 1280, height: 800,
+    title: 'Liturgia Report Viewer',
+    icon: getIconPath(),
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
+  await reportViewerWindow.loadFile(resolveProjectPath('report-viewer.html'));
+  if (filePath) reportViewerWindow.webContents.send('load-report-file', filePath);
+  reportViewerWindow.on('closed', () => { reportViewerWindow = null; });
+}
+
+ipcMain.handle('open-report-viewer', async (event, filePath) => {
+  await openReportViewerWindow(filePath || null);
+});
+
 // IPC helper to write a combined diagnostic report
 async function startSaveReport() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const defaultName = `liturgia-report-${timestamp}.txt`;
+  const defaultName = `liturgia-report-${timestamp}.litrep`;
 
   // Ask renderers (main window) to prepare their payload
   let rendererPayload = null;
@@ -1679,17 +1828,35 @@ async function startSaveReport() {
     });
   }
 
-  // Capture live window snapshot if available
-  let liveScreenshotBase64 = null;
+  // Capture live window snapshots for all active displays
+  const liveScreenshots = []; // [{displayId, dataUrl}]
+
+  // Collect sidecar diagnostic log
+  let sidecarDiagLog = '';
   try {
-    const firstWin = [...liveWindows.values()].find(w => !w.isDestroyed());
-    if (firstWin) {
-      const image = await firstWin.webContents.capturePage();
-      const png = image.toPNG();
-      liveScreenshotBase64 = 'data:image/png;base64,' + png.toString('base64');
+    if (speechSidecarManager) sidecarDiagLog = speechSidecarManager.getStatus().diagnosticLog || '';
+  } catch (e) {}
+
+  // Ask AI speech worker window for its in-page logs and rolling context
+  let speechWorkerPayload = null;
+  try {
+    if (aiSpeechWorkerWindow && !aiSpeechWorkerWindow.isDestroyed()) {
+      aiSpeechWorkerWindow.webContents.send('prepare-speech-report');
+      speechWorkerPayload = await new Promise((resolve) => {
+        const t = setTimeout(() => resolve({ timedOut: true }), 5000);
+        ipcMain.once('speech-report', (_e, payload) => { clearTimeout(t); resolve(payload); });
+      });
     }
-  } catch (e) {
-    console.error('Failed to capture live window:', e);
+  } catch (e) {}
+  for (const [displayId, win] of liveWindows.entries()) {
+    if (win.isDestroyed()) continue;
+    try {
+      const image = await win.webContents.capturePage();
+      const png = image.toPNG();
+      liveScreenshots.push({ displayId, dataUrl: 'data:image/png;base64,' + png.toString('base64') });
+    } catch (e) {
+      console.error(`Failed to capture live window for display ${displayId}:`, e);
+    }
   }
 
   // Read files and settings
@@ -1738,8 +1905,10 @@ async function startSaveReport() {
   parts.push('=== RENDERER PAYLOAD ===');
   parts.push(JSON.stringify(rendererPayload || {}, null, 2));
 
-  parts.push('=== LIVE WINDOW SCREENSHOT (base64 PNG) ===');
-  parts.push(liveScreenshotBase64 || '');
+  for (const { displayId, dataUrl } of liveScreenshots) {
+    parts.push(`=== LIVE WINDOW SCREENSHOT (display ${displayId}) ===`);
+    parts.push(dataUrl);
+  }
 
   // If renderer included base64 images for preview canvas, include them too
   if (rendererPayload && rendererPayload.previewDataUrl) {
@@ -1759,6 +1928,22 @@ async function startSaveReport() {
   parts.push('=== RENDERER SETTINGS (in-memory) ===');
   parts.push(JSON.stringify(rendererPayload || {}, null, 2));
 
+  // Sidecar diagnostic log
+  parts.push('=== SIDECAR DIAGNOSTIC LOG ===');
+  parts.push(sidecarDiagLog || '(sidecar not running or no logs)');
+
+  // Speech worker in-page logs, rolling context, etc.
+  if (speechWorkerPayload && !speechWorkerPayload.timedOut) {
+    parts.push('=== SPEECH WORKER LOGS ===');
+    parts.push(speechWorkerPayload.logs || '(none)');
+    parts.push('=== ROLLING CONTEXT ===');
+    parts.push(speechWorkerPayload.rollingContext || '(empty)');
+    if (speechWorkerPayload.finalText) {
+      parts.push('=== SPEECH FINAL TEXT ===');
+      parts.push(speechWorkerPayload.finalText);
+    }
+  }
+
   parts.push('=== END OF REPORT ===');
   const reportContent = parts.join('\n\n');
 
@@ -1767,7 +1952,7 @@ async function startSaveReport() {
   const { filePath, canceled } = await dialog.showSaveDialog({
     title: 'Save diagnostic report',
     defaultPath: path.join(getDesktopPath(app), defaultName),
-    filters: [{ name: 'Report', extensions: ['txt'] }]
+    filters: [{ name: 'Liturgia Report', extensions: ['litrep'] }]
   });
 
   if (canceled || !filePath) {
@@ -2156,6 +2341,23 @@ async function createWindow() {
           }
         },
         {
+          label: 'Open Report Viewer',
+          click: async () => {
+            await openReportViewerWindow();
+          }
+        },
+        {
+          label: 'Open Report File...',
+          click: async () => {
+            const { filePath } = await dialog.showOpenDialog({
+              title: 'Open Liturgia Report',
+              filters: [{ name: 'Liturgia Report', extensions: ['litrep'] }],
+              properties: ['openFile']
+            });
+            if (filePath) await openReportViewerWindow(filePath);
+          }
+        },
+        {
           label: 'Learn More',
           click: async () => {
             await shell.openExternal('https://electronjs.org')
@@ -2362,7 +2564,8 @@ app.whenReady().then(async () => {
             }
           });
           
-          const success = await relayClient.register('Liturgia Desktop');
+          const deviceName = (settings.relay && settings.relay.deviceName && settings.relay.deviceName.trim()) || 'Liturgia Desktop';
+          const success = await relayClient.register(deviceName);
           if (success) {
             console.log('[relay] Auto-started from settings');
           } else {
@@ -2375,6 +2578,21 @@ app.whenReady().then(async () => {
         console.error('[relay] Failed to auto-start:', e.message);
         // Don't crash the app if relay fails to start
       }
+    }
+
+    // Auto-start per-display network servers if enabled
+    if (settings.displaySettings) {
+      setTimeout(() => {
+        for (const [displayIdStr, ds] of Object.entries(settings.displaySettings)) {
+          const nd = ds && ds.networkDisplay;
+          if (nd && nd.enabled) {
+            const displayId = parseInt(displayIdStr, 10);
+            const port = nd.port || 7777;
+            try { startDisplayNetServer(displayId, port); }
+            catch (e) { console.error('[network-display] Failed to auto-start for display', displayId, ':', e.message); }
+          }
+        }
+      }, 600);
     }
   } catch (e) { console.warn('Failed to start remote/relay:', e); }
   
@@ -2432,6 +2650,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   console.log('[main] before-quit: starting cleanup');
   destroyAiSpeechWorkerWindow();
+  // Stop per-display network servers
+  if (displayNetServers.size) {
+    console.log('[main] Stopping display network servers on app quit');
+    stopAllDisplayNetServers();
+  }
   // Clean up remote server
   if (remoteServer) {
     console.log('[main] Stopping remote server on app quit');
@@ -2758,6 +2981,7 @@ ipcMain.handle('create-live-window', async () => {
     targetIds = fallbackId ? [fallbackId] : [];
   }
   for (const id of targetIds) {
+    if (id <= 0) continue; // 0 = network-only entry, no physical window
     const display = displays.find(d => d.id == id) || displays[0];
     if (display) createLiveWindowForDisplay(display);
   }
@@ -2785,14 +3009,27 @@ ipcMain.handle('close-live-window', () => {
 });
 
 ipcMain.on('update-live-window', (event, data) => {
-  for (const win of liveWindows.values()) {
+  const overrides = data._displayStyleOverrides || {};
+  for (const [displayId, win] of liveWindows.entries()) {
     if (win.isDestroyed()) continue;
+    const displayData = overrides[String(displayId)]
+      ? mergeStylesForDisplay(data, overrides[String(displayId)])
+      : data;
     if (win._liveReady) {
-      win.webContents.send('update-content', data);
+      win.webContents.send('update-content', displayData);
     } else {
       // Window is still loading — buffer so it gets the content the moment it's ready
-      win._livePending = data;
+      win._livePending = displayData;
     }
+  }
+  // Relay to per-display network clients
+  for (const [displayId, ns] of displayNetServers.entries()) {
+    const displayData = overrides[String(displayId)]
+      ? mergeStylesForDisplay(data, overrides[String(displayId)])
+      : data;
+    ns.lastPayload = displayData;
+    ns.lastMode = 'normal';
+    if (ns.server) broadcastToDisplayClients(ns, { type: 'content', data: displayData });
   }
 });
 
@@ -2825,6 +3062,9 @@ ipcMain.on('set-live-mode', (event, mode) => {
   for (const win of liveWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('set-live-mode', mode);
   }
+  // Relay to per-display network clients
+  for (const ns of displayNetServers.values()) { ns.lastMode = mode; }
+  broadcastToAllNetDisplays({ type: 'mode', mode });
 });
 
 // Forward captured JPEG frames from preview webview to all live windows
@@ -2911,4 +3151,309 @@ ipcMain.on('styles-changed', (event, newStyles) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('styles-updated', newStyles);
   }
+});
+
+// Forward per-display style changes back to main renderer
+ipcMain.on('styles-changed-display', (event, { displayId, styles }) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('display-styles-updated', { displayId, styles });
+  }
+});
+
+// Forward per-display setting changes (e.g. perDisplayStylesEnabled) to main renderer
+ipcMain.on('display-setting-changed', (event, data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('display-setting-changed', data);
+  }
+});
+
+// ── Network Display WebSocket Server ────────────────────────────────────────
+
+/**
+ * Encode a text string as a WebSocket frame (server→client, unmasked, opcode 0x1).
+ */
+function encodeWsFrame(data) {
+  const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+  const len = payload.length;
+  let header;
+  if (len < 126) {
+    header = Buffer.allocUnsafe(2);
+    header[0] = 0x81; // FIN + text
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.allocUnsafe(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.allocUnsafe(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeUInt32BE(Math.floor(len / 0x100000000), 2);
+    header.writeUInt32BE(len >>> 0, 6);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+/**
+ * Handle inbound WebSocket frames from a browser client.
+ * We only need to handle ping→pong and close→close; all other frames are ignored.
+ */
+function handleWsInbound(socket, buf) {
+  try {
+    let offset = 0;
+    while (offset + 2 <= buf.length) {
+      const b0 = buf[offset], b1 = buf[offset + 1];
+      const opcode = b0 & 0x0f;
+      const masked  = (b1 & 0x80) !== 0;
+      let payloadLen = b1 & 0x7f;
+      offset += 2;
+      if (payloadLen === 126) {
+        if (offset + 2 > buf.length) break;
+        payloadLen = buf.readUInt16BE(offset); offset += 2;
+      } else if (payloadLen === 127) {
+        if (offset + 8 > buf.length) break;
+        // Only read the lower 32 bits (payloads ≤ 4 GB)
+        payloadLen = buf.readUInt32BE(offset + 4); offset += 8;
+      }
+      const maskKey = masked ? buf.slice(offset, offset + 4) : null;
+      if (masked) offset += 4;
+      if (offset + payloadLen > buf.length) break;
+      const payload = Buffer.from(buf.slice(offset, offset + payloadLen));
+      offset += payloadLen;
+      if (masked && maskKey) for (let i = 0; i < payload.length; i++) payload[i] ^= maskKey[i % 4];
+      if (opcode === 0x9) {
+        // Ping → reply with Pong
+        const pong = Buffer.allocUnsafe(2 + payload.length);
+        pong[0] = 0x8a; pong[1] = payload.length;
+        payload.copy(pong, 2);
+        try { socket.write(pong); } catch (_) {}
+      } else if (opcode === 0x8) {
+        // Close → echo close frame and destroy
+        try { socket.write(Buffer.from([0x88, 0x00])); } catch (_) {}
+        socket.destroy();
+      }
+    }
+  } catch (_) {}
+}
+
+/**
+ * Broadcast to all WebSocket clients of one display server.
+ */
+function broadcastToDisplayClients(ns, obj) {
+  if (!ns.clients.size) return;
+  const frame = encodeWsFrame(JSON.stringify(obj));
+  for (const socket of [...ns.clients]) {
+    try { socket.write(frame); }
+    catch (_) { try { socket.destroy(); } catch (__) {} ns.clients.delete(socket); }
+  }
+}
+
+/**
+ * Broadcast to all active per-display network servers.
+ */
+function broadcastToAllNetDisplays(obj) {
+  for (const ns of displayNetServers.values()) {
+    if (ns.server) broadcastToDisplayClients(ns, obj);
+  }
+}
+
+/**
+ * Start (or restart) the HTTP + WebSocket network display server.
+ * @param {number} port
+ */
+function startDisplayNetServer(displayId, port) {
+  if (displayNetServers.has(displayId)) stopDisplayNetServer(displayId);
+
+  const ns = { server: null, clients: new Set(), port, lastPayload: null, lastMode: 'normal', lastError: null };
+  displayNetServers.set(displayId, ns);
+
+  const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
+
+  const server = http.createServer((req, res) => {
+    let pathname = '/';
+    let searchParams = new URLSearchParams();
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      pathname = u.pathname;
+      searchParams = u.searchParams;
+    } catch (_) {}
+
+    if (pathname === '/' || pathname === '/index.html') {
+      fs.readFile(receiverHtmlPath, 'utf8', (err, data) => {
+        if (err) { res.writeHead(404); res.end('Receiver page not found'); return; }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(data);
+      });
+      return;
+    }
+
+    if (pathname === '/media') {
+      const filePath = searchParams.get('path');
+      if (!filePath) { res.writeHead(400); res.end('Missing path parameter'); return; }
+
+      // Resolve and validate the path
+      const resolved = path.resolve(filePath);
+
+      // Block directory traversal by ensuring the resolved path is absolute
+      // and ends with a known media extension
+      const ext = path.extname(resolved).toLowerCase().slice(1);
+      const allowedExts = ['jpg','jpeg','png','gif','webp','bmp','mp4','webm','ogg','mov','avi'];
+      if (!allowedExts.includes(ext)) {
+        res.writeHead(403); res.end('Forbidden file type'); return;
+      }
+
+      fs.stat(resolved, (err, stat) => {
+        if (err || !stat.isFile()) { res.writeHead(404); res.end('File not found'); return; }
+
+        const mimeMap = {
+          jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+          gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+          mp4: 'video/mp4', webm: 'video/webm', ogg: 'video/ogg',
+          mov: 'video/quicktime', avi: 'video/x-msvideo'
+        };
+        const mime = mimeMap[ext] || 'application/octet-stream';
+
+        // Support Range requests so video seeking works in the browser
+        const rangeHeader = req.headers['range'];
+        if (rangeHeader) {
+          const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+          if (m) {
+            const start     = parseInt(m[1], 10);
+            const end       = m[2] ? parseInt(m[2], 10) : stat.size - 1;
+            const chunkSize = end - start + 1;
+            res.writeHead(206, {
+              'Content-Range':  `bytes ${start}-${end}/${stat.size}`,
+              'Accept-Ranges':  'bytes',
+              'Content-Length': chunkSize,
+              'Content-Type':   mime,
+            });
+            fs.createReadStream(resolved, { start, end }).pipe(res);
+            return;
+          }
+        }
+
+        res.writeHead(200, {
+          'Content-Type':   mime,
+          'Content-Length': stat.size,
+          'Accept-Ranges':  'bytes',
+          'Cache-Control':  'no-cache',
+        });
+        fs.createReadStream(resolved).pipe(res);
+      });
+      return;
+    }
+
+    res.writeHead(404); res.end('Not found');
+  });
+
+  server.on('upgrade', (req, socket, _head) => {
+    // Only accept WebSocket upgrades on the root path
+    if (req.url !== '/' && req.url !== '') { socket.destroy(); return; }
+
+    const wsKey = req.headers['sec-websocket-key'];
+    if (!wsKey) { socket.destroy(); return; }
+
+    const acceptKey = crypto
+      .createHash('sha1')
+      .update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+
+    socket.write([
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Accept: ${acceptKey}`,
+      '\r\n',
+    ].join('\r\n'));
+
+    socket.setKeepAlive(true, 30000);
+    ns.clients.add(socket);
+
+    // Immediately sync new client to current state
+    if (ns.lastPayload) {
+      try {
+        socket.write(encodeWsFrame(JSON.stringify({
+          type: 'sync', payload: ns.lastPayload, mode: ns.lastMode
+        })));
+      } catch (_) {}
+    }
+
+    socket.on('close', () => ns.clients.delete(socket));
+    socket.on('error', () => {
+      try { socket.destroy(); } catch (_) {}
+      ns.clients.delete(socket);
+    });
+    socket.on('data', (buf) => handleWsInbound(socket, buf));
+  });
+
+  server.on('error', (e) => {
+    let msg;
+    if (e.code === 'EADDRINUSE')      msg = `Port ${port} is already in use. Choose a different port in Settings > Display.`;
+    else if (e.code === 'EACCES')     msg = `Permission denied for port ${port}. Use a port above 1023.`;
+    else                              msg = `Network display error: ${e.message}`;
+    console.error('[network-display]', msg);
+    ns.lastError = msg;
+    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('display-net-error', { displayId, error: msg });
+  });
+
+  server.listen(port, '0.0.0.0', () => {
+    ns.port      = port;
+    ns.server    = server;
+    ns.lastError = null;
+    console.log(`[network-display] Display ${displayId} listening on port ${port}`);
+    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('display-net-error', { displayId, error: null });
+  });
+}
+
+/**
+ * Gracefully close the network display server for a specific display.
+ */
+function stopDisplayNetServer(displayId) {
+  const ns = displayNetServers.get(displayId);
+  if (!ns) return;
+  for (const socket of [...ns.clients]) {
+    try { socket.write(Buffer.from([0x88, 0x02, 0x03, 0xe8])); socket.destroy(); } catch (_) {}
+  }
+  ns.clients.clear();
+  if (ns.server) {
+    try { ns.server.close(); } catch (_) {}
+    try { if (ns.server.closeAllConnections) ns.server.closeAllConnections(); } catch (_) {}
+    ns.server = null;
+  }
+  displayNetServers.delete(displayId);
+}
+
+function stopAllDisplayNetServers() {
+  for (const displayId of [...displayNetServers.keys()]) {
+    stopDisplayNetServer(displayId);
+  }
+}
+
+// IPC: per-display network display start/stop/status
+ipcMain.handle('display-net-start', async (_event, displayId, port) => {
+  const p = (typeof port === 'number' && port > 0) ? port : 7777;
+  startDisplayNetServer(displayId, p);
+  return { ok: true, port: p };
+});
+
+ipcMain.handle('display-net-stop', async (_event, displayId) => {
+  stopDisplayNetServer(displayId);
+  return { ok: true };
+});
+
+ipcMain.handle('get-display-net-status', async (_event, displayId) => {
+  let localIp = '127.0.0.1';
+  try {
+    const ifaces = os.networkInterfaces();
+    outer: for (const name of Object.keys(ifaces)) {
+      for (const iface of ifaces[name]) {
+        if (iface.family === 'IPv4' && !iface.internal) { localIp = iface.address; break outer; }
+      }
+    }
+  } catch (_) {}
+  const ns = displayNetServers.get(displayId);
+  const running = !!(ns && ns.server);
+  const port = ns ? ns.port : 7777;
+  return { running, port, url: running ? `http://${localIp}:${port}` : null, lastError: ns ? (ns.lastError || null) : null };
 });

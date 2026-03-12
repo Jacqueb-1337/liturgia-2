@@ -39,6 +39,10 @@
     .ctxHit { background: rgba(113, 168, 255, 0.22); border-bottom: 1px solid rgba(143, 192, 255, 0.9); border-radius: 4px; padding: 0 1px; }
 
     #logs { max-height: 180px; overflow:auto; border:1px solid #223049; border-radius:10px; padding:8px; background:#0b1120; font-size:12px; }
+    #logs::-webkit-scrollbar { width: 6px; height: 6px; }
+    #logs::-webkit-scrollbar-track { background: transparent; }
+    #logs::-webkit-scrollbar-thumb { background: rgba(159,177,215,0.2); border-radius: 4px; }
+    #logs::-webkit-scrollbar-thumb:hover { background: rgba(159,177,215,0.45); }
     .logLine { margin:0 0 3px 0; }
 
     .footer { margin-top:8px; color:#9fb1d7; font-size:12px; line-height:1.35; }
@@ -2641,6 +2645,27 @@
     });
 
     btnStop.disabled = true;
+
+    // Report collection — invoked by main process via startSaveReport()
+    if (window.desktopRuntime && typeof window.desktopRuntime.onPrepareReport === 'function') {
+      window.desktopRuntime.onPrepareReport(() => {
+        try {
+          const logLines = Array.from(logsEl.querySelectorAll('.logLine'))
+            .reverse()
+            .map(el => el.textContent)
+            .join('\n');
+          window.desktopRuntime.sendReport({
+            logs: logLines,
+            rollingContext: state.rollingText || '',
+            finalText: state.finalText || '',
+            detectionMemoryText: state.detectionMemoryText || ''
+          });
+        } catch (e) {
+          window.desktopRuntime.sendReport({ error: String(e) });
+        }
+      });
+    }
+
     init().then(() => {
       if (autoStartMode) {
         setTimeout(() => {

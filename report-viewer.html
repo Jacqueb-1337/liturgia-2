@@ -363,7 +363,7 @@
   <header>
     <h1><i class="fa-solid fa-magnifying-glass-chart"></i> Liturgia Diagnostic Report Viewer</h1>
     <div class="file-input-wrapper">
-      <input type="file" id="file-input" accept=".txt">
+      <input type="file" id="file-input" accept=".litrep">
       <button class="btn" onclick="document.getElementById('file-input').click()">
         Open Report
       </button>
@@ -392,6 +392,21 @@
       renderUI();
     });
 
+    // Allow main process to push a file path when opened via menu
+    if (typeof require !== 'undefined') {
+      try {
+        const { ipcRenderer } = require('electron');
+        ipcRenderer.on('load-report-file', async (event, filePath) => {
+          try {
+            const fs = require('fs');
+            const text = fs.readFileSync(filePath, 'utf8');
+            parseReport(text);
+            renderUI();
+          } catch (e) { alert('Failed to load report: ' + e.message); }
+        });
+      } catch (e) {}
+    }
+
     function parseReport(text) {
       reportData = {
         metadata: {},
@@ -402,7 +417,11 @@
         settingsFile: '',
         rendererSettings: null,
         previewCanvas: '',
-        liveScreenshot: ''
+        liveScreenshots: [],
+        sidecarLog: '',
+        speechWorkerLogs: '',
+        rollingContext: '',
+        speechFinalText: ''
       };
 
       const sections = text.split(/^=== /m).filter(s => s.trim());
@@ -447,10 +466,29 @@
             reportData.previewCanvas = content.trim();
             break;
           case 'LIVE WINDOW SCREENSHOT (base64 PNG)':
-            reportData.liveScreenshot = content.trim();
+            // Legacy single-display format
+            reportData.liveScreenshots.push({ displayId: 'all', dataUrl: content.trim() });
             break;
           case 'GLOBAL CSS (styles.css)':
             reportData.globalCss = content;
+            break;
+          case 'SIDECAR DIAGNOSTIC LOG':
+            reportData.sidecarLog = content;
+            break;
+          case 'SPEECH WORKER LOGS':
+            reportData.speechWorkerLogs = content;
+            break;
+          case 'ROLLING CONTEXT':
+            reportData.rollingContext = content;
+            break;
+          case 'SPEECH FINAL TEXT':
+            reportData.speechFinalText = content;
+            break;
+          default:
+            if (title.startsWith('LIVE WINDOW SCREENSHOT (display ')) {
+              const dispId = title.slice('LIVE WINDOW SCREENSHOT (display '.length).replace(/\)$/, '').trim();
+              reportData.liveScreenshots.push({ displayId: dispId, dataUrl: content.trim() });
+            }
             break;
         }
       });
@@ -500,11 +538,16 @@
         { id: 'main-logs', label: 'Main Logs', icon: '<i class="fa-solid fa-list"></i>', badge: reportData.mainLogs.length },
         { id: 'renderer-logs', label: 'Renderer Logs', icon: '<i class="fa-solid fa-code"></i>', badge: reportData.rendererLogs.length },
         { id: 'preview-canvas', label: 'Preview Canvas', icon: '<i class="fa-solid fa-image"></i>' },
-        { id: 'live-screenshot', label: 'Live Screenshot', icon: '<i class="fa-solid fa-image"></i>' },
+        ...reportData.liveScreenshots.map((ss, i) => ({
+          id: `live-screenshot-${i}`,
+          label: reportData.liveScreenshots.length === 1 ? 'Live Screenshot' : `Live: Display ${ss.displayId}`,
+          icon: '<i class="fa-solid fa-image"></i>'
+        })),
         { id: 'index-html', label: 'index.html', icon: '<i class="fa-regular fa-file"></i>' },
         { id: 'live-html', label: 'live.html', icon: '<i class="fa-regular fa-file"></i>' },
         { id: 'settings-file', label: 'Settings (disk)', icon: '<i class="fa-solid fa-hdd"></i>' },
-        { id: 'settings-memory', label: 'Settings (memory)', icon: '<i class="fa-solid fa-microchip"></i>' }
+        { id: 'settings-memory', label: 'Settings (memory)', icon: '<i class="fa-solid fa-microchip"></i>' },
+        { id: 'speech-sidecar', label: 'Speech / Sidecar', icon: '<i class="fa-solid fa-microphone-lines"></i>' }
       ];
 
       container.innerHTML = `
@@ -521,13 +564,14 @@
           ${renderLogs('main-logs', reportData.mainLogs, 'Main Process Logs')}
           ${renderLogs('renderer-logs', reportData.rendererLogs, 'Renderer Process Logs')}
           ${renderImage('preview-canvas', reportData.previewCanvas, 'Preview Canvas')}
-          ${renderImage('live-screenshot', reportData.liveScreenshot, 'Live Window Screenshot')}
+          ${reportData.liveScreenshots.map((ss, i) => renderImage(`live-screenshot-${i}`, ss.dataUrl, reportData.liveScreenshots.length === 1 ? 'Live Window Screenshot' : `Live Window Screenshot — Display ${ss.displayId}`)).join('')}
           ${renderCode('index-html', reportData.indexHtml, 'index.html')}
           ${reportData.indexHtml ? renderHtmlPreview('index-preview', reportData.indexHtml, reportData.globalCss, 'index.html Preview') : ''}
           ${renderCode('live-html', reportData.liveHtml, 'live.html')}
           ${reportData.liveHtml ? renderHtmlPreview('live-preview', reportData.liveHtml, reportData.globalCss, 'live.html Preview') : ''}
           ${renderCode('settings-file', reportData.settingsFile, 'Settings File (from disk)', 'json')}
           ${renderJson('settings-memory', reportData.rendererSettings, 'Renderer Settings (in-memory)')}
+          ${renderSpeechSidecar()}
         </div>
       `;
 
@@ -754,6 +798,22 @@
         }
         return '<span class="' + cls + '">' + match + '</span>';
       });
+    }
+
+    function renderSpeechSidecar() {
+      const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const block = (label, text) => text
+        ? `<h3 style="margin:18px 0 8px;font-size:15px;">${label}</h3><pre class="code-block" style="white-space:pre-wrap;word-break:break-word;">${esc(text)}</pre>`
+        : `<h3 style="margin:18px 0 8px;font-size:15px;">${label}</h3><p style="color:#858585;font-style:italic;">No data captured</p>`;
+      return `
+        <div id="speech-sidecar" class="section">
+          <h2 style="margin-bottom:15px;font-size:20px;">Speech / Sidecar</h2>
+          ${block('Sidecar Diagnostic Log', reportData.sidecarLog)}
+          ${block('Speech Worker Logs', reportData.speechWorkerLogs)}
+          ${block('Rolling Context', reportData.rollingContext)}
+          ${reportData.speechFinalText ? block('Speech Final Text', reportData.speechFinalText) : ''}
+        </div>
+      `;
     }
 
     function setupLogFiltering(id, logs) {

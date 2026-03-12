@@ -1428,6 +1428,7 @@ function initAiTab(settings) {
 (async () => {
   const settings = await ipcRenderer.invoke('load-settings');
   const relayEnabledEl = document.getElementById('relay-enabled');
+  const relayDeviceNameEl = document.getElementById('relay-device-name');
   const relayAccountStatusEl = document.getElementById('relay-account-status');
   const relayNotSignedInEl = document.getElementById('relay-not-signed-in');
   const relaySignedInEl = document.getElementById('relay-signed-in');
@@ -1440,6 +1441,18 @@ function initAiTab(settings) {
   // Load saved relay settings
   if (settings && settings.relay) {
     if (relayEnabledEl) relayEnabledEl.checked = !!settings.relay.enabled;
+    if (relayDeviceNameEl) relayDeviceNameEl.value = settings.relay.deviceName || '';
+  }
+
+  // Auto-save device name on change
+  if (relayDeviceNameEl) {
+    relayDeviceNameEl.addEventListener('input', async () => {
+      const name = relayDeviceNameEl.value.trim();
+      const s = await ipcRenderer.invoke('load-settings');
+      const relay = (s && s.relay) || {};
+      relay.deviceName = name;
+      await ipcRenderer.invoke('update-settings', { relay });
+    });
   }
   
   async function refreshRelayUI() {
@@ -1529,9 +1542,10 @@ function initAiTab(settings) {
         }
         
         console.log('[Cloud Relay] Starting relay with token length:', authToken.length);
+        const deviceName = (relayDeviceNameEl && relayDeviceNameEl.value.trim()) || 'Liturgia Desktop';
         const result = await ipcRenderer.invoke('relay-start', {
           token: authToken,
-          deviceName: 'Liturgia Desktop'
+          deviceName
         });
         console.log('[Cloud Relay] Relay start result:', result);
         
@@ -1561,7 +1575,7 @@ document.getElementById('add-display-entry').addEventListener('click', async () 
   const defaultId = _allDisplays.length > 0 ? _allDisplays[0].id : 1;
   ids.push(defaultId);
   await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
-  renderDisplayEntries(ids);
+  loadDisplays();
 });
 
 document.getElementById('open-live-window').addEventListener('click', async () => {
@@ -2038,18 +2052,19 @@ async function loadDisplays() {
   _allDisplays = await ipcRenderer.invoke('get-displays');
   const settings = await ipcRenderer.invoke('load-settings');
   const savedIds = (settings && Array.isArray(settings.liveDisplays)) ? settings.liveDisplays : [];
-  renderDisplayEntries(savedIds);
+  const displaySettings = (settings && settings.displaySettings) || {};
+  renderDisplayEntries(savedIds, displaySettings);
 }
 
-function renderDisplayEntries(ids) {
+function renderDisplayEntries(ids, displaySettings) {
   const container = document.getElementById('display-list');
   container.innerHTML = '';
   ids.forEach((displayId, index) => {
-    container.appendChild(buildDisplayEntry(displayId, index, ids.length));
+    container.appendChild(buildDisplayEntry(displayId, index, ids.length, (displaySettings || {})[String(displayId)] || {}));
   });
 }
 
-function buildDisplayEntry(displayId, index, total) {
+function buildDisplayEntry(displayId, index, total, perDisplaySettings) {
   const row = document.createElement('div');
   row.className = 'display-row';
 
@@ -2060,6 +2075,24 @@ function buildDisplayEntry(displayId, index, total) {
 
   const select = document.createElement('select');
   select.className = 'display-row-select';
+
+  // Special "Network only" sentinel — value 0, no physical window opened
+  const netOnlyOpt = document.createElement('option');
+  netOnlyOpt.value = 0;
+  netOnlyOpt.textContent = 'Network only (no screen)';
+  if (displayId == 0) netOnlyOpt.selected = true;
+  select.appendChild(netOnlyOpt);
+
+  // If this display ID is not currently detected (and is not the special 0 sentinel),
+  // show a placeholder so the saved assignment is never silently dropped or reassigned.
+  const isDetected = displayId == 0 || _allDisplays.some(d => d.id == displayId);
+  if (!isDetected) {
+    const opt = document.createElement('option');
+    opt.value = displayId;
+    opt.textContent = `Display ${index + 1} (disconnected)`;
+    opt.selected = true;
+    select.appendChild(opt);
+  }
   _allDisplays.forEach((d, i) => {
     const opt = document.createElement('option');
     opt.value = d.id;
@@ -2071,19 +2104,27 @@ function buildDisplayEntry(displayId, index, total) {
     const ids = readCurrentIds();
     ids[index] = parseInt(select.value, 10);
     await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
-    renderDisplayEntries(ids);
+    loadDisplays();
   });
   row.appendChild(select);
 
+  // Edit button — opens per-display settings modal
+  const editBtn = document.createElement('button');
+  editBtn.className = 'btn display-row-edit';
+  editBtn.textContent = '...';
+  editBtn.title = 'Window settings';
+  editBtn.addEventListener('click', () => openDisplayEditModal(displayId, index + 1, perDisplaySettings || {}));
+  row.appendChild(editBtn);
+
   const removeBtn = document.createElement('button');
   removeBtn.className = 'btn display-row-remove';
-  removeBtn.textContent = '\u2212'; // minus sign
+  removeBtn.textContent = '\u2212';
   removeBtn.title = 'Remove this window';
   removeBtn.addEventListener('click', async () => {
     const ids = readCurrentIds();
     ids.splice(index, 1);
     await ipcRenderer.invoke('update-settings', { liveDisplays: ids });
-    renderDisplayEntries(ids);
+    loadDisplays();
   });
   row.appendChild(removeBtn);
 
@@ -2096,4 +2137,168 @@ function readCurrentIds() {
     const sel = row.querySelector('.display-row-select');
     return sel ? parseInt(sel.value, 10) : null;
   }).filter(id => id !== null);
+}
+
+function openDisplayEditModal(displayId, displayIndex, initialSettings) {
+  // Remove any existing modal
+  const existing = document.getElementById('dp-modal-backdrop');
+  if (existing) existing.remove();
+
+  const nd = (initialSettings && initialSettings.networkDisplay) || {};
+  const perDisplayStylesEnabled = !!(initialSettings && initialSettings.perDisplayStylesEnabled);
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'dp-modal-backdrop';
+  backdrop.className = 'dp-modal-backdrop';
+
+  const modal = document.createElement('div');
+  modal.className = 'dp-modal';
+  modal.innerHTML = `
+    <div class="dp-modal-header">
+      <span class="dp-modal-title">Window ${displayIndex} Settings</span>
+      <button class="dp-modal-close" title="Close">&#x2715;</button>
+    </div>
+    <div class="dp-modal-body">
+      <div class="dp-modal-section">Network Display</div>
+      <label class="toggle-label">
+        <input id="dp-nd-enable" type="checkbox" />
+        <span class="toggle-ui"></span>
+        Enable network display server
+      </label>
+      <div class="dp-nd-port-row">
+        <span class="dp-nd-label">Port</span>
+        <input id="dp-nd-port" type="number" min="1024" max="65535" value="${nd.port || 7777}" />
+      </div>
+      <div class="dp-nd-url-row">
+        <span id="dp-nd-url" class="muted-text">Not running</span>
+        <button id="dp-nd-copy" class="btn">Copy URL</button>
+      </div>
+      <div id="dp-nd-error" class="nd-error" style="display:none;"></div>
+      <label class="toggle-label">
+        <input id="dp-nd-transparent" type="checkbox" />
+        <span class="toggle-ui"></span>
+        Transparent background (for OBS lower-thirds)
+      </label>
+      <label class="toggle-label">
+        <input id="dp-nd-black-clear" type="checkbox" />
+        <span class="toggle-ui"></span>
+        Treat black mode as clear
+      </label>
+      <div class="muted-text" style="font-size:0.85em;margin-top:2px;">Open this URL in a browser or OBS browser source on any device on your network.</div>
+      <div class="dp-modal-section" style="margin-top:10px;">Custom Styles</div>
+      <label class="toggle-label">
+        <input id="dp-styles-enable" type="checkbox" />
+        <span class="toggle-ui"></span>
+        Use custom text styles for this display
+      </label>
+      <div style="margin-top:6px;">
+        <button id="dp-styles-edit-btn" class="btn">Edit Styles</button>
+      </div>
+    </div>
+  `;
+
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+
+  const enableEl      = modal.querySelector('#dp-nd-enable');
+  const portEl        = modal.querySelector('#dp-nd-port');
+  const urlEl         = modal.querySelector('#dp-nd-url');
+  const errEl         = modal.querySelector('#dp-nd-error');
+  const transparentEl = modal.querySelector('#dp-nd-transparent');
+  const blackClearEl  = modal.querySelector('#dp-nd-black-clear');
+  const copyBtn       = modal.querySelector('#dp-nd-copy');
+  const closeBtn      = modal.querySelector('.dp-modal-close');
+  const stylesEnableEl = modal.querySelector('#dp-styles-enable');
+  const stylesEditBtn  = modal.querySelector('#dp-styles-edit-btn');
+
+  // Restore saved checkbox states
+  enableEl.checked      = !!nd.enabled;
+  transparentEl.checked = !!nd.transparent;
+  blackClearEl.checked  = !!nd.blackAsClear;
+  stylesEnableEl.checked = perDisplayStylesEnabled;
+
+  function buildUrl(baseUrl) {
+    if (!baseUrl) return null;
+    const params = [];
+    if (transparentEl.checked) params.push('t=1');
+    if (blackClearEl.checked)  params.push('c=1');
+    return params.length ? `${baseUrl}?${params.join('&')}` : baseUrl;
+  }
+
+  async function refreshStatus() {
+    try {
+      const status = await ipcRenderer.invoke('get-display-net-status', displayId);
+      urlEl.textContent = status.running ? (buildUrl(status.url) || 'Running') : 'Not running';
+      if (status.lastError) { errEl.textContent = status.lastError; errEl.style.display = ''; }
+      else                  { errEl.style.display = 'none'; }
+    } catch (_) {}
+  }
+
+  async function saveAndApply() {
+    const enabled     = enableEl.checked;
+    const port        = parseInt(portEl.value, 10) || 7777;
+    const transparent = transparentEl.checked;
+    const blackAsClear = blackClearEl.checked;
+    const stylesEnabled = stylesEnableEl.checked;
+    const s = await ipcRenderer.invoke('load-settings');
+    const displaySettings = (s && s.displaySettings) || {};
+    displaySettings[String(displayId)] = displaySettings[String(displayId)] || {};
+    displaySettings[String(displayId)].networkDisplay = { enabled, port, transparent, blackAsClear };
+    displaySettings[String(displayId)].perDisplayStylesEnabled = stylesEnabled;
+    await ipcRenderer.invoke('update-settings', { displaySettings });
+    ipcRenderer.send('display-setting-changed', { displayId, key: 'perDisplayStylesEnabled', value: stylesEnabled });
+    if (enabled) {
+      await ipcRenderer.invoke('display-net-start', displayId, port);
+    } else {
+      await ipcRenderer.invoke('display-net-stop', displayId);
+    }
+    setTimeout(refreshStatus, 300);
+  }
+
+  const errorListener = (_event, { displayId: eid, error }) => {
+    if (eid !== displayId) return;
+    if (error) { errEl.textContent = error; errEl.style.display = ''; }
+    else        { errEl.style.display = 'none'; }
+    refreshStatus();
+  };
+  ipcRenderer.on('display-net-error', errorListener);
+
+  enableEl.addEventListener('change', saveAndApply);
+  portEl.addEventListener('change', saveAndApply);
+  transparentEl.addEventListener('change', saveAndApply);
+  blackClearEl.addEventListener('change', saveAndApply);
+  stylesEnableEl.addEventListener('change', saveAndApply);
+
+  stylesEditBtn.addEventListener('click', async () => {
+    const s = await ipcRenderer.invoke('load-settings');
+    const ds = (s && s.displaySettings && s.displaySettings[String(displayId)]) || {};
+    const content = null; // No preview content from settings context
+    const isDark = document.body.classList.contains('dark-theme');
+    ipcRenderer.send('open-style-window', {
+      previewStyles: ds.perDisplayStyles ? { ...ds.perDisplayStyles } : (s && s.previewStyles ? { ...s.previewStyles } : {}),
+      content: content,
+      darkMode: isDark,
+      bgSnapshot: null,
+      displayId: displayId,
+      displayIndex: displayIndex,
+    });
+  });
+
+  copyBtn.addEventListener('click', () => {
+    const text = urlEl.textContent;
+    if (text && text !== 'Not running') try { navigator.clipboard.writeText(text); } catch (_) {}
+  });
+
+  function closeModal() {
+    ipcRenderer.removeListener('display-net-error', errorListener);
+    backdrop.remove();
+  }
+
+  closeBtn.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  document.addEventListener('keydown', function onKey(e) {
+    if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', onKey); }
+  });
+
+  refreshStatus();
 }

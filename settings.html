@@ -466,6 +466,52 @@
     .btn.primary{background:var(--accent, #0078d4);border-color:var(--accent, #0078d4);color:#fff}
     .settings-content .btn{margin-right:8px}
 
+    /* Network display error text (used inside per-display modal) */
+    .nd-error { font-size: 0.85em; color: #c0392b; padding: 2px 0; }
+    body.dark-theme .nd-error { color: #e74c3c; }
+
+    /* Display list rows (style.css not loaded in settings window) */
+    .display-manager { width:100%; margin-top:6px; }
+    .display-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+    .display-row { display:flex; align-items:center; gap:8px; padding:6px 10px; background:#f4f4f4; border:1px solid #ddd; border-radius:6px; }
+    body.dark-theme .display-row { background:#2a2a2a; border-color:#444; }
+    .display-row-num { font-size:0.8em; color:#999; min-width:16px; text-align:right; flex-shrink:0; }
+    body.dark-theme .display-row-num { color:#666; }
+    .display-row-select { flex:1; font-size:0.9em; padding:4px 6px; border-radius:4px; border:1px solid #ccc; background:#fff; color:#000; }
+    body.dark-theme .display-row-select { background:#1e1e1e; border-color:#555; color:#eee; }
+    .display-row-remove { flex-shrink:0; width:28px; height:28px; min-height:28px; padding:0; font-size:1.2em; line-height:1; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; color:#c00; border:1px solid #c00; background:transparent; }
+    .display-row-remove:hover { background:#c00; color:#fff; }
+    body.dark-theme .display-row-remove { color:#e05555; border-color:#e05555; }
+    body.dark-theme .display-row-remove:hover { background:#a83232; color:#fff; }
+    .display-manager-footer { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .display-add-btn { font-size:0.88em; }
+    .display-global-actions { margin-top:6px; }
+
+    /* Display row edit button */
+    .display-row-edit { flex-shrink:0; width:28px; height:28px; min-height:28px; padding:0; font-size:0.9em; line-height:1; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; }
+
+    /* Per-display settings modal */
+    .dp-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:1000; display:flex; align-items:center; justify-content:center; }
+    .dp-modal { background:#fff; border-radius:8px; box-shadow:0 4px 24px rgba(0,0,0,0.18); min-width:320px; max-width:420px; width:90%; overflow:hidden; max-height:90vh; display:flex; flex-direction:column; }
+    body.dark-theme .dp-modal { background:#2a2a2a; color:#eee; }
+    .dp-modal-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #e8e8e8; }
+    body.dark-theme .dp-modal-header { border-bottom-color:#444; }
+    .dp-modal-title { font-weight:600; font-size:1em; }
+    .dp-modal-close { background:none; border:none; font-size:1.1em; cursor:pointer; padding:2px 6px; color:#666; line-height:1; border-radius:4px; }
+    .dp-modal-close:hover { background:#f0f0f0; color:#333; }
+    body.dark-theme .dp-modal-close { color:#aaa; }
+    body.dark-theme .dp-modal-close:hover { background:#333; color:#eee; }
+    .dp-modal-body { padding:16px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; flex:1 1 auto; }
+    .dp-modal-section { font-size:0.78em; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:#888; margin-bottom:2px; }
+    body.dark-theme .dp-modal-section { color:#666; }
+    .dp-nd-port-row { display:flex; align-items:center; gap:8px; }
+    .dp-nd-port-row input[type="number"] { width:80px; }
+    .dp-nd-label { font-size:0.9em; color:var(--muted,#666); }
+    body.dark-theme .dp-nd-label { color:#999; }
+    .dp-nd-url-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .dp-nd-url-row #dp-nd-url { font-family:monospace; font-size:0.9em; word-break:break-all; }
+    .dp-nd-url-row .btn { padding:2px 8px; height:28px; min-height:28px; font-size:0.82em; }
+
     /* Account box colors - adapt to dark mode */
     .account-box{padding:8px;border-radius:4px;border:1px solid #e0e0e0;background:#f5f5f5;color:#111}
     body.dark-theme .account-box{background:var(--panel,#23272a);color:var(--text,#eee);border-color:rgba(255,255,255,0.04)}
@@ -476,16 +522,37 @@
 
     @media (max-width:600px) { .settings-container { min-width: 320px; } }
 
-    /* Themed scrollbar for settings content (WebKit-based) */
-    .settings-content::-webkit-scrollbar { width: 12px; height: 12px; }
-    .settings-content::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
-    .settings-content::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
-    .settings-content::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); }
+    /* Themed scrollbar for all scrollable areas */
+    .settings-content::-webkit-scrollbar,
+    .dp-modal-body::-webkit-scrollbar,
+    .ai-log::-webkit-scrollbar,
+    .bible-import-modal-list::-webkit-scrollbar { width: 8px; height: 8px; }
+    .settings-content::-webkit-scrollbar-track,
+    .dp-modal-body::-webkit-scrollbar-track,
+    .ai-log::-webkit-scrollbar-track,
+    .bible-import-modal-list::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+    .settings-content::-webkit-scrollbar-thumb,
+    .dp-modal-body::-webkit-scrollbar-thumb,
+    .ai-log::-webkit-scrollbar-thumb,
+    .bible-import-modal-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+    .settings-content::-webkit-scrollbar-thumb:hover,
+    .dp-modal-body::-webkit-scrollbar-thumb:hover,
+    .ai-log::-webkit-scrollbar-thumb:hover,
+    .bible-import-modal-list::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.3); background-clip: content-box; }
 
     /* Dark-mode scrollbar overrides */
-    body.dark-theme .settings-content::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
-    body.dark-theme .settings-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); }
-    body.dark-theme .settings-content::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+    body.dark-theme .settings-content::-webkit-scrollbar-track,
+    body.dark-theme .dp-modal-body::-webkit-scrollbar-track,
+    body.dark-theme .ai-log::-webkit-scrollbar-track,
+    body.dark-theme .bible-import-modal-list::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+    body.dark-theme .settings-content::-webkit-scrollbar-thumb,
+    body.dark-theme .dp-modal-body::-webkit-scrollbar-thumb,
+    body.dark-theme .ai-log::-webkit-scrollbar-thumb,
+    body.dark-theme .bible-import-modal-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); background-clip: content-box; }
+    body.dark-theme .settings-content::-webkit-scrollbar-thumb:hover,
+    body.dark-theme .dp-modal-body::-webkit-scrollbar-thumb:hover,
+    body.dark-theme .ai-log::-webkit-scrollbar-thumb:hover,
+    body.dark-theme .bible-import-modal-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); background-clip: content-box; }
 
     /* Styled select to match app inputs/buttons */
     #default-display { appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 8px 36px 8px 12px; border-radius:6px; border:1px solid rgba(0,0,0,0.08); background-color:var(--panel); color:var(--text); background-position: right 12px center; background-repeat:no-repeat; background-size: 12px 8px; }
@@ -791,6 +858,13 @@
           </div>
         </div>
         
+        <div class="form-row" style="margin-bottom:12px;">
+          <label style="font-size:0.9em;font-weight:500;display:block;margin-bottom:4px;">Display Name</label>
+          <input id="relay-device-name" type="text" maxlength="48" placeholder="Liturgia Desktop"
+            style="width:100%;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.9em;" />
+          <div style="font-size:0.8em;color:#888;margin-top:3px;">This name appears in the mobile app when connecting.</div>
+        </div>
+
         <div class="form-row">
           <label class="toggle-label">
             <input id="relay-enabled" type="checkbox" />
