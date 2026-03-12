@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.2 - 2026-03-12
+
+- feat: app renamed to "Liturgia • Worship" across all titles, dialogs, and site pages
+- feat: song list now sorts A-Z by title
+
 ## 5.0.1 - 2026-03-12
 
 - fix: sidecar stderr (Vosk internal warnings) no longer triggers the "Errors detected" toast — downgraded from console.error to console.warn

@@ -92,8 +92,8 @@ function _handleFatalError(source, err) {
       // dialog.showMessageBoxSync works without a parent BrowserWindow
       dialog.showMessageBoxSync({
         type: 'error',
-        title: 'Liturgia crashed',
-        message: 'Liturgia encountered an unexpected error and needs to close.',
+        title: 'Liturgia • Worship crashed',
+        message: 'Liturgia • Worship encountered an unexpected error and needs to close.',,
         detail: `A crash report has been saved to:\n${reportPath || 'unknown location'}\n\nError: ${err && err.message ? err.message : String(err)}`,
         buttons: ['OK']
       });
@@ -1372,8 +1372,8 @@ function handlePairRequest(deviceId, deviceName) {
     buttons: ['Approve', 'Reject'],
     defaultId: 0,
     title: 'Remote Control Pairing Request',
-    message: `"${deviceName}" wants to connect to Liturgia.`,
-    detail: 'Do you want to allow this device to control Liturgia?'
+    message: `"${deviceName}" wants to connect to Liturgia • Worship.`,
+    detail: 'Do you want to allow this device to control Liturgia • Worship?'
   }).then(({ response }) => {
     if (response === 0) {
       // Approved
@@ -2927,7 +2927,7 @@ function createLiveWindowForDisplay(display) {
   }
   const win = new BrowserWindow({
     parent: null,
-    title: 'Liturgia Live',
+    title: 'Liturgia • Worship Live',
     icon: getIconPath(),
     x: display.bounds.x,
     y: display.bounds.y,

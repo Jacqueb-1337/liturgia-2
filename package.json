@@ -1,9 +1,9 @@
 {
   "name": "liturgia",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "author": "Jacqueb <contact@jacqueb.me>",
   "main": "main.js",
-  "description": "Liturgia — presentation software",
+  "description": "Liturgia • Worship — presentation software",
   "scripts": {
     "start": "electron .",
     "dev": "set NODE_ENV=development && electron .",

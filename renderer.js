@@ -5411,6 +5411,8 @@ async function loadSongs() {
 }
 
 function renderSongList(songs) {
+  // Always display A-Z by title
+  songs = songs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
   const songListContainer = document.getElementById('song-list');
   const wrapper = document.getElementById('song-virtual-list');
   if (!wrapper || !songListContainer) return;
