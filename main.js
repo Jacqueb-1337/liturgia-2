@@ -322,6 +322,8 @@ const specialCharacters = {
 };
 
 function normalizeVerseSpacing(text) {
+  // Normalize all line endings to \n first (RTF source often yields \r\n)
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   // Add double newline before verse/section tags (except the first one)
   // Match patterns like [Verse 1], [Chorus], etc.
   let lines = text.split('\n');

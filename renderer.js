@@ -5419,7 +5419,22 @@ async function loadSongs() {
       allSongs = [];
     } else {
       const data = fs.readFileSync(songsPath, 'utf8');
-      allSongs = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // Auto-fix any \r characters left from old EasyWorship imports (\r\n stored as \n\r\n)
+      let needsWrite = false;
+      for (const song of parsed) {
+        if (!Array.isArray(song.lyrics)) continue;
+        for (const section of song.lyrics) {
+          if (section.text && section.text.includes('\r')) {
+            section.text = section.text.replace(/\r/g, '');
+            needsWrite = true;
+          }
+        }
+      }
+      if (needsWrite) {
+        try { fs.writeFileSync(songsPath, JSON.stringify(parsed, null, 2), 'utf8'); } catch {}
+      }
+      allSongs = parsed;
     }
     
     renderSongList(allSongs);

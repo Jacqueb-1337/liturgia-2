@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.5 - 2026-03-12
+
+- fix: EasyWorship import no longer produces double blank lines between every lyric line (CRLF \\r\\n not fully stripped from RTF output)
+- fix: existing imported songs with stale \\r characters are auto-cleaned on next launch
+
 ## 5.0.4 - 2026-03-12
 
 - fix: all global keybinds (go-live Enter, prev/next verse, etc.) are now suppressed when any modal or editor overlay is open — pressing Enter in the song editor no longer triggers Go Live
