@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.0.3 - 2026-03-12
+
+- fix: crash on startup caused by stray double comma in crash dialog message string
+
 ## 5.0.2 - 2026-03-12
 
 - feat: app renamed to "Liturgia • Worship" across all titles, dialogs, and site pages

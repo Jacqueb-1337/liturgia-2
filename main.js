@@ -93,7 +93,7 @@ function _handleFatalError(source, err) {
       dialog.showMessageBoxSync({
         type: 'error',
         title: 'Liturgia • Worship crashed',
-        message: 'Liturgia • Worship encountered an unexpected error and needs to close.',,
+        message: 'Liturgia • Worship encountered an unexpected error and needs to close.',
         detail: `A crash report has been saved to:\n${reportPath || 'unknown location'}\n\nError: ${err && err.message ? err.message : String(err)}`,
         buttons: ['OK']
       });
