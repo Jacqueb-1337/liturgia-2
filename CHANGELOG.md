@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.0.7 - 2026-03-12
+
+- fix: startup sanitizer now also collapses double blank lines left by earlier partial fix (stripping \\r left \\n\\n between each lyric line); each line is also trimmed
+- fix: normalizeVerseSpacing collapses 3+ consecutive newlines to prevent same issue on fresh imports
+
 ## 5.0.6 - 2026-03-12
 
 - fix: CRLF song sanitization moved to main process startup (runs before window opens, guaranteed to succeed); creates songs.json.bak as safety net before rewriting

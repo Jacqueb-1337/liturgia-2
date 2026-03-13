@@ -324,6 +324,9 @@ const specialCharacters = {
 function normalizeVerseSpacing(text) {
   // Normalize all line endings to \n first (RTF source often yields \r\n)
   text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // Collapse runs of blank lines within verse blocks down to a single blank line
+  // (used as verse separator). Blank lines between section tags are intentional.
+  text = text.replace(/\n{3,}/g, '\n\n');
   // Add double newline before verse/section tags (except the first one)
   // Match patterns like [Verse 1], [Chorus], etc.
   let lines = text.split('\n');
@@ -2493,22 +2496,38 @@ app.whenReady().then(async () => {
       for (const song of songs) {
         if (!Array.isArray(song.lyrics)) continue;
         for (const section of song.lyrics) {
-          if (section.text && section.text.includes('\r')) {
-            section.text = section.text.replace(/\r/g, '');
+          if (!section.text) continue;
+          const original = section.text;
+          // 1. Normalize all line endings to \n
+          let text = section.text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          // 2. Collapse runs of blank lines within a section down to a single \n
+          //    (EW import produced \n\r\n between lines; after \r removal → \n\n)
+          text = text.replace(/\n{2,}/g, '\n');
+          // 3. Trim leading/trailing whitespace from the whole block and each line
+          text = text.split('\n').map(l => l.trim()).filter((l, i, arr) => {
+            // Remove leading/trailing blank lines but keep internal ones that
+            // survive (none should after step 2, but be safe)
+            if (i === 0 || i === arr.length - 1) return l !== '';
+            return true;
+          }).join('\n');
+          if (text !== original) {
+            section.text = text;
             dirty = true;
           }
         }
         // Also clean title / author whitespace anomalies from EW
-        if (typeof song.title === 'string' && /\r/.test(song.title)) {
-          song.title = song.title.replace(/\r/g, '');
-          dirty = true;
+        for (const key of ['title', 'author']) {
+          if (typeof song[key] === 'string') {
+            const cleaned = song[key].replace(/\r/g, '').trim();
+            if (cleaned !== song[key]) { song[key] = cleaned; dirty = true; }
+          }
         }
       }
       if (dirty) {
         const tmp = songsPath + '.bak';
         fs.copyFileSync(songsPath, tmp); // keep one backup just in case
         fs.writeFileSync(songsPath, JSON.stringify(songs, null, 2), 'utf8');
-        console.log('[startup] songs.json sanitized (\\r chars removed)');
+        console.log('[startup] songs.json sanitized (CRLF / blank lines fixed)');
       }
     }
   } catch (e) {
