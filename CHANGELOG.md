@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.0.6 - 2026-03-12
+
+- fix: CRLF song sanitization moved to main process startup (runs before window opens, guaranteed to succeed); creates songs.json.bak as safety net before rewriting
+
 ## 5.0.5 - 2026-03-12
 
 - fix: EasyWorship import no longer produces double blank lines between every lyric line (CRLF \\r\\n not fully stripped from RTF output)

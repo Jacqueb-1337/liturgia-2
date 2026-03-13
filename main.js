@@ -2482,6 +2482,39 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(async () => {
+  // Sanitize songs.json before the window opens: strip \r chars introduced by
+  // old EasyWorship imports (stored as \n\r\n instead of plain \n)
+  try {
+    const songsPath = path.join(getUserDataDir(app), 'songs.json');
+    if (fs.existsSync(songsPath)) {
+      const raw = fs.readFileSync(songsPath, 'utf8');
+      const songs = JSON.parse(raw);
+      let dirty = false;
+      for (const song of songs) {
+        if (!Array.isArray(song.lyrics)) continue;
+        for (const section of song.lyrics) {
+          if (section.text && section.text.includes('\r')) {
+            section.text = section.text.replace(/\r/g, '');
+            dirty = true;
+          }
+        }
+        // Also clean title / author whitespace anomalies from EW
+        if (typeof song.title === 'string' && /\r/.test(song.title)) {
+          song.title = song.title.replace(/\r/g, '');
+          dirty = true;
+        }
+      }
+      if (dirty) {
+        const tmp = songsPath + '.bak';
+        fs.copyFileSync(songsPath, tmp); // keep one backup just in case
+        fs.writeFileSync(songsPath, JSON.stringify(songs, null, 2), 'utf8');
+        console.log('[startup] songs.json sanitized (\\r chars removed)');
+      }
+    }
+  } catch (e) {
+    console.warn('[startup] songs.json sanitize failed (non-fatal):', e.message || e);
+  }
+
   // Register custom protocol handler for deep links (magic link from email)
   if (process.defaultApp) {
     // Development mode: register the protocol handler
