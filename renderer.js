@@ -4443,10 +4443,14 @@ function initSchedule() {
 
 function handleVerseDragStart(e) {
   if (!e.target.classList.contains('verse-item')) return;
-  
-  // Store the current selection
+
+  const draggedIndex = parseInt(e.target.getAttribute('data-index'));
+  // If the dragged item is part of the current multi-selection, drag all selected indices.
+  // Otherwise drag only the item that was actually grabbed.
+  const indices = selectedIndices.includes(draggedIndex) ? selectedIndices : [draggedIndex];
+
   e.dataTransfer.effectAllowed = 'copy';
-  e.dataTransfer.setData('text/plain', JSON.stringify(selectedIndices));
+  e.dataTransfer.setData('text/plain', JSON.stringify(indices));
 }
 
 function handleScheduleDragOver(e) {
