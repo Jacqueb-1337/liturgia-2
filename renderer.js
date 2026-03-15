@@ -2710,7 +2710,7 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
         ctx.letterSpacing = (textStyle && textStyle.letterSpacing) ? `${textStyle.letterSpacing * _normScale}px` : '0px';
 
       const _rawText = (content.type === 'song' && globalStyle.songInline)
-        ? (content.text || '').replace(/\n+/g, ' ').trim()
+        ? (content.text || '').split('\n').map(l => l.trim()).filter(l => l.length > 0).map(l => /[.!?,;:]$/.test(l) ? l : l + '.').join(' ')
         : content.text;
       const textLines = _rawText.split('\n');
 
