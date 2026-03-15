@@ -4535,7 +4535,7 @@ function renderSchedule() {
   scheduleList.innerHTML = '';
   
   if (scheduleItems.length === 0) {
-    scheduleList.innerHTML = '<div style="color: #888; padding: 20px; text-align: center;">Drag verses here to add to schedule</div>';
+    scheduleList.innerHTML = '<div class="schedule-empty-hint">Drag verses, songs, or media here.<br><span class="schedule-empty-sub">You can also open a .litsch file.</span></div>';
     return;
   }
   
