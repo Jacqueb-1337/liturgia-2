@@ -266,8 +266,9 @@
     <div id="top-section" style="display: flex; flex: 0 0 calc(100vh - 216px); overflow: hidden; min-height: 0; min-width: 0; max-width: 100%;">
       <!-- Schedule Sidebar -->
       <div id="schedule-sidebar" style="width: 250px; display: flex; flex-direction: column;">
-        <div id="schedule-header" style="padding: 10px; font-weight: bold;">
-          Schedule
+        <div id="schedule-header" style="padding: 10px; font-weight: bold; display: flex; align-items: center; justify-content: space-between;">
+          <span>Schedule</span>
+          <button id="schedule-clear-btn" class="btn schedule-clear-btn" title="Remove all items">Clear All</button>
         </div>
         <div id="schedule-list" style="flex: 1; overflow-y: auto; padding: 5px;">
           <!-- Schedule items will be added here -->

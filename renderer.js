@@ -4363,6 +4363,74 @@ function initSchedule() {
   
   // Load schedule from settings
   loadScheduleFromSettings();
+
+  // Clear All button
+  const clearBtn = document.getElementById('schedule-clear-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (scheduleItems.length === 0) return;
+      if (!confirm('Remove all items from the schedule?')) return;
+      scheduleItems = [];
+      renderSchedule();
+      saveScheduleToSettings();
+    });
+  }
+
+  // File menu: Save / Load schedule
+  ipcRenderer.on('schedule:save', async () => {
+    const filePath = await ipcRenderer.invoke('schedule:save-to-file');
+    if (!filePath) return;
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(scheduleItems, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to save schedule file:', err);
+    }
+  });
+
+  ipcRenderer.on('schedule:load', async () => {
+    const loaded = await ipcRenderer.invoke('schedule:load-from-file');
+    if (!Array.isArray(loaded)) return;
+    scheduleItems = loaded;
+    renderSchedule();
+    saveScheduleToSettings();
+  });
+
+  // Opened via file association (double-click .litsch file or passed at launch)
+  ipcRenderer.on('schedule:open-file', (_e, data) => {
+    if (!Array.isArray(data)) return;
+    if (!confirm('Load this schedule file? Your current schedule will be cleared.')) return;
+    scheduleItems = data;
+    renderSchedule();
+    saveScheduleToSettings();
+  });
+
+  // Opened via file association (double-click .litsong file or passed at launch)
+  ipcRenderer.on('songs:open-file', async (_e, data) => {
+    if (!Array.isArray(data)) return;
+    const songs = data.filter(s => s.title && s.lyrics && Array.isArray(s.lyrics));
+    if (songs.length === 0) return;
+    if (!confirm(`Import ${songs.length} song${songs.length !== 1 ? 's' : ''} from this file? Duplicates will be skipped.`)) return;
+    let addedCount = 0;
+    songs.forEach(song => {
+      const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
+      if (!exists) { allSongs.push(song); addedCount++; }
+    });
+    if (addedCount > 0) {
+      try {
+        const userData  = await ipcRenderer.invoke('get-user-data-path');
+        const songsPath = path.join(userData, 'songs.json');
+        fs.writeFileSync(songsPath, JSON.stringify(allSongs, null, 2), 'utf8');
+        renderSongList(allSongs);
+        populateHymnalFilter();
+        alert(`Imported ${addedCount} song${addedCount !== 1 ? 's' : ''}`);
+      } catch (err) {
+        console.error('Failed to save imported songs:', err);
+        alert('Failed to save imported songs');
+      }
+    } else {
+      alert('No new songs to import (all duplicates)');
+    }
+  });
   
   // Make verse items draggable
   verseList.addEventListener('dragstart', handleVerseDragStart);
@@ -5140,9 +5208,26 @@ function handleScheduleItemDragOver(e) {
 function handleScheduleItemDrop(e) {
   e.preventDefault();
   e.stopPropagation();
-  
-  if (draggedScheduleIndex === null) return;
-  
+
+  // External drag (song / verse / media being added) — delegate to the list drop handler
+  if (draggedScheduleIndex === null) {
+    const data = e.dataTransfer.getData('text/plain');
+    if (!data) return;
+    try {
+      const dragData = JSON.parse(data);
+      if (dragData.type === 'song') {
+        addSongToSchedule(dragData.songIndex);
+      } else if (dragData.type === 'media') {
+        addMediaToSchedule(dragData.mediaIndex);
+      } else if (Array.isArray(dragData)) {
+        addScheduleItem(dragData);
+      }
+    } catch (err) {
+      console.error('Failed to parse dropped data on schedule item:', err);
+    }
+    return;
+  }
+
   const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'));
   
   if (targetIndex !== draggedScheduleIndex) {
@@ -6307,7 +6392,8 @@ function exportSongs(songIndices) {
   card.innerHTML = `
     <div style="font-size:1.1em;font-weight:600;margin-bottom:16px;">Export ${songsToExport.length} song${songsToExport.length !== 1 ? 's' : ''}</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <button id="exp-json" class="btn primary" style="text-align:left;padding:10px 14px;"><strong>JSON</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">Reimportable — preserves all data</div></button>
+      <button id="exp-litsong" class="btn primary" style="text-align:left;padding:10px 14px;"><strong>Liturgia Songs (.litsong)</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">Reimportable in Liturgia — preserves all data</div></button>
+      <button id="exp-json" class="btn" style="text-align:left;padding:10px 14px;"><strong>JSON (.json)</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">Generic JSON — compatible with other tools</div></button>
       <button id="exp-txt" class="btn" style="text-align:left;padding:10px 14px;"><strong>Text file</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">All songs in one .txt file</div></button>
       <button id="exp-zip" class="btn" style="text-align:left;padding:10px 14px;"><strong>Text files (ZIP)</strong><div style="font-size:0.8em;opacity:0.75;margin-top:2px;">One .txt per song, zipped</div></button>
     </div>
@@ -6319,6 +6405,16 @@ function exportSongs(songIndices) {
   const close = () => document.body.removeChild(overlay);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   card.querySelector('#exp-cancel').onclick = close;
+
+  card.querySelector('#exp-litsong').onclick = () => {
+    close();
+    const jsonData = JSON.stringify(songsToExport, null, 2);
+    const blob = new Blob([jsonData], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `songs-export-${Date.now()}.litsong`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   card.querySelector('#exp-json').onclick = () => {
     close();
@@ -6374,7 +6470,7 @@ function exportSongs(songIndices) {
 function importSongs() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.json,.txt,.rtf,.zip,.db';
+  input.accept = '.json,.litsong,.txt,.rtf,.zip,.db';
   input.multiple = true;
   input.onchange = (e) => processSongImportFiles(Array.from(e.target.files));
   input.click();
@@ -6468,7 +6564,7 @@ async function processSongImportFiles(files) {
       } else {
         const fileContent = await file.text();
 
-        if (fileExt === '.json') {
+        if (fileExt === '.json' || fileExt === '.litsong') {
           let parsed;
           try {
             parsed = JSON.parse(fileContent);
@@ -7154,7 +7250,7 @@ function renderMediaGrid() {
   }
   
   if (filteredMedia.length === 0 && query) {
-    display.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No media files</div>';
+    display.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">No media files match your search.</div>';
     return;
   }
   
@@ -7223,6 +7319,12 @@ function renderMediaGrid() {
   });
   
   html += '</div>';
+
+  // Empty state hint (no items added yet, not searching)
+  if (allMedia.length === 0 && !query) {
+    html += '<div style="padding: 20px; text-align: center; color: #999; font-size: 13px;">No media yet. Click + to add photos, videos, or websites, or use the New Color tile above.</div>';
+  }
+
   display.innerHTML = html;
   
   // Add event listeners

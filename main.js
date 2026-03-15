@@ -231,6 +231,9 @@ let pendingMaximize = false;
 let pendingFullscreen = false;
 let rendererReady = false; // Set when renderer finishes DOMContentLoaded initialization
 let aiWorkerWindowReady = false;
+let pendingScheduleFile = null; // Path to a .litsch file passed at launch before the window is ready
+let pendingSongFile = null;     // Path to a .litsong file passed at launch before the window is ready
+let pendingReportFile = null;   // Path to a .litrep file passed at launch before the window is ready
 let sidecarInitialized = false;
 let initialWindowX = 100;
 let initialWindowY = 100;
@@ -1014,8 +1017,56 @@ function tryCloseSplashScreen() {
             } 
           } catch(e){ console.error('[main] Error showing main window:', e); }
           try { if (mainWindow && mainWindow.webContents) mainWindow.webContents.send('splash-closed'); } catch(e){}
+          // If a .litsch file was queued before the window was ready, open it now
+          if (pendingScheduleFile) {
+            const p = pendingScheduleFile;
+            pendingScheduleFile = null;
+            setTimeout(() => sendScheduleFileToRenderer(p), 300);
+          }
+          // If a .litsong file was queued before the window was ready, open it now
+          if (pendingSongFile) {
+            const p = pendingSongFile;
+            pendingSongFile = null;
+            setTimeout(() => sendSongFileToRenderer(p), 300);
+          }
+          // If a .litrep report file was queued before the window was ready, open the report viewer
+          if (pendingReportFile) {
+            const p = pendingReportFile;
+            pendingReportFile = null;
+            setTimeout(() => openReportViewerWindow(p), 300);
+          }
         }, 50);
       }, finalDelay);
+    }
+  }
+}
+
+function sendScheduleFileToRenderer(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('schedule:open-file', data);
+      mainWindow.focus();
+    }
+  } catch (e) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showMessageBox(mainWindow, { type: 'error', message: 'Failed to open schedule file', detail: e.message || String(e), buttons: ['OK'] });
+    }
+  }
+}
+
+function sendSongFileToRenderer(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = JSON.parse(raw);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('songs:open-file', data);
+      mainWindow.focus();
+    }
+  } catch (e) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showMessageBox(mainWindow, { type: 'error', message: 'Failed to open song file', detail: e.message || String(e), buttons: ['OK'] });
     }
   }
 }
@@ -1147,6 +1198,31 @@ ipcMain.handle('load-settings', async () => {
   } catch (e) {
     console.warn('[load-settings] returning default {}; error:', e && e.message);
     return {};
+  }
+});
+
+ipcMain.handle('schedule:save-to-file', async () => {
+  const { filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Schedule',
+    defaultPath: 'schedule.litsch',
+    filters: [{ name: 'Liturgia Schedule', extensions: ['litsch'] }]
+  });
+  return filePath || null;
+});
+
+ipcMain.handle('schedule:load-from-file', async () => {
+  const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Load Schedule',
+    filters: [{ name: 'Liturgia Schedule', extensions: ['litsch'] }],
+    properties: ['openFile']
+  });
+  if (!filePaths || !filePaths.length) return null;
+  try {
+    const raw = await fs.promises.readFile(filePaths[0], 'utf8');
+    return JSON.parse(raw);
+  } catch (e) {
+    await dialog.showMessageBox(mainWindow, { type: 'error', message: 'Failed to load schedule', detail: e.message || String(e), buttons: ['OK'] });
+    return null;
   }
 });
 
@@ -2296,6 +2372,17 @@ async function createWindow() {
           click: async () => { await importVideoPsalmHandler(); }
         },
         { type: 'separator' },
+        {
+          label: 'Save Schedule...',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => { if (mainWindow) mainWindow.webContents.send('schedule:save'); }
+        },
+        {
+          label: 'Load Schedule...',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => { if (mainWindow) mainWindow.webContents.send('schedule:load'); }
+        },
+        { type: 'separator' },
         { role: 'quit' }
       ]
     },
@@ -2468,6 +2555,21 @@ if (!gotTheLock) {
     if (deepLink) {
       handleDeepLink(deepLink);
     }
+    // Check for .litsch schedule file in commandLine (Windows - file association)
+    const scheduleFile = commandLine.find(arg => arg.endsWith('.litsch'));
+    if (scheduleFile && fs.existsSync(scheduleFile)) {
+      sendScheduleFileToRenderer(scheduleFile);
+    }
+    // Check for .litsong song file in commandLine (Windows - file association)
+    const songFile = commandLine.find(arg => arg.endsWith('.litsong'));
+    if (songFile && fs.existsSync(songFile)) {
+      sendSongFileToRenderer(songFile);
+    }
+    // Check for .litrep report file in commandLine (Windows - file association)
+    const repFile = commandLine.find(arg => arg.endsWith('.litrep'));
+    if (repFile && fs.existsSync(repFile)) {
+      openReportViewerWindow(repFile);
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
@@ -2480,6 +2582,30 @@ if (!gotTheLock) {
     console.log('[main] open-url event:', url);
     if (url.startsWith('liturgia://')) {
       handleDeepLink(url);
+    }
+  });
+
+  // Handle open-file event (macOS - when a .litsch, .litsong, or .litrep file is opened)
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    if (filePath.endsWith('.litsch')) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        sendScheduleFileToRenderer(filePath);
+      } else {
+        pendingScheduleFile = filePath;
+      }
+    } else if (filePath.endsWith('.litsong')) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        sendSongFileToRenderer(filePath);
+      } else {
+        pendingSongFile = filePath;
+      }
+    } else if (filePath.endsWith('.litrep')) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        openReportViewerWindow(filePath);
+      } else {
+        pendingReportFile = filePath;
+      }
     }
   });
 }
@@ -2546,7 +2672,29 @@ app.whenReady().then(async () => {
     // Production mode (packaged)
     app.setAsDefaultProtocolClient('liturgia');
   }
-  
+
+  // Check if a .litsch schedule file was passed as a command-line argument (Windows, first launch)
+  if (!pendingScheduleFile) {
+    const scheduleArg = process.argv.find(a => a.endsWith('.litsch'));
+    if (scheduleArg && fs.existsSync(scheduleArg)) {
+      pendingScheduleFile = scheduleArg;
+    }
+  }
+  // Check if a .litsong song file was passed as a command-line argument (Windows, first launch)
+  if (!pendingSongFile) {
+    const songArg = process.argv.find(a => a.endsWith('.litsong'));
+    if (songArg && fs.existsSync(songArg)) {
+      pendingSongFile = songArg;
+    }
+  }
+  // Check if a .litrep report file was passed as a command-line argument (Windows, first launch)
+  if (!pendingReportFile) {
+    const repArg = process.argv.find(a => a.endsWith('.litrep'));
+    if (repArg && fs.existsSync(repArg)) {
+      pendingReportFile = repArg;
+    }
+  }
+
   await createWindow();
 
   if (speechSidecarManager) {

@@ -1,6 +1,6 @@
 {
   "name": "liturgia",
-  "version": "5.0.8",
+  "version": "5.1.0",
   "author": "Jacqueb <contact@jacqueb.me>",
   "main": "main.js",
   "description": "Liturgia • Worship — presentation software",
@@ -41,6 +41,26 @@
       "icon": "build/icon.png",
       "category": "AudioVideo"
     },
+    "fileAssociations": [
+      {
+        "ext": "litsch",
+        "name": "Liturgia Schedule",
+        "description": "Liturgia Worship Schedule",
+        "role": "Editor"
+      },
+      {
+        "ext": "litsong",
+        "name": "Liturgia Songs",
+        "description": "Liturgia Song Collection",
+        "role": "Editor"
+      },
+      {
+        "ext": "litrep",
+        "name": "Liturgia Report",
+        "description": "Liturgia Diagnostic Report",
+        "role": "Viewer"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,
