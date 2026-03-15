@@ -1565,7 +1565,7 @@
         state.browserNoSpeechWhileMeterCount = 0;
         await connectSidecar();
         state.useBrowserSpeech = false;
-        sendSidecarControl("start", { wordList: buildRecognitionWordList() });
+        sendSidecarControl("start", {});
         setPill(statusLatency, "Latency: sidecar", "ok");
         log("Backend mode: Vosk sidecar only.", "warn");
         startAudioWatchdog();
@@ -1658,9 +1658,9 @@
     const BOOKS = [
       { key:"genesis", aliases:["genesis", "gen"] },
       { key:"exodus", aliases:["exodus", "exo"] },
-      { key:"leviticus", aliases:["leviticus", "lev"] },
+      { key:"leviticus", aliases:["leviticus", "lev", "vegas"] },
       { key:"numbers", aliases:["numbers", "num"] },
-      { key:"deuteronomy", aliases:["deuteronomy", "deut", "deu"] },
+      { key:"deuteronomy", aliases:["deuteronomy", "deut", "deu", "dude around me", "did around me", "do around me", "dead around me", "do it around me", "later on me", "later on my", "later on may"] },
       { key:"joshua", aliases:["joshua", "josh"] },
       { key:"judges", aliases:["judges", "judg"] },
       { key:"ruth", aliases:["ruth"] },
@@ -1676,11 +1676,11 @@
       { key:"job", aliases:["job"] },
       { key:"psalms", aliases:["psalms", "psalm", "ps"] },
       { key:"proverbs", aliases:["proverbs", "prov"] },
-      { key:"ecclesiastes", aliases:["ecclesiastes", "eccl", "eccles"] },
+      { key:"ecclesiastes", aliases:["ecclesiastes", "eccl", "eccles", "ecclesiasties"] },
       { key:"songofsolomon", aliases:["song of solomon", "song of songs", "songs", "song", "sos"] },
       { key:"isaiah", aliases:["isaiah", "isa"] },
       { key:"jeremiah", aliases:["jeremiah", "jer"] },
-      { key:"lamentations", aliases:["lamentations", "lam"] },
+      { key:"lamentations", aliases:["lamentations", "lam", "limitations"] },
       { key:"ezekiel", aliases:["ezekiel", "ezek", "eze"] },
       { key:"daniel", aliases:["daniel", "dan"] },
       { key:"hosea", aliases:["hosea", "hos"] },
@@ -1693,8 +1693,8 @@
       { key:"habakkuk", aliases:["habakkuk", "hab"] },
       { key:"zephaniah", aliases:["zephaniah", "zeph", "zep"] },
       { key:"haggai", aliases:["haggai", "hag"] },
-      { key:"zechariah", aliases:["zechariah", "zech", "zec"] },
-      { key:"malachi", aliases:["malachi", "mal"] },
+      { key:"zechariah", aliases:["zechariah", "zech", "zec", "zachariah"] },
+      { key:"malachi", aliases:["malachi", "mal", "maliki", "malaka", "malka", "malik", "malika", "molokai", "malaga", "maga", "melissa"] },
       { key:"matthew", aliases:["matthew", "matt", "mt"] },
       { key:"mark", aliases:["mark", "mk"] },
       { key:"luke", aliases:["luke", "lk"] },
@@ -1704,15 +1704,15 @@
       { key:"1corinthians", aliases:["1 corinthians", "first corinthians", "one corinthians"] },
       { key:"2corinthians", aliases:["2 corinthians", "second corinthians", "two corinthians"] },
       { key:"galatians", aliases:["galatians", "gal"] },
-      { key:"ephesians", aliases:["ephesians", "eph"] },
+      { key:"ephesians", aliases:["ephesians", "eph", "if asians", "if agents", "if egypt s", "visions", "if asian"] },
       { key:"philippians", aliases:["philippians", "phil"] },
-      { key:"colossians", aliases:["colossians", "col"] },
-      { key:"1thessalonians", aliases:["1 thessalonians", "first thessalonians", "one thessalonians"] },
-      { key:"2thessalonians", aliases:["2 thessalonians", "second thessalonians", "two thessalonians"] },
+      { key:"colossians", aliases:["colossians", "col", "collisions", "galoshes", "cautions", "collages", "collections"] },
+      { key:"1thessalonians", aliases:["1 thessalonians", "first thessalonians", "one thessalonians", "first this alliance", "first this alone", "first this alone eons", "first there s a lonely", "first does loans", "first this loans", "bars this alliance", "bars this alone", "burst this alliance"] },
+      { key:"2thessalonians", aliases:["2 thessalonians", "second thessalonians", "two thessalonians", "second this alliance", "second this alone", "second this alone eons", "second there s a lonely", "second does loans", "second this loans"] },
       { key:"1timothy", aliases:["1 timothy", "first timothy", "one timothy"] },
       { key:"2timothy", aliases:["2 timothy", "second timothy", "two timothy"] },
-      { key:"titus", aliases:["titus"] },
-      { key:"philemon", aliases:["philemon"] },
+      { key:"titus", aliases:["titus", "tatis"] },
+      { key:"philemon", aliases:["philemon", "filemon", "philimon", "filament", "film on", "film and"] },
       { key:"hebrews", aliases:["hebrews", "heb"] },
       { key:"james", aliases:["james", "jas"] },
       { key:"1peter", aliases:["1 peter", "first peter", "one peter"] },
@@ -1730,61 +1730,11 @@
     // is detected directly after the alias in the speech stream, not just anywhere in the window.
     const CONTEXT_REQUIRED_ALIASES = new Set([
       'mark', 'job', 'acts', 'john', 'james', 'numbers', 'ruth', 'luke',
-      'joel', 'amos', 'jude', 'titus', 'songs', 'romans', 'rev'
+      'joel', 'amos', 'jude', 'titus', 'tatis', 'songs', 'romans', 'rev',
+      // Phonetic aliases that are real English words — only fire when a number follows.
+      'limitations', 'collisions', 'filament', 'visions', 'maga', 'melissa',
+      'cautions', 'collages', 'collections'
     ]);
-
-    // Common English words included so that Vosk still recognises normal speech when a grammar
-    // word list is active. Without these, any word not in the list becomes [unk].
-    // This approximates soft "biasing": Bible-specific terms are guaranteed in-vocabulary while
-    // everyday conversation still transcribes correctly.
-    const COMMON_ENGLISH_WORDS = [
-      "a","about","after","again","all","also","am","an","and","any","are","as","at",
-      "back","be","because","been","before","being","between","both","but","by",
-      "called","came","can","come","could","day","did","do","does","done","down",
-      "each","even","every","find","first","for","from","get","give","go","god","good",
-      "great","had","has","have","he","her","here","him","his","how","i","if","in",
-      "into","is","it","its","just","know","last","let","like","long","look","made",
-      "make","man","many","may","me","men","more","most","much","my","new","no",
-      "not","now","o","on","one","only","or","other","our","out","over","own",
-      "part","people","place","put","said","same","say","see","she","so","some",
-      "still","such","take","tell","than","that","their","them","then","there","these",
-      "they","thing","think","this","those","time","too","turn","two","up","us",
-      "use","was","way","we","well","went","were","what","when","where","which",
-      "while","who","will","with","work","would","year","yes","yet","you","your",
-      // Preaching/church vocabulary
-      "lord","jesus","christ","holy","spirit","gospel","church","faith","prayer",
-      "grace","glory","truth","love","life","word","father","son","kingdom","heaven",
-      "earth","sin","salvation","blessed","eternal","amen","praise","worship","preach",
-      "sermon","scripture","bible","text","passage","reading","says","reads","written",
-      "open","turn","read","look","see","found","find","chapter","verse","passage",
-      "book","old","new","testament","covenant","prophet","apostle","disciple",
-      "according","therefore","because","although","however","together","another",
-      "following","great","small","second","third","fourth","fifth","last","next"
-    ];
-
-    // Build a Vosk grammar word list from all known book names, number words, connectors,
-    // and common English words. This biases Vosk's decoder toward Bible book names (ensuring
-    // e.g. "malachi" beats "maliki") while still allowing normal speech to transcribe correctly.
-    // [unk] is always included so any word not in the list still passes through (as a single [unk])
-    // rather than being lost entirely.
-    function buildRecognitionWordList() {
-      const words = new Set(["[unk]"]);
-      for (const item of ALIAS_FLAT) {
-        words.add(item.alias);
-        for (const w of item.alias.split(" ")) { if (w) words.add(w); }
-      }
-      for (const name of dynamicBookNames) {
-        const n = normalize(name);
-        if (!n) continue;
-        words.add(n);
-        for (const w of n.split(" ")) { if (w) words.add(w); }
-      }
-      for (const [w] of NUM_WORDS) words.add(w);
-      for (const [w] of NUM_HOMOPHONES) words.add(w);
-      for (const w of COMMON_ENGLISH_WORDS) words.add(w);
-      ["through","colon"].forEach(w => words.add(w));
-      return [...words];
-    }
 
     // Book names from the currently loaded Bible (populated at runtime via IPC).
     // For English Bibles these will match the alias table above; for other languages they
@@ -1992,6 +1942,10 @@
 
     function findBookCandidates(text) {
       const t = normalize(text);
+      // Normalize common Vosk b/f substitution for ordinal prefixes so numbered book aliases
+      // match correctly ("burst corinthians" → "first corinthians", etc.). Both spellings are
+      // 5 characters so text positions stay accurate.
+      const matchText = t.replace(/\bburst\b/g, "first").replace(/\bbars\b/g, "first");
       const found = [];
 
       // Check dynamic book names (from the currently loaded Bible) first.
@@ -2001,20 +1955,22 @@
         for (const name of dynamicBookNames) {
           const alias = normalize(name);
           if (!alias) continue;
-          const idx = t.lastIndexOf(alias);
+          const idx = matchText.lastIndexOf(alias);
           if (idx !== -1) found.push({ bookKey: name, match: "exact", alias, pos: idx, sim: 1 });
         }
       }
 
       // Standard English phonetic alias matching.
       for (const item of ALIAS_FLAT) {
-        const idx = t.lastIndexOf(item.alias);
+        const idx = matchText.lastIndexOf(item.alias);
         if (idx !== -1) found.push({ bookKey: item.key, match: "exact", alias: item.alias, pos: idx, sim: 1, requiresNumbers: CONTEXT_REQUIRED_ALIASES.has(item.alias) });
       }
 
-      if (!found.length) {
-        const tail = t.split(" ").slice(-6).join(" ");
-        // Fuzzy match against dynamic book names.
+      // Always run fuzzy matching on the tail of the most recently spoken words. This fires
+      // even when exact matches exist for other books earlier in the rolling window, so a
+      // garbled pronunciation at the end isn't silently dropped.
+      {
+        const tail = matchText.split(" ").slice(-6).join(" ");
         if (dynamicBookNames.length) {
           for (const name of dynamicBookNames) {
             const alias = normalize(name);
@@ -2024,14 +1980,22 @@
             if (sim >= 0.72) found.push({ bookKey: name, match: "fuzzy", alias, sim, pos: -1 });
           }
         }
-        // Fuzzy match against standard English aliases.
         for (const item of ALIAS_FLAT) {
           const dist = levenshtein(tail, item.alias);
           const sim = 1 - dist / Math.max(1, Math.max(tail.length, item.alias.length));
           if (sim >= 0.72) found.push({ bookKey: item.key, match: "fuzzy", alias: item.alias, sim, pos: -1 });
         }
-        found.sort((a, b) => b.sim - a.sim);
       }
+
+      // Sort so the most recently spoken books come first.
+      // Among exact matches: highest pos (latest in the rolling text) wins.
+      // Fuzzy matches follow, sorted by similarity.
+      found.sort((a, b) => {
+        if (a.match === "exact" && b.match !== "exact") return -1;
+        if (b.match === "exact" && a.match !== "exact") return 1;
+        if (a.match === "exact" && b.match === "exact") return b.pos - a.pos;
+        return b.sim - a.sim;
+      });
 
       const out = [];
       const seen = new Set();
@@ -2412,9 +2376,12 @@
         return b.score - a.score;
       });
 
-      // Minimum confidence threshold — filters out book-only and context-only suggestions.
-      // Scoring reference: exact-book-only = 42, context-only = 17, book+chapter = 60.
-      const MIN_SCORE = 48;
+      // Minimum confidence threshold — filters out context-only and fuzzy-only suggestions.
+      // Scoring reference: exact-book-only = 42, fuzzy-book-only ~34, context-only = 17, book+chapter = 60.
+      // 40 allows exact book-only matches through so the detected book shows as it's being spoken,
+      // before a chapter number is heard. Ambiguous aliases (john, mark, acts, etc.) are still gated
+      // by requiresNumbers and will not produce false positives.
+      const MIN_SCORE = 40;
       return selected.filter(s => s.score >= MIN_SCORE);
     }
 

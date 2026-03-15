@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import importlib
 import json
-import math
 import os
 import shutil
 import tempfile
@@ -245,15 +244,6 @@ async def handle_connection(ws, transcriber: VoskTranscriber):
                     continue
 
                 try:
-                    # Noise gate: skip frames whose RMS is below the floor to prevent
-                    # Vosk hallucinating short words (e.g. Bible book abbreviations)
-                    # from microphone noise. 16-bit PCM samples, threshold ~0.003 full-scale.
-                    import struct
-                    samples = struct.unpack_from(f"<{len(message)//2}h", message)
-                    rms = math.sqrt(sum(s*s for s in samples) / len(samples)) / 32768.0 if samples else 0
-                    if rms < 0.003:
-                        continue
-
                     accepted = recognizer.AcceptWaveform(message)
                     if accepted:
                         result = json.loads(recognizer.Result() or "{}")

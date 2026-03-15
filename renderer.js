@@ -5197,6 +5197,7 @@ function handleScheduleItemDragStart(e) {
 function handleScheduleItemDragOver(e) {
   if (draggedScheduleIndex === null) return;
   e.preventDefault();
+  e.stopPropagation(); // Prevent outer list handler from overwriting dropEffect to 'copy'
   e.dataTransfer.dropEffect = 'move';
   
   const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'));
