@@ -60,16 +60,20 @@ jobs:
         run: npm test
 
       - name: Build packages
-        run: |
-          echo "Building on $RUNNER_OS"
-          if [ "$RUNNER_OS" = "Windows" ] || [ "${{ matrix.os }}" = "windows-latest" ]; then
-            npx electron-builder --win --x64 --publish=never
-          elif [ "$RUNNER_OS" = "macOS" ] || [ "${{ matrix.os }}" = "macos-latest" ]; then
-            npx electron-builder --mac --publish=never
-          else
-            npx electron-builder --linux --publish=never
-          fi
-        shell: bash
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 20
+          max_attempts: 3
+          shell: bash
+          command: |
+            echo "Building on $RUNNER_OS"
+            if [ "$RUNNER_OS" = "Windows" ] || [ "${{ matrix.os }}" = "windows-latest" ]; then
+              npx electron-builder --win --x64 --publish=never
+            elif [ "$RUNNER_OS" = "macOS" ] || [ "${{ matrix.os }}" = "macos-latest" ]; then
+              npx electron-builder --mac --publish=never
+            else
+              npx electron-builder --linux --publish=never
+            fi
 
       - name: List dist
         run: |
