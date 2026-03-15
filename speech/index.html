@@ -995,6 +995,7 @@
     function sanitizeTranscript(raw) {
       const text = String(raw || "")
         .replace(/\b(blank_audio|\[noise\]|\[music\]|\(music\)|<\|nospeech\|>)\b/gi, " ")
+        .replace(/\[unk\]/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
       if (!text) return "";
@@ -1725,11 +1726,47 @@
 
     const ALIAS_FLAT = BOOKS.flatMap(b => b.aliases.map(a => ({ key: b.key, alias: a }))).sort((a, b) => b.alias.length - a.alias.length);
 
-    // Build a Vosk grammar word list from all known book names, number words, and connectors.
-    // Sending this with the "start" command biases Vosk's decoder toward Bible book names so that
-    // e.g. "malachi" is recognised as "malachi" rather than "maliki" or "male cats",
-    // and "exodus" is recognised correctly rather than "x oh x".
-    // [unk] is always included so unrecognised sounds still pass through.
+    // Aliases that are common English words or names — only generate suggestions when a number
+    // is detected directly after the alias in the speech stream, not just anywhere in the window.
+    const CONTEXT_REQUIRED_ALIASES = new Set([
+      'mark', 'job', 'acts', 'john', 'james', 'numbers', 'ruth', 'luke',
+      'joel', 'amos', 'jude', 'titus', 'songs', 'romans', 'rev'
+    ]);
+
+    // Common English words included so that Vosk still recognises normal speech when a grammar
+    // word list is active. Without these, any word not in the list becomes [unk].
+    // This approximates soft "biasing": Bible-specific terms are guaranteed in-vocabulary while
+    // everyday conversation still transcribes correctly.
+    const COMMON_ENGLISH_WORDS = [
+      "a","about","after","again","all","also","am","an","and","any","are","as","at",
+      "back","be","because","been","before","being","between","both","but","by",
+      "called","came","can","come","could","day","did","do","does","done","down",
+      "each","even","every","find","first","for","from","get","give","go","god","good",
+      "great","had","has","have","he","her","here","him","his","how","i","if","in",
+      "into","is","it","its","just","know","last","let","like","long","look","made",
+      "make","man","many","may","me","men","more","most","much","my","new","no",
+      "not","now","o","on","one","only","or","other","our","out","over","own",
+      "part","people","place","put","said","same","say","see","she","so","some",
+      "still","such","take","tell","than","that","their","them","then","there","these",
+      "they","thing","think","this","those","time","too","turn","two","up","us",
+      "use","was","way","we","well","went","were","what","when","where","which",
+      "while","who","will","with","work","would","year","yes","yet","you","your",
+      // Preaching/church vocabulary
+      "lord","jesus","christ","holy","spirit","gospel","church","faith","prayer",
+      "grace","glory","truth","love","life","word","father","son","kingdom","heaven",
+      "earth","sin","salvation","blessed","eternal","amen","praise","worship","preach",
+      "sermon","scripture","bible","text","passage","reading","says","reads","written",
+      "open","turn","read","look","see","found","find","chapter","verse","passage",
+      "book","old","new","testament","covenant","prophet","apostle","disciple",
+      "according","therefore","because","although","however","together","another",
+      "following","great","small","second","third","fourth","fifth","last","next"
+    ];
+
+    // Build a Vosk grammar word list from all known book names, number words, connectors,
+    // and common English words. This biases Vosk's decoder toward Bible book names (ensuring
+    // e.g. "malachi" beats "maliki") while still allowing normal speech to transcribe correctly.
+    // [unk] is always included so any word not in the list still passes through (as a single [unk])
+    // rather than being lost entirely.
     function buildRecognitionWordList() {
       const words = new Set(["[unk]"]);
       for (const item of ALIAS_FLAT) {
@@ -1744,7 +1781,8 @@
       }
       for (const [w] of NUM_WORDS) words.add(w);
       for (const [w] of NUM_HOMOPHONES) words.add(w);
-      ["chapter", "verse", "and", "through", "to", "the", "of", "colon"].forEach(w => words.add(w));
+      for (const w of COMMON_ENGLISH_WORDS) words.add(w);
+      ["through","colon"].forEach(w => words.add(w));
       return [...words];
     }
 
@@ -1767,12 +1805,11 @@
 
     const NUM_HOMOPHONES = new Map([
       ["won", 1], ["wun", 1],
-      ["to", 2], ["too", 2], ["tu", 2],
+      ["too", 2], ["tu", 2],
+      // "to" and "for" removed — they appear in almost every sentence and cause constant false positives
       ["tree", 3],
-      ["for", 4], ["fore", 4], ["fur", 4],
-      ["hive", 5],
-      ["sex", 6],
-      ["a", 8], ["eh", 8], ["ay", 8],
+      ["fur", 4],
+      // "a", "eh", "ay" removed — single-letter "a" matches every sentence
       ["ate", 8], ["ait", 8],
       ["oh", 0],
       ["nein", 9]
@@ -1972,7 +2009,7 @@
       // Standard English phonetic alias matching.
       for (const item of ALIAS_FLAT) {
         const idx = t.lastIndexOf(item.alias);
-        if (idx !== -1) found.push({ bookKey: item.key, match: "exact", alias: item.alias, pos: idx, sim: 1 });
+        if (idx !== -1) found.push({ bookKey: item.key, match: "exact", alias: item.alias, pos: idx, sim: 1, requiresNumbers: CONTEXT_REQUIRED_ALIASES.has(item.alias) });
       }
 
       if (!found.length) {
@@ -2006,7 +2043,12 @@
       }
 
       if (!out.length && state.lastBookKey) {
-        out.push({ bookKey: state.lastBookKey, match: "context", alias: "", sim: 0.5, pos: -1 });
+        // Only carry over the last book context when the current transcript actually contains numbers.
+        // Without this gate, the carry-over fires indefinitely after any stray book-name mention.
+        const hasNumbers = /\d/.test(t) || t.split(' ').some(w => NUM_WORDS.has(w));
+        if (hasNumbers) {
+          out.push({ bookKey: state.lastBookKey, match: "context", alias: "", sim: 0.5, pos: -1 });
+        }
       }
 
       return out;
@@ -2160,6 +2202,8 @@
 
       for (const b of books) {
         if (!tailNums.length) {
+          // Ambiguous aliases (common English words) must have a number detected to fire at all.
+          if (b.requiresNumbers) continue;
           cands.push({
             bookKey: b.bookKey,
             chapter: null,
@@ -2175,6 +2219,9 @@
         }
 
         const aliasHint = extractAliasNumberHint(text, b);
+        // For ambiguous aliases, require a number to appear directly after the alias — not just
+        // anywhere in the rolling window. This prevents e.g. "tell john a story" from triggering.
+        if (b.requiresNumbers && !aliasHint) continue;
         const numsForBook = aliasHint ? [aliasHint] : tailNums;
 
         for (const n of numsForBook) {
@@ -2365,7 +2412,10 @@
         return b.score - a.score;
       });
 
-      return selected;
+      // Minimum confidence threshold — filters out book-only and context-only suggestions.
+      // Scoring reference: exact-book-only = 42, context-only = 17, book+chapter = 60.
+      const MIN_SCORE = 48;
+      return selected.filter(s => s.score >= MIN_SCORE);
     }
 
     function renderSuggestions(list) {

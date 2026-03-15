@@ -2556,6 +2556,20 @@ app.whenReady().then(async () => {
       } catch (err) {
         console.warn('[speech-sidecar] ensure running failed:', err && err.message ? err.message : err);
       }
+      // If the sidecar still isn't running (e.g., Python --version timed out on a cold
+      // Windows start due to Defender scanning), queue a retry that bypasses backoff.
+      // This mirrors what the "restart" button in settings does automatically.
+      if (!speechSidecarManager.getStatus().processRunning) {
+        setTimeout(() => {
+          if (speechSidecarManager && aiEnabled) {
+            console.log('[speech-sidecar] Startup retry: process not running after initial attempt, retrying...');
+            speechSidecarManager.clearSpawnBackoff();
+            speechSidecarManager.ensureRunning().catch(err => {
+              console.warn('[speech-sidecar] startup retry failed:', err && err.message ? err.message : err);
+            });
+          }
+        }, 4000);
+      }
       startSidecarWatchdog();
     } else {
       latestSidecarStatus = decorateSidecarStatus(speechSidecarManager.getStatus());

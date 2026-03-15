@@ -153,6 +153,8 @@ class SpeechSidecarManager extends EventEmitter {
     // Backoff tracking (prevent thrashing when spawn keeps failing)
     this.consecutiveSpawnFailures = 0;
     this.spawnFailureBackoffUntil = 0;
+    // Model-error auto-restart tracking (port open but model failed to load)
+    this.modelErrorRetries = 0;
     // Diagnostic log buffer
     this.logBuffer = [];
     this.maxLogSize = 200;
@@ -451,7 +453,7 @@ class SpeechSidecarManager extends EventEmitter {
     for (const candidate of candidates) {
       try {
         this.addLog(`Verifying Python candidate: ${candidate.cmd}`);
-        const { stdout } = await execAsync(`"${candidate.cmd}" --version`, { timeout: 1000, encoding: 'utf8' });
+        const { stdout } = await execAsync(`"${candidate.cmd}" --version`, { timeout: 5000, encoding: 'utf8' });
         this.addLog(`Verified Python: ${candidate.cmd} → ${stdout.trim()}`);
         
         // Get the full path to Python - this is what actually works for spawn
@@ -517,14 +519,20 @@ class SpeechSidecarManager extends EventEmitter {
       
       const pythonCmd = candidate.cmd.trim();
       const pythonArgs = [...candidate.args, scriptPath, '--host', this.host, '--port', String(this.port)];
-      
-      this.addLog(`Spawning: "${pythonCmd}" with ${pythonArgs.length} args (cwd: ${this.rootDir})`);
+
+      // Resolve the model directory the same way the JS side does, then pass it to Python
+      // via VOSK_MODEL_PATH so both agree on the storage location.
+      // Without this, Python always writes relative to __file__ (inside Program Files on installed
+      // builds), which requires admin rights to write to and causes model loading to fail for
+      // non-admin users even after a successful download.
+      const resolvedModelDir = getModelDir(this.rootDir, this.modelSize, this.userDataDir);
+      this.addLog(`Spawning: "${pythonCmd}" with ${pythonArgs.length} args (cwd: ${this.rootDir}, model: ${resolvedModelDir})`);
       
       // Spawn Python directly - rootDir is now correctly outside ASAR
       const child = spawn(pythonCmd, pythonArgs, {
         cwd: this.rootDir,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize },
+        env: { ...process.env, VOSK_MODEL_SIZE: this.modelSize, VOSK_MODEL_PATH: resolvedModelDir },
         windowsHide: true
       });
 
@@ -669,6 +677,22 @@ class SpeechSidecarManager extends EventEmitter {
     const portOpen = await this.checkPortOpen();
     if (portOpen) {
       this.consecutiveSpawnFailures = 0;
+
+      // If Python is running but the model failed to load (e.g., network error during
+      // initial download), auto-restart so the download is retried automatically rather
+      // than requiring the user to click the restart button in settings.
+      if (this.state.statusMessage === 'model-error' && !this.state.restarting) {
+        const timeSinceLastStart = Date.now() - (this.state.lastStartAt || 0);
+        if (timeSinceLastStart > 30000 && this.modelErrorRetries < 3) {
+          this.modelErrorRetries += 1;
+          this.addLog(`Auto-restarting Python to retry model load (attempt ${this.modelErrorRetries}/3)`);
+          this.restart().catch(err => console.warn('[speech-sidecar] model-error auto-restart:', err && err.message ? err.message : err));
+          return true;
+        }
+      } else if (this.state.modelReady) {
+        this.modelErrorRetries = 0;
+      }
+
       this.updateState({ portOpen: true, processRunning: true, statusMessage: this.state.modelReady ? 'model-ready' : (this.state.statusMessage || 'sidecar-running') });
       return true;
     }
@@ -688,6 +712,7 @@ class SpeechSidecarManager extends EventEmitter {
     this.stopProcess();
     this.consecutiveSpawnFailures = 0;
     this.spawnFailureBackoffUntil = 0;
+    this.modelErrorRetries = 0;
     await new Promise((resolve) => setTimeout(resolve, 600));
     const started = await this.startProcess();
     if (!started) {
@@ -724,6 +749,13 @@ class SpeechSidecarManager extends EventEmitter {
 
   getModelFolder() {
     return getModelDir(this.rootDir, this.modelSize, this.userDataDir);
+  }
+
+  // Reset spawn-failure backoff so the next ensureRunning() call tries immediately.
+  // Called from main process after a failed startup attempt.
+  clearSpawnBackoff() {
+    this.consecutiveSpawnFailures = 0;
+    this.spawnFailureBackoffUntil = 0;
   }
 
   dispose() {
