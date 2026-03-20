@@ -15,7 +15,8 @@
     "build:all": "electron-builder --mac || true && electron-builder --linux || true && electron-builder --win || true",
     "make-icon": "node scripts/make-icon.js",
     "rebuild-native": "npx electron-rebuild -f -w keytar --module-dir .",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "release": "node scripts/release-bump.js"
   },
   "jest": {
     "testEnvironment": "jsdom"

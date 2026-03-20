@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.2.0 - 2026-03-19
+
+- feat: Bible export now supports both JSON and XML formats (matching thiagobodruk/bible schema)
+- feat: Bible import flow redesigned with format info popover before file selection
+- feat: export format chooser popover for selecting JSON or XML when exporting Bibles
+
 ## 5.0.7 - 2026-03-12
 
 - fix: startup sanitizer now also collapses double blank lines left by earlier partial fix (stripping \\r left \\n\\n between each lyric line); each line is also trimmed
