@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.3.0 - 2026-03-20
+
+- fix: fixed a bunch of issues and pushed a bunch of changes I forgot to commit before lol
+
+
 ## 5.2.0 - 2026-03-19
 
 - feat: Bible export now supports both JSON and XML formats (matching thiagobodruk/bible schema)

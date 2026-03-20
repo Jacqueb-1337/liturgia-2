@@ -295,7 +295,7 @@ function renderAiSuggestionPayload(payload, ui, state) {
     // Update hint visibility
     if (ui.context) {
       const hasSuggestions = state.enabled && state.suggestionGroups.length > 0;
-      const hintText = state.enabled ? AI_HINT_MESSAGE : 'Enable AI in Settings to resume suggestions.';
+      const hintText = state.enabled ? AI_HINT_MESSAGE : 'Enable Speech Recognition in Settings to resume suggestions.';
       if (state.lastHintHidden !== !hasSuggestions) {
         ui.context.textContent = hintText;
         ui.context.classList.toggle('ai-hint-hidden', hasSuggestions);
@@ -651,7 +651,7 @@ function initAiSuggestionPanel() {
     }
     if (ui.subtitle) {
       if (aiDisabled) {
-        ui.subtitle.textContent = 'Enable AI in Settings to resume suggestions.';
+        ui.subtitle.textContent = 'Enable Speech Recognition in Settings to resume suggestions.';
       } else if (status.lastError) {
         ui.subtitle.textContent = status.lastError;
       } else if (status.statusMessage) {
@@ -695,7 +695,7 @@ function initAiSuggestionPanel() {
       panel.classList.toggle('ai-suggestion-panel-disabled', !enabled);
       if (!enabled) {
         renderPayload({ clearContext: true });
-        if (ui.subtitle) ui.subtitle.textContent = 'Enable AI in Settings to resume suggestions.';
+        if (ui.subtitle) ui.subtitle.textContent = 'Enable Speech Recognition in Settings to resume suggestions.';
       }
     }));
   }
@@ -2785,7 +2785,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
     // ── Reference (bottom-right) ───────────────────────────────────────
     if (content.reference) {
       const mult = (referenceStyle && referenceStyle.sizeMultiplier) ? referenceStyle.sizeMultiplier : 0.7;
-      ctx.font      = fontStr(baseFontSize * mult, referenceStyle);
+      const referenceFontSize = Math.min(baseFontSize * mult, displayHeight * 0.045);
+      ctx.font      = fontStr(referenceFontSize, referenceStyle);
       ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'alphabetic';
@@ -2795,10 +2796,11 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
 
     // ── Hint ──────────────────────────────────────────────────────────
     if (content.showHint) {
-      ctx.font = fontStr(baseFontSize * 0.6, null);
+      const hintFontSize = Math.min(baseFontSize * 0.6, displayHeight * 0.04);
+      ctx.font = fontStr(hintFontSize, null);
       ctx.fillStyle = '#ddd'; ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
       const _hintY = isDual ? (primaryRegionH - areaTop * 0.5) : areaBottom;
-      ctx.fillText(content.showHint, areaRight, _hintY - baseFontSize * 1.1);
+      ctx.fillText(content.showHint, areaRight, _hintY - hintFontSize * 1.8);
     }
 
     // ── Secondary translation ──────────────────────────────────────────
@@ -2819,7 +2821,8 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
 
       if (content.secondaryRef) {
         const secRefMult = (referenceStyle && referenceStyle.sizeMultiplier) ? referenceStyle.sizeMultiplier * 0.8 : 0.55;
-        ctx.font = fontStr(baseFontSize * secRefMult, referenceStyle);
+        const secondaryRefFontSize = Math.min(baseFontSize * secRefMult, displayHeight * 0.036);
+        ctx.font = fontStr(secondaryRefFontSize, referenceStyle);
         ctx.fillStyle = (referenceStyle && referenceStyle.color) || '#fff';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'alphabetic';
@@ -3586,8 +3589,9 @@ async function handleVerseDoubleClick(i) {
   if (currentTab === 'songs') {
     if (selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
       if (!liveMode) {
-        // Create the window first, then push content once it is ready
+        // Create the window first, then push content
         await toggleLive(true);
+        await updateLiveFromSongVerse(selectedSongVerseIndex);
       } else {
         await updateLiveFromSongVerse(selectedSongVerseIndex);
       }
@@ -3615,9 +3619,10 @@ async function handleVerseDoubleClick(i) {
   // Do not change clear/black mode here - respect user's current display mode
 
   if (!liveMode) {
-    // Create the window first; toggleLive awaits creation before pushing selectedIndices
-    // (single-click already set selectedIndices to the target verse before dblclick fires)
+    // Create the window first, then push the content
     await toggleLive(true);
+    // Explicitly update with the double-clicked verse(s)
+    await updateLive(indicesToGo);
   } else {
     // Window already open — push content directly
     await updateLive(indicesToGo);
@@ -5707,7 +5712,9 @@ function displaySelectedSong() {
         // Remove any highlight markers that might be in the raw text (shouldn't be there, but clean it up)
         const cleanFirstLine = firstLine.replace(/___HIGHLIGHT_(START|END)___/g, '');
         const label = cleanFirstLine.length > 40 ? cleanFirstLine.substring(0, 40) + '...' : cleanFirstLine;
-        html += `<div class="song-verse-block${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}">${section.section} (${verseIndex + 1}): ${label}</div>`;
+        // Only show verse index if there are multiple verses in this section
+        const verseLabel = verses.length > 1 ? ` (${verseIndex + 1})` : '';
+        html += `<div class="song-verse-block${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}">${section.section}${verseLabel}: ${label}</div>`;
       });
     });
   } else {
@@ -5978,14 +5985,17 @@ function selectSongVerseByNumber(verseNum) {
   const song = allSongs[selectedSongIndices[0]];
   if (!song) return;
   
-  // Count total verses in song
-  let totalVerses = 0;
-  song.lyrics.forEach(section => {
-    totalVerses += section.text.split(/\n\n+/).length;
+  // Find verse sections (sections labeled as "Verse")
+  const verseSections = [];
+  song.lyrics.forEach((section, idx) => {
+    if (section.section.toLowerCase().includes('verse')) {
+      verseSections.push(idx);
+    }
   });
   
-  if (verseNum >= 1 && verseNum <= totalVerses) {
-    selectedSongVerseIndex = verseNum - 1;
+  if (verseNum >= 1 && verseNum <= verseSections.length) {
+    const sectionIdx = verseSections[verseNum - 1];
+    selectedSongVerseIndex = sectionIdx;
     displaySelectedSong();
     updatePreviewFromSongVerse(selectedSongVerseIndex);
   }
@@ -6392,8 +6402,8 @@ function exportSongs(songIndices) {
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;display:flex;align-items:center;justify-content:center;';
 
   const card = document.createElement('div');
-  card.className = 'song-editor-panel';
-  card.style.cssText = 'padding:24px 28px;width:320px;max-width:95vw;border-radius:8px;';
+  const isDark = document.body.classList.contains('dark-theme');
+  card.style.cssText = `padding:24px 28px;width:320px;max-width:95vw;border-radius:8px;background:${isDark ? '#23272a' : '#fff'};color:${isDark ? '#eee' : '#000'};box-shadow:0 4px 20px rgba(0,0,0,0.3);`;
   card.innerHTML = `
     <div style="font-size:1.1em;font-weight:600;margin-bottom:16px;">Export ${songsToExport.length} song${songsToExport.length !== 1 ? 's' : ''}</div>
     <div style="display:flex;flex-direction:column;gap:10px;">

@@ -61,6 +61,35 @@ document.addEventListener('DOMContentLoaded', () => {
   // Import Bible from local file
   document.getElementById('bible-import-btn').addEventListener('click', handleBibleImport);
   
+  // Bible export format chooser
+  const exportFormatPopover = document.getElementById('bible-export-format-popover');
+  exportFormatPopover.addEventListener('click', async (e) => {
+    const option = e.target.closest('.bible-export-format-option');
+    if (!option) return;
+    const format = option.dataset.format;
+    const versionId = exportFormatPopover.dataset.currentVersion;
+    if (!versionId) return;
+    exportFormatPopover.classList.remove('active');
+    const exportBtn = document.querySelector(`.bible-action.export[data-export-version="${versionId}"]`);
+    if (!exportBtn) return;
+    exportBtn.disabled = true;
+    exportBtn.textContent = 'Saving...';
+    try {
+      const savedPath = await ipcRenderer.invoke('export-bible-file', versionId, format);
+      if (savedPath) {
+        exportBtn.textContent = 'Saved!';
+        setTimeout(() => { exportBtn.textContent = 'Export'; exportBtn.disabled = false; }, 2000);
+      } else {
+        exportBtn.textContent = 'Export';
+        exportBtn.disabled = false;
+      }
+    } catch (err) {
+      console.error('Bible export failed:', err);
+      exportBtn.textContent = 'Error';
+      setTimeout(() => { exportBtn.textContent = 'Export'; exportBtn.disabled = false; }, 2000);
+    }
+  });
+  
   // Refresh relay UI when the Cloud Relay tab is clicked (don't load on init to avoid freeze)
   const relayTabButton = document.querySelector('button[data-panel="relay"]');
   if (relayTabButton) {
@@ -1771,7 +1800,7 @@ async function renderLocalBiblesList(localIds) {
                 ${isSelected ? 'disabled' : ''}>
           ${isSelected ? 'Currently Active' : 'Select'}
         </button>
-        <button class="bible-action export" data-export-version="${versionId}">Export JSON</button>
+        <button class="bible-action export" data-export-version="${versionId}">Export</button>
       </div>
     `;
 
@@ -1786,23 +1815,23 @@ async function renderLocalBiblesList(localIds) {
     });
 
     const exportBtn = item.querySelector('.bible-action.export');
-    exportBtn.addEventListener('click', async () => {
-      exportBtn.disabled = true;
-      exportBtn.textContent = 'Saving...';
-      try {
-        const savedPath = await ipcRenderer.invoke('export-bible-file', versionId);
-        if (savedPath) {
-          exportBtn.textContent = 'Saved!';
-          setTimeout(() => { exportBtn.textContent = 'Export JSON'; exportBtn.disabled = false; }, 2000);
-        } else {
-          exportBtn.textContent = 'Export JSON';
-          exportBtn.disabled = false;
-        }
-      } catch (err) {
-        console.error('Bible export failed:', err);
-        exportBtn.textContent = 'Error';
-        setTimeout(() => { exportBtn.textContent = 'Export JSON'; exportBtn.disabled = false; }, 2000);
-      }
+    exportBtn.addEventListener('click', async (e) => {
+      const popover = document.getElementById('bible-export-format-popover');
+      const rect = exportBtn.getBoundingClientRect();
+      popover.style.top = `${rect.bottom + 4}px`;
+      popover.style.left = `${rect.left}px`;
+      popover.classList.add('active');
+      popover.dataset.currentVersion = versionId;
+      popover.dataset.currentButton = 'true';
+
+      const closePopover = () => {
+        popover.classList.remove('active');
+        document.removeEventListener('click', outsideClick);
+      };
+      const outsideClick = (evt) => {
+        if (!popover.contains(evt.target) && evt.target !== exportBtn) closePopover();
+      };
+      setTimeout(() => document.addEventListener('click', outsideClick), 0);
     });
 
     container.appendChild(item);
@@ -1812,6 +1841,31 @@ async function renderLocalBiblesList(localIds) {
 async function handleBibleImport() {
   const statusEl = document.getElementById('bible-import-status');
   statusEl.textContent = '';
+
+  const formatsOverlay = document.getElementById('bible-formats-modal-overlay');
+  formatsOverlay.style.display = 'flex';
+
+  const shouldContinue = await new Promise(resolve => {
+    const continueBtn = document.getElementById('bible-formats-modal-continue');
+    const cancelBtn = document.getElementById('bible-formats-modal-cancel');
+    function doContinue() { cleanup(); resolve(true); }
+    function doCancel() { cleanup(); resolve(false); }
+    function onOverlayClick(e) { if (e.target === formatsOverlay) { cleanup(); resolve(false); } }
+    function onKeyDown(e) { if (e.key === 'Escape') doCancel(); }
+    function cleanup() {
+      continueBtn.removeEventListener('click', doContinue);
+      cancelBtn.removeEventListener('click', doCancel);
+      formatsOverlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKeyDown);
+      formatsOverlay.style.display = 'none';
+    }
+    continueBtn.addEventListener('click', doContinue);
+    cancelBtn.addEventListener('click', doCancel);
+    formatsOverlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKeyDown);
+  });
+
+  if (!shouldContinue) return;
 
   // Step 1: Open file dialog
   const filePath = await ipcRenderer.invoke('show-bible-import-dialog');

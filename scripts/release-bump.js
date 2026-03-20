@@ -167,6 +167,16 @@ async function main() {
   
   console.log('\n🔨 Building release...\n');
   
+  const status = execSync('git status --porcelain').toString();
+  const hasChanges = status.trim().length > 0;
+  
+  if (hasChanges) {
+    console.log('📋 Files with changes:');
+    const files = status.split('\n').filter(l => l.trim());
+    files.forEach(f => console.log(`   ${f}`));
+    console.log('');
+  }
+  
   pkg.version = newVersion;
   fs.writeFileSync(packagePath, JSON.stringify(pkg, null, 2) + '\n');
   console.log(`✓ Updated package.json to ${newVersion}`);
@@ -174,7 +184,8 @@ async function main() {
   updateChangelog(newVersion, entries);
   
   try {
-    execSync('git add package.json CHANGELOG.md', { stdio: 'inherit' });
+    execSync('git add -A', { stdio: 'inherit' });
+    console.log(`✓ Staged all changes`);
     
     const commitMsg = generateCommitMessage(entries);
     execSync(`git commit -m "${commitMsg}"`, { stdio: 'inherit' });

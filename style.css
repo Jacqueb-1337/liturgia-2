@@ -464,6 +464,7 @@ body.dark-theme .ai-suggestion-panel {
 #scripture-search {
   flex-shrink: 0 !important;
   width: 100% !important;
+  margin-top: 16px;
 }
 
 .ai-suggestion-panel-disabled {

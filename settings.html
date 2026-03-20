@@ -287,6 +287,37 @@
 
     body.dark-theme .bible-local-heading { color: #777; }
     body.dark-theme .bible-local-tag { background: #1e3a5f; color: #90caf9; }
+
+    /* Cloud Relay styling */
+    .relay-description { color: #666; margin-bottom: 16px; }
+    .relay-info { margin-bottom: 16px; padding: 10px 12px; background: #e3f2fd; color: #1565c0; border-radius: 4px; }
+    .relay-account-status { margin-bottom: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 4px; background: #fafafa; }
+    .relay-account-message { margin: 8px 0 0 0; color: #666; }
+    .relay-device-name-row { margin-bottom: 12px; }
+    .relay-label { font-size: 0.9em; font-weight: 500; display: block; margin-bottom: 4px; color: #333; }
+    .relay-input { width: 100%; padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.9em; background: #fff; color: #333; box-sizing: border-box; }
+    .relay-input:focus { outline: none; border-color: #0078d4; box-shadow: 0 0 0 2px rgba(0,120,212,0.2); }
+    .relay-hint { font-size: 0.8em; color: #888; margin-top: 3px; }
+    .relay-connected-info { margin-top: 16px; padding: 12px; border-radius: 4px; background: #f1f8f4; border: 1px solid #d4edda; }
+    .relay-connected-title { font-weight: 500; margin-bottom: 8px; color: #155724; }
+    .relay-connected-details { font-size: 0.9em; color: #333; }
+    .relay-session-row { margin-bottom: 4px; }
+    .relay-session-id { font-family: monospace; font-size: 0.85em; color: #666; }
+    .relay-connected-hint { color: #666; font-size: 0.9em; margin-top: 8px; }
+
+    body.dark-theme .relay-description { color: #999; }
+    body.dark-theme .relay-info { background: #1e3a5f; color: #90caf9; }
+    body.dark-theme .relay-account-status { border-color: #444; background: #2a2a2a; }
+    body.dark-theme .relay-account-message { color: #999; }
+    body.dark-theme .relay-label { color: #ddd; }
+    body.dark-theme .relay-input { background: #2a2a2a; color: #eee; border-color: #444; }
+    body.dark-theme .relay-input:focus { border-color: #0078d4; box-shadow: 0 0 0 2px rgba(0,120,212,0.3); }
+    body.dark-theme .relay-hint { color: #888; }
+    body.dark-theme .relay-connected-info { background: #1e3d2f; border-color: #2d5a3f; }
+    body.dark-theme .relay-connected-title { color: #7bc96f; }
+    body.dark-theme .relay-connected-details { color: #ccc; }
+    body.dark-theme .relay-session-id { color: #aaa; }
+    body.dark-theme .relay-connected-hint { color: #999; }
     body.dark-theme #bible-import-status { color: #81c784; }
 
     /* Bible import summary modal */
@@ -393,6 +424,94 @@
     }
     body.dark-theme .bible-import-modal-list .book-row { border-bottom-color: #333; }
     body.dark-theme .book-row-stats { color: #777; }
+
+    .bible-formats-list {
+      margin: 12px 0;
+      padding-left: 20px;
+      list-style: disc;
+      line-height: 1.5;
+      max-height: 360px;
+      overflow-y: auto;
+      font-size: 0.85em;
+    }
+    .bible-formats-list li {
+      margin-bottom: 6px;
+      color: #333;
+    }
+    .bible-formats-list strong {
+      font-weight: 600;
+      color: #000;
+    }
+    .bible-formats-list code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #222;
+    }
+    .bible-formats-list::-webkit-scrollbar {
+      width: 8px;
+    }
+    .bible-formats-list::-webkit-scrollbar-track {
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
+    .bible-formats-list::-webkit-scrollbar-thumb {
+      background: #ccc;
+      border-radius: 4px;
+    }
+    .bible-formats-list::-webkit-scrollbar-thumb:hover {
+      background: #aaa;
+    }
+    body.dark-theme .bible-formats-list li { color: #bbb; }
+    body.dark-theme .bible-formats-list strong { color: #eee; }
+    body.dark-theme .bible-formats-list code {
+      background: #1e2124;
+      color: #ddd;
+    }
+    body.dark-theme .bible-formats-list::-webkit-scrollbar-track {
+      background: #1e2124;
+    }
+    body.dark-theme .bible-formats-list::-webkit-scrollbar-thumb {
+      background: #444;
+    }
+    body.dark-theme .bible-formats-list::-webkit-scrollbar-thumb:hover {
+      background: #555;
+    }
+
+    .bible-export-format-popover {
+      position: absolute;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+      padding: 8px;
+      z-index: 1000;
+      display: none;
+      min-width: 140px;
+    }
+    .bible-export-format-popover.active {
+      display: block;
+    }
+    .bible-export-format-option {
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.9em;
+      transition: background 0.15s;
+    }
+    .bible-export-format-option:hover {
+      background: #f0f0f0;
+    }
+    body.dark-theme .bible-export-format-popover {
+      background: #2a2a2a;
+      border-color: #444;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    body.dark-theme .bible-export-format-option:hover {
+      background: #333;
+    }
 
     .muted-text { color: #666; font-size: 0.95em; }
     body.dark-theme .muted-text { color: #aaa; }
@@ -601,7 +720,6 @@
     .keybind-row {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 1em;
       padding: 0.45em 0;
       border-bottom: 1px solid #f0f0f0;
@@ -616,6 +734,7 @@
       font-size: 0.9em;
       font-weight: 500;
       color: #333;
+      flex: 1;
     }
     body.dark-theme .keybind-label {
       color: #ddd;
@@ -624,7 +743,8 @@
       padding: 4px 8px;
       border: 1px solid #ddd;
       border-radius: 4px;
-      width: 110px;
+      width: 110px !important;
+      max-width: 110px;
       font-family: monospace;
       font-size: 0.85em;
       background: #fff;
@@ -646,7 +766,7 @@
     /* Song selection grid */
     .keybind-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
       gap: 0.4em 1em;
     }
     .keybind-grid-item {
@@ -842,28 +962,27 @@
       </div>
       <div class="settings-panel" id="panel-relay">
         <h2>Cloud Relay (Beta)</h2>
-        <p style="color:#666;margin-bottom:16px;">Connect from anywhere without port forwarding using your Liturgia account.</p>
+        <p class="relay-description">Connect from anywhere without port forwarding using your Liturgia account.</p>
         
-        <div class="relay-info" style="margin-bottom:16px;padding:10px 12px;background:#e3f2fd;color:#1565c0;border-radius:4px;">
-          <strong>✨ Connect from Anywhere:</strong> Cloud Relay works over the internet without configuring your router. Perfect for remote worship services.
+        <div class="relay-info">
+          <strong>Connect from Anywhere:</strong> Cloud Relay works over the internet without configuring your router. Perfect for remote worship services.
         </div>
         
-        <div id="relay-account-status" style="margin-bottom:16px;padding:12px;border:1px solid #ddd;border-radius:4px;">
+        <div id="relay-account-status" class="relay-account-status">
           <div id="relay-not-signed-in" style="display:none;">
-            <strong>⚠ Not Signed In</strong>
-            <p style="margin:8px 0 0 0;color:#666;">Please sign in via the <strong>Account</strong> tab to use Cloud Relay.</p>
+            <strong>Not Signed In</strong>
+            <p class="relay-account-message">Please sign in via the <strong>Account</strong> tab to use Cloud Relay.</p>
           </div>
           <div id="relay-signed-in" style="display:none;">
-            <strong>✓ Signed In</strong>
-            <p style="margin:8px 0 0 0;color:#666;">Account: <span id="relay-account-email"></span></p>
+            <strong>Signed In</strong>
+            <p class="relay-account-message">Account: <span id="relay-account-email"></span></p>
           </div>
         </div>
         
-        <div class="form-row" style="margin-bottom:12px;">
-          <label style="font-size:0.9em;font-weight:500;display:block;margin-bottom:4px;">Display Name</label>
-          <input id="relay-device-name" type="text" maxlength="48" placeholder="Liturgia Desktop"
-            style="width:100%;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:0.9em;" />
-          <div style="font-size:0.8em;color:#888;margin-top:3px;">This name appears in the mobile app when connecting.</div>
+        <div class="relay-device-name-row">
+          <label class="relay-label">Display Name</label>
+          <input id="relay-device-name" type="text" maxlength="48" placeholder="Liturgia Desktop" class="relay-input" />
+          <div class="relay-hint">This name appears in the mobile app when connecting.</div>
         </div>
 
         <div class="form-row">
@@ -874,11 +993,11 @@
           </label>
         </div>
         
-        <div id="relay-connected-info" style="margin-top:16px;padding:12px;border-radius:4px;background:#f1f8f4;display:none;">
-          <div style="font-weight:500;margin-bottom:8px;">🌐 Connected to Cloud Relay</div>
-          <div style="font-size:0.9em;">
-            <div style="margin-bottom:4px;">Session: <span id="relay-session-id" style="font-family:monospace;font-size:0.85em;"></span></div>
-            <div style="color:#666;font-size:0.9em;margin-top:8px;">Your mobile device can now connect from anywhere using your account.</div>
+        <div id="relay-connected-info" class="relay-connected-info" style="display:none;">
+          <div class="relay-connected-title">Connected to Cloud Relay</div>
+          <div class="relay-connected-details">
+            <div class="relay-session-row">Session: <span id="relay-session-id" class="relay-session-id"></span></div>
+            <div class="relay-connected-hint">Your mobile device can now connect from anywhere using your account.</div>
           </div>
         </div>
         
@@ -887,17 +1006,6 @@
       </div>
       <div class="settings-panel" id="panel-bibles">
         <h2>Manage Bibles</h2>
-        <p class="bible-import-hint">Import a Bible from a local file. Supported formats:</p>
-        <ul class="bible-import-hint-list">
-          <li><strong>JSON</strong> &mdash; thiagobodruk/bible array format</li>
-          <li><strong>Zefania XML</strong> &mdash; .xml files with &lt;BIBLEBOOK&gt; structure</li>
-          <li><strong>USFX XML</strong> &mdash; .xml or .usfx (eBible.org &ldquo;_usfx.zip&rdquo; downloads)</li>
-          <li><strong>ZIP</strong> &mdash; import the .zip directly; the app will detect and extract the Bible data automatically</li>
-          <li><strong>OSIS XML</strong> &mdash; .osis</li>
-          <li><strong>USFM</strong> &mdash; .usfm / .sfm text marker format</li>
-          <li><strong>TSV</strong> &mdash; tab-separated: book, chapter, verse, text columns</li>
-          <li><strong>Plain text</strong> &mdash; one verse per line: <code>Genesis 1:1 In the beginning...</code></li>
-        </ul>
         <div class="bible-import-bar">
           <button class="btn" id="bible-import-btn">Import from file...</button>
           <span id="bible-import-status"></span>
@@ -927,6 +1035,28 @@
   </div>
   <script src="settings.js"></script>
 
+  <!-- Bible import formats info modal -->
+  <div id="bible-formats-modal-overlay" class="bible-import-modal-overlay" style="display:none;">
+    <div class="bible-import-modal">
+      <h3 class="bible-import-modal-title">Supported Bible Formats</h3>
+      <p class="bible-import-modal-subtitle">Liturgia can import Bibles from the following file formats:</p>
+      <ul class="bible-formats-list">
+        <li><strong>JSON</strong> &mdash; thiagobodruk/bible array format</li>
+        <li><strong>Zefania XML</strong> &mdash; .xml files with &lt;BIBLEBOOK&gt; structure</li>
+        <li><strong>USFX XML</strong> &mdash; .xml or .usfx (eBible.org downloads)</li>
+        <li><strong>ZIP</strong> &mdash; import the .zip directly; the app will detect and extract the Bible data</li>
+        <li><strong>OSIS XML</strong> &mdash; .osis files</li>
+        <li><strong>USFM</strong> &mdash; .usfm / .sfm text marker format</li>
+        <li><strong>TSV</strong> &mdash; tab-separated: book, chapter, verse, text columns</li>
+        <li><strong>Plain text</strong> &mdash; one verse per line: <code>Genesis 1:1 In the beginning...</code></li>
+      </ul>
+      <div class="bible-import-modal-actions">
+        <button class="btn primary" id="bible-formats-modal-continue">Continue</button>
+        <button class="btn" id="bible-formats-modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bible import summary/confirmation modal -->
   <div id="bible-import-modal-overlay" class="bible-import-modal-overlay" style="display:none;">
     <div class="bible-import-modal">
@@ -943,6 +1073,12 @@
         <button class="btn" id="bible-import-modal-cancel">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <!-- Bible export format chooser popover -->
+  <div id="bible-export-format-popover" class="bible-export-format-popover">
+    <div class="bible-export-format-option" data-format="json">JSON</div>
+    <div class="bible-export-format-option" data-format="xml">XML</div>
   </div>
 </body>
 </html>

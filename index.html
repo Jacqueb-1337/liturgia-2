@@ -364,7 +364,7 @@
         <button class="bottom-tab" data-tab="songs" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer;">Songs</button>
         <button class="bottom-tab" data-tab="media" style="padding: 8px 16px; border: none; background: transparent; cursor: pointer;">Media</button>
         <!-- Move control buttons into bottom tabs area on the right -->
-        <div id="control-buttons-container" style="margin-left: auto; display: flex; gap: 5px; align-items: center;"></div>
+        <div id="control-buttons-container" style="margin-left: auto; display: flex; gap: 0; align-items: center;"></div>
       </div>
       
       <!-- Verses Tab Content -->
@@ -395,12 +395,12 @@
       <!-- Songs Tab Content -->
       <div id="songs-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
         <div id="song-search" style="flex-shrink: 0; padding: 1em; display: flex; gap: 8px; align-items: center;">
-          <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 6px; box-sizing: border-box;" />
-          <select id="song-hymnal-filter" title="Filter by hymnal" style="padding: 6px; max-width: 130px;">
+          <input type="text" id="song-search-input" placeholder="Search songs by title or lyrics..." style="flex: 1; padding: 8px 10px; box-sizing: border-box;" />
+          <select id="song-hymnal-filter" title="Filter by hymnal" style="padding: 8px 10px; max-width: 130px;">
             <option value="">All hymnals</option>
           </select>
-          <button id="song-view-toggle" style="padding: 6px 12px; white-space: nowrap;" title="Toggle between full song and verse blocks">Verse Blocks</button>
-          <button id="song-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Create new song">+</button>
+          <button id="song-view-toggle" style="padding: 8px 12px; white-space: nowrap; height: 36px; box-sizing: border-box;" title="Toggle between full song and verse blocks">Verse Blocks</button>
+          <button id="song-add-btn" style="padding: 8px 12px; font-size: 18px; font-weight: bold; height: 36px; line-height: 1; box-sizing: border-box; color: #0078d4;" title="Create new song">+</button>
         </div>
         <div style="display: flex; flex: 1; min-height: 0;">
           <div id="song-list" tabindex="0" aria-label="Song list" style="flex: 0 0 200px; overflow-y: auto; position: relative; border: 1px solid #ccc;">
@@ -415,8 +415,8 @@
       <!-- Media Tab Content -->
       <div id="media-tab-content" class="tab-content" style="display: none; flex-direction: column; flex: 1; min-height: 0;">
         <div style="padding: 1em; display: flex; gap: 8px; align-items: center;">
-          <button id="media-add-btn" style="padding: 6px 12px; font-size: 18px; font-weight: bold;" title="Add media">+</button>
-          <input type="text" id="media-search-input" placeholder="Search media files..." style="flex: 1; padding: 8px; box-sizing: border-box;" />
+          <input type="text" id="media-search-input" placeholder="Search media files..." style="flex: 1; padding: 8px 10px; box-sizing: border-box;" />
+          <button id="media-add-btn" style="padding: 8px 12px; font-size: 18px; font-weight: bold; height: 36px; line-height: 1; box-sizing: border-box; color: #0078d4;" title="Add media">+</button>
         </div>
         <div id="media-display" style="flex: 1; padding: 10px; overflow-y: auto;">
           <!-- Media content will be shown here -->

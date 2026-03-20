@@ -1703,22 +1703,76 @@ ipcMain.handle('import-bible-file', async (event, filePath, versionId) => {
   return await importBibleFile(filePath, versionId, storageDir);
 });
 
-ipcMain.handle('export-bible-file', async (event, versionId) => {
-  const storageDir = path.join(app.getPath('userData'), 'bibles');
-  const srcFile = path.join(storageDir, versionId, 'bible.json');
-  if (!require('fs').existsSync(srcFile)) throw new Error(`Bible file not found for version: ${versionId}`);
-  const result = await dialog.showSaveDialog({
-    title: 'Export Bible as JSON',
-    defaultPath: `${versionId}.json`,
-    filters: [
-      { name: 'JSON Files', extensions: ['json'] },
-      { name: 'All Files', extensions: ['*'] }
-    ]
-  });
-  if (result.canceled || !result.filePath) return null;
-  require('fs').copyFileSync(srcFile, result.filePath);
-  return result.filePath;
+ipcMain.handle('export-bible-file', async (event, versionId, format = 'json') => {
+  try {
+    const storageDir = path.join(app.getPath('userData'), 'bibles');
+    const srcFile = path.join(storageDir, versionId, 'bible.json');
+    if (!fs.existsSync(srcFile)) throw new Error(`Bible file not found for version: ${versionId}`);
+    
+    const isXml = format === 'xml';
+    const result = await dialog.showSaveDialog({
+      title: isXml ? 'Export Bible as XML' : 'Export Bible as JSON',
+      defaultPath: `${versionId}.${isXml ? 'xml' : 'json'}`,
+      filters: isXml 
+        ? [{ name: 'XML Files', extensions: ['xml'] }, { name: 'All Files', extensions: ['*'] }]
+        : [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }]
+    });
+    
+    if (result.canceled || !result.filePath) return null;
+    
+    if (isXml) {
+      const bibleData = JSON.parse(fs.readFileSync(srcFile, 'utf8'));
+      const xmlContent = convertBibleJsonToXml(bibleData);
+      fs.writeFileSync(result.filePath, xmlContent, 'utf8');
+    } else {
+      fs.copyFileSync(srcFile, result.filePath);
+    }
+    
+    return result.filePath;
+  } catch (err) {
+    console.error('Export Bible error:', err);
+    throw err;
+  }
 });
+
+function convertBibleJsonToXml(bibleData) {
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<bible>\n';
+  
+  for (const book of bibleData) {
+    const bookAbbrev = book.abbrev || '';
+    const bookName = book.name || book.book || '';
+    xml += `  <b id="${escapeXml(bookAbbrev)}" n="${escapeXml(bookName)}">\n`;
+    
+    for (let chapterIdx = 0; chapterIdx < book.chapters.length; chapterIdx++) {
+      const chapterNum = chapterIdx + 1;
+      const verses = book.chapters[chapterIdx];
+      xml += `    <c n="${chapterNum}">\n`;
+      
+      for (let verseIdx = 0; verseIdx < verses.length; verseIdx++) {
+        const verseNum = verseIdx + 1;
+        const verseText = verses[verseIdx];
+        xml += `      <v n="${verseNum}">${escapeXml(verseText)}</v>\n`;
+      }
+      
+      xml += `    </c>\n`;
+    }
+    
+    xml += `  </b>\n`;
+  }
+  
+  xml += '</bible>';
+  return xml;
+}
+
+function escapeXml(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 ipcMain.handle('download-python', async (event) => {
   try {

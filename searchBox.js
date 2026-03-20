@@ -80,6 +80,8 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   const goLiveBtn = document.createElement('button');
   goLiveBtn.textContent = 'Go Live';
   goLiveBtn.style.padding = '4px 8px';
+  goLiveBtn.style.borderRadius = '6px 0 0 6px';
+  goLiveBtn.style.borderRight = 'none';
   goLiveBtn.addEventListener('click', () => {
     if (onEnter) onEnter();
   });
@@ -88,6 +90,8 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   const liveBtn = document.createElement('button');
   liveBtn.textContent = 'Live';
   liveBtn.style.padding = '4px 8px';
+  liveBtn.style.borderRadius = '0';
+  liveBtn.style.borderRight = 'none';
   liveBtn.addEventListener('click', () => {
     const willBeActive = !liveBtn.classList.contains('active');
     if (onToggleLive) onToggleLive(willBeActive);
@@ -101,6 +105,8 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   const clearBtn = document.createElement('button');
   clearBtn.textContent = 'Clear';
   clearBtn.style.padding = '4px 8px';
+  clearBtn.style.borderRadius = '0';
+  clearBtn.style.borderRight = 'none';
   clearBtn.addEventListener('click', () => {
     if (onToggleClear) onToggleClear();
     // Don't manually toggle button state - let toggleClear() in renderer.js handle it
@@ -113,6 +119,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   const blackBtn = document.createElement('button');
   blackBtn.textContent = 'Black';
   blackBtn.style.padding = '4px 8px';
+  blackBtn.style.borderRadius = '0 6px 6px 0';
   blackBtn.addEventListener('click', () => {
     if (onToggleBlack) onToggleBlack();
     // Don't manually toggle button state - let toggleBlack() in renderer.js handle it
