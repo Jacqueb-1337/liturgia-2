@@ -1570,6 +1570,7 @@ ipcMain.handle('relay-start', async (event, { token, deviceName }) => {
       console.log('[relay] Connection method:', method);
       if (mainWindow && mainWindow.webContents) {
         mainWindow.webContents.send('relay-connection-method', method);
+        mainWindow.webContents.send('relay-push-state-request');
       }
       if (settingsWindow && !settingsWindow.isDestroyed()) {
         settingsWindow.webContents.send('relay-connection-method', method);
@@ -2035,7 +2036,7 @@ async function startSaveReport() {
   parts.push('=== METADATA ===');
   parts.push(JSON.stringify(sysInfo, null, 2));
 
-  parts.push('=== MAIN LOGS ===');
+  parts.push('=== MAIN PROCESS LOGS ===');
   parts.push(JSON.stringify(mainLogs, null, 2));
 
   parts.push('=== INDEX.HTML FILE ===');
@@ -2046,6 +2047,9 @@ async function startSaveReport() {
 
   parts.push('=== SETTINGS FILE (on disk) ===');
   parts.push(settingsFile);
+
+  parts.push('=== RENDERER PROCESS LOGS ===');
+  parts.push(JSON.stringify((rendererPayload && rendererPayload.rendererLogs) || [], null, 2));
 
   parts.push('=== RENDERER PAYLOAD ===');
   parts.push(JSON.stringify(rendererPayload || {}, null, 2));

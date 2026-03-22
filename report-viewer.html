@@ -522,6 +522,20 @@
     }
 
     function parseLogs(content) {
+      const trimmed = content.trim();
+      if (trimmed.startsWith('[')) {
+        try {
+          const arr = JSON.parse(trimmed);
+          if (Array.isArray(arr)) {
+            return arr.map(entry => {
+              const level = (entry.level || 'log').toLowerCase();
+              const type = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info';
+              const text = `[${entry.ts || ''}] [${level.toUpperCase()}] ${entry.msg || ''}`;
+              return { type, text };
+            });
+          }
+        } catch (e) {}
+      }
       return content.split('\n').filter(line => line.trim()).map(line => {
         let type = 'info';
         if (line.includes('[ERROR]') || line.toLowerCase().includes('error')) type = 'error';

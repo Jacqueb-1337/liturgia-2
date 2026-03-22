@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.4.2 - 2026-03-22
+
+- fix: lots of bugs introduced in the previous update
+- fix: some bugs with cloud relay
+
+
 ## 5.4.1 - 2026-03-22
 
 - fix: fixed some issues with the sign-in flow and the view subscription modal 

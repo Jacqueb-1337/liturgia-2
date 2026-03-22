@@ -709,6 +709,7 @@ function initAiSuggestionPanel() {
 let allVerses = [];
 let allSongs = [];
 let filteredSongs = []; // For search results
+let lastRelayState = null;
 
 // Safety stub for showPopover: queues calls if popover isn't initialized yet
 if (typeof window !== 'undefined' && !window.showPopover) {
@@ -3380,6 +3381,7 @@ async function updateLive(verseOrIndices) {
       lastUpdated: Date.now()
     };
     console.log('[relay] Pushing state:', JSON.stringify(state));
+    lastRelayState = state;
     await ipcRenderer.invoke('relay-push-state', state);
   } catch (err) {
     console.error('[relay] Failed to push state:', err);
@@ -5901,6 +5903,7 @@ async function updateLiveFromSongVerse(verseIndex) {
           lastUpdated: Date.now()
         };
         console.log('[relay] Pushing song state:', JSON.stringify(state));
+        lastRelayState = state;
         await ipcRenderer.invoke('relay-push-state', state);
       }
     }
@@ -9291,11 +9294,71 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Remote Control Command Handler
+ipcRenderer.on('relay-push-state-request', async () => {
+  try {
+    const state = {
+      bible: [],
+      songs: [],
+      schedule: [],
+      scheduling: {
+        totalItems: scheduleItems.length,
+        currentItem: currentLiveScheduleIndex,
+        hasSchedule: scheduleItems.length > 0
+      },
+      allScheduleItems: scheduleItems.map((item, idx) => ({
+        index: idx,
+        label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
+        type: item.type
+      })),
+      allSongs: allSongs.map((song, idx) => ({
+        index: idx,
+        title: song.title,
+        author: song.author || '',
+        lyrics: song.lyrics || []
+      })),
+      lastUpdated: Date.now()
+    };
+    await ipcRenderer.invoke('relay-push-state', state);
+  } catch (err) {
+    console.error('[relay] Failed to push initial state:', err);
+  }
+});
+
 ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, data }) => {
   console.log('[remote] Command from', deviceName, ':', command, data);
   
   try {
     switch (command) {
+      case 'REQUEST_STATE':
+        try {
+          const reqState = lastRelayState ? { ...lastRelayState, lastUpdated: Date.now() } : {
+            bible: [],
+            songs: [],
+            schedule: [],
+            scheduling: {
+              totalItems: scheduleItems.length,
+              currentItem: currentLiveScheduleIndex,
+              hasSchedule: scheduleItems.length > 0
+            },
+            allScheduleItems: scheduleItems.map((item, idx) => ({
+              index: idx,
+              label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
+              type: item.type
+            })),
+            allSongs: allSongs.map((song, idx) => ({
+              index: idx,
+              title: song.title,
+              author: song.author || '',
+              lyrics: song.lyrics || []
+            })),
+            lastUpdated: Date.now()
+          };
+          await ipcRenderer.invoke('relay-push-state', reqState);
+        } catch (err) {
+          console.error('[relay] Failed to push state on REQUEST_STATE:', err);
+        }
+        break;
+
       case 'SELECT_VERSE':
         // Select a verse or verse range and optionally go live
         if (data.book && data.chapter && data.verse) {
