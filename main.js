@@ -3,7 +3,7 @@
 // Force production mode when running via npm start (not packaged)
 if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
 
-const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, screen, dialog, session } = require('electron');
 const RtfParser = require('rtf-parser');
 
 // Instrument dialog.showMessageBox during development to find stray native dialogs
@@ -44,7 +44,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const RemoteServer = require('./remote-server');
-const RelayClient = require('./relay-client');
+const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
 
 // --- Emergency crash report writer ---
@@ -1566,7 +1566,16 @@ ipcMain.handle('relay-start', async (event, { token, deviceName }) => {
     
     relayClient = new RelayClient('https://jacqueb.me/liturgia/relay', token);
     
-    // Handle messages from mobile
+    relayClient.on('connection-method', (method) => {
+      console.log('[relay] Connection method:', method);
+      if (mainWindow && mainWindow.webContents) {
+        mainWindow.webContents.send('relay-connection-method', method);
+      }
+      if (settingsWindow && !settingsWindow.isDestroyed()) {
+        settingsWindow.webContents.send('relay-connection-method', method);
+      }
+    });
+    
     relayClient.on('message', (message) => {
       console.log('[relay] Received message from mobile:', message);
       // Forward to RemoteServer's command handler logic
@@ -1629,7 +1638,8 @@ ipcMain.handle('relay-get-info', async () => {
   }
   return {
     running: true,
-    sessionId: relayClient.sessionId
+    sessionId: relayClient.sessionId,
+    connectionMethod: relayClient.useWebSocket ? 'WebSocket' : 'PHP Polling'
   };
 });
 
@@ -2665,6 +2675,11 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (permission === 'media') { callback(true); return; }
+    callback(false);
+  });
+
   // Sanitize songs.json before the window opens: strip \r chars introduced by
   // old EasyWorship imports (stored as \n\r\n instead of plain \n)
   try {
@@ -3090,8 +3105,33 @@ ipcMain.handle('download-update', async (event, { url }) => {
     const fetch = require('node-fetch');
     const { getTempPath } = require('./lib/paths');
     const tmpDir = getTempPath(app);
-    const name = path.basename((url || '').split('?')[0]) || `liturgia-update-${Date.now()}.exe`;
+    const originalName = path.basename((url || '').split('?')[0]) || 'liturgia-update.exe';
+    const timestamp = Date.now();
+    const ext = path.extname(originalName);
+    const nameWithoutExt = path.basename(originalName, ext);
+    const name = `${nameWithoutExt}-${timestamp}${ext}`;
     const dest = path.join(tmpDir, name);
+    
+    try {
+      const files = fs.readdirSync(tmpDir);
+      const oldInstallers = files.filter(f => 
+        f.startsWith('liturgia') && 
+        f.endsWith('.exe') && 
+        /liturgia.*-\d+\.exe$/.test(f)
+      );
+      oldInstallers.forEach(f => {
+        try {
+          const filePath = path.join(tmpDir, f);
+          fs.unlinkSync(filePath);
+          console.log(`[update] Cleaned up old installer: ${f}`);
+        } catch (e) {
+          console.log(`[update] Could not delete ${f}:`, e.message);
+        }
+      });
+    } catch (e) {
+      console.log('[update] Could not clean old installers:', e.message);
+    }
+    
     const r = await fetch(url);
     if (!r.ok) return { ok:false, error: `Download failed ${r.status}` };
     const total = parseInt(r.headers.get('content-length') || '0', 10);
@@ -3134,11 +3174,21 @@ ipcMain.handle('cancel-update-download', async (event, { file }) => {
   } catch (e) { return { ok:false, error: String(e) }; }
 });
 
-// Run the downloaded installer (open file with default handler)
+// Run the downloaded installer (spawn and quit app)
 ipcMain.handle('run-installer', async (event, file) => {
   try {
     if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
-    await shell.openPath(file);
+    
+    const { spawn } = require('child_process');
+    spawn(file, [], {
+      detached: true,
+      stdio: 'ignore'
+    }).unref();
+    
+    setTimeout(() => {
+      app.quit();
+    }, 500);
+    
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
 });

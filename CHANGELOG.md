@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.4.0 - 2026-03-22
+
+- fix: fixed an issue with search inputs not focusing on cold boot
+- fix: fixed an issue with search inputs not focusing on cold boot
+- feat: added some cloud relay logic
+
+
 ## 5.3.0 - 2026-03-20
 
 - fix: fixed a bunch of issues and pushed a bunch of changes I forgot to commit before lol

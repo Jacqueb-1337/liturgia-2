@@ -1544,6 +1544,11 @@ function initAiTab(settings) {
     if (info.running && info.sessionId) {
       if (relayConnectedInfoEl) relayConnectedInfoEl.style.display = 'block';
       if (relaySessionIdEl) relaySessionIdEl.textContent = info.sessionId.substring(0, 16) + '...';
+      
+      const methodEl = document.getElementById('relay-connection-method');
+      if (methodEl && info.connectionMethod) {
+        methodEl.textContent = info.connectionMethod;
+      }
     } else {
       if (relayConnectedInfoEl) relayConnectedInfoEl.style.display = 'none';
     }
@@ -1598,6 +1603,13 @@ function initAiTab(settings) {
     });
   }
 })();
+
+ipcRenderer.on('relay-connection-method', (event, method) => {
+  const methodEl = document.getElementById('relay-connection-method');
+  if (methodEl) {
+    methodEl.textContent = method;
+  }
+});
 
 // Live toggle dark theme
 document.getElementById('dark-theme').addEventListener('change', (e) => {

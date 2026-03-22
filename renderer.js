@@ -3374,7 +3374,8 @@ async function updateLive(verseOrIndices) {
       allSongs: allSongs.map((song, idx) => ({
         index: idx,
         title: song.title,
-        author: song.author || ''
+        author: song.author || '',
+        lyrics: song.lyrics || []
       })),
       lastUpdated: Date.now()
     };
@@ -5894,7 +5895,8 @@ async function updateLiveFromSongVerse(verseIndex) {
           allSongs: allSongs.map((s, idx) => ({
             index: idx,
             title: s.title,
-            author: s.author || ''
+            author: s.author || '',
+            lyrics: s.lyrics || []
           })),
           lastUpdated: Date.now()
         };
@@ -9295,32 +9297,171 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
   try {
     switch (command) {
       case 'SELECT_VERSE':
-        // Select a verse and optionally go live
+        // Select a verse or verse range and optionally go live
         if (data.book && data.chapter && data.verse) {
-          const verseKey = `${data.book} ${data.chapter}:${data.verse}`;
-          const verseIndex = allVerses.findIndex(v => v.key === verseKey);
-          if (verseIndex !== -1) {
+          const startVerseKey = `${data.book} ${data.chapter}:${data.verse}`;
+          const startIndex = allVerses.findIndex(v => v.key === startVerseKey);
+          
+          if (startIndex !== -1) {
             // Switch to verses tab if not already there
             if (currentTab !== 'verses') {
               switchTab('verses');
             }
-            // Select the verse
-            await handleVerseClick(verseIndex, null);
-            // Optionally go live
-            if (data.goLive) {
-              await handleVerseDoubleClick(verseIndex);
+            
+            // Handle verse range if verseEnd is provided
+            if (data.verseEnd && data.verseEnd > data.verse) {
+              const endVerseKey = `${data.book} ${data.chapter}:${data.verseEnd}`;
+              const endIndex = allVerses.findIndex(v => v.key === endVerseKey);
+              
+              if (endIndex !== -1) {
+                // Select all verses in the range
+                selectedIndices = [];
+                for (let i = startIndex; i <= endIndex; i++) {
+                  selectedIndices.push(i);
+                }
+                updateVerseDisplay();
+                await updatePreview(selectedIndices);
+                
+                // Go live with the range
+                if (data.goLive) {
+                  await handleVerseDoubleClick(selectedIndices);
+                }
+              } else {
+                console.error('[remote] End verse not found:', endVerseKey);
+                // Fall back to single verse
+                await handleVerseClick(startIndex, null);
+                if (data.goLive) {
+                  await handleVerseDoubleClick(startIndex);
+                }
+              }
+            } else {
+              // Single verse
+              await handleVerseClick(startIndex, null);
+              if (data.goLive) {
+                await handleVerseDoubleClick(startIndex);
+              }
             }
           } else {
-            console.error('[remote] Verse not found:', verseKey);
+            console.error('[remote] Verse not found:', startVerseKey);
           }
         }
         break;
         
       case 'SELECT_SONG':
-        // Select a song by index or title
-        if (typeof data.index === 'number') {
-          // TODO: Implement song selection by index
-          // You'll need to add this based on your existing song selection code
+        // Select a song by index and display it
+        if (typeof data.songIndex === 'number') {
+          console.log('[remote] Selecting song index:', data.songIndex);
+          // Switch to songs tab if not already there
+          if (currentTab !== 'songs') {
+            switchTab('songs');
+          }
+          // Select the song
+          selectedSongIndices = [data.songIndex];
+          selectedSongVerseIndex = null;
+          // Display the song
+          displaySelectedSong();
+          // Re-render song list to show selection
+          renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+        } else {
+          console.warn('[remote] SELECT_SONG missing songIndex:', data);
+        }
+        break;
+        
+      case 'SELECT_SONG_VERSE':
+        // Select a specific verse within the currently selected song
+        if (typeof data.verseIndex === 'number' && selectedSongIndices.length > 0) {
+          console.log('[remote] Selecting song verse index:', data.verseIndex);
+          selectedSongVerseIndex = data.verseIndex;
+          displaySelectedSong();
+          updatePreviewFromSongVerse(data.verseIndex);
+        } else {
+          console.warn('[remote] SELECT_SONG_VERSE missing verseIndex or no song selected:', data);
+        }
+        break;
+        
+      case 'DISPLAY_SONG_VERSE':
+        // Display a specific song verse live without changing desktop selection
+        if (typeof data.songIndex === 'number' && typeof data.verseIndex === 'number') {
+          console.log('[remote] Displaying song verse live - song:', data.songIndex, 'verse:', data.verseIndex);
+          const song = allSongs[data.songIndex];
+          if (!song) {
+            console.warn('[remote] Song not found at index:', data.songIndex);
+            break;
+          }
+          
+          // Get the verse text using same logic as getSongVerseText
+          let verseData = null;
+          let currentVerseIndex = 0;
+          for (const section of song.lyrics) {
+            const verses = section.text.split(/\n\n+/);
+            for (const verse of verses) {
+              if (currentVerseIndex === data.verseIndex) {
+                verseData = {
+                  title: song.title,
+                  section: section.section,
+                  text: verse
+                };
+                break;
+              }
+              currentVerseIndex++;
+            }
+            if (verseData) break;
+          }
+          
+          if (!verseData) {
+            console.warn('[remote] Verse not found at index:', data.verseIndex);
+            break;
+          }
+          
+          // Display it live using proper rendering (like updateLiveFromSongVerse but without changing selection)
+          hideVideoLiveBar();
+          hideWebsiteLivePanel(true);
+          
+          const settings = await ipcRenderer.invoke('load-settings');
+          const displays = await ipcRenderer.invoke('get-displays');
+          const defaultDisplayId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
+          const display = displays.find(d => d.id == defaultDisplayId) || displays[0];
+          const width = display ? display.bounds.width : 1920;
+          const height = display ? display.bounds.height : 1080;
+          
+          const liveCanvas = document.getElementById('live-canvas');
+          if (liveCanvas) {
+            const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+            const styles = getCanvasStylesFor('song');
+            window.currentContent = {
+              type: 'song',
+              number: '',
+              text: verseData.text,
+              reference: `${verseData.title} - ${verseData.section}`,
+              showHint: null,
+              width: width,
+              height: height,
+              backgroundMedia: backgroundMedia,
+              styles
+            };
+            renderToCanvas(liveCanvas, window.currentContent, width, height);
+          }
+          
+          const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+          ipcRenderer.send('update-live-window', {
+            number: '',
+            text: verseData.text,
+            reference: `${verseData.title} - ${verseData.section}`,
+            showingCount: 1,
+            totalSelected: 1,
+            backgroundMedia: backgroundMedia,
+            styles: getCanvasStylesFor('song'),
+            _displayStyleOverrides: getPerDisplayStyleOverrides('song') || undefined,
+            transitionIn: transitionSettings['fade-in'],
+            transitionOut: transitionSettings['fade-out']
+          });
+          
+          // Turn on live mode if not already on
+          if (!liveMode) {
+            toggleLive(true);
+          }
+        } else {
+          console.warn('[remote] DISPLAY_SONG_VERSE missing songIndex or verseIndex:', data);
         }
         break;
         
@@ -9369,23 +9510,17 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
       case 'ADD_TO_SCHEDULE':
         // Add verse to schedule from mobile
         if (data && data.book && data.chapter && data.verse) {
-          const verseRef = `${data.book} ${data.chapter}:${data.verse}`;
-          console.log('[remote] Adding to schedule:', verseRef);
+          const verseKey = `${data.book} ${data.chapter}:${data.verse}`;
+          console.log('[remote] Adding to schedule:', verseKey);
           
-          // Add to schedule (assuming scheduleItems is accessible)
-          if (typeof scheduleItems !== 'undefined' && Array.isArray(scheduleItems)) {
-            scheduleItems.push({
-              type: 'verses',
-              book: data.book,
-              chapter: data.chapter,
-              startVerse: data.verse,
-              endVerse: data.verse
-            });
-            saveScheduleItems();
-            renderSchedule();
-            console.log('[remote] Added verse to schedule, total items:', scheduleItems.length);
+          // Find the verse index in allVerses
+          const verseIndex = allVerses.findIndex(v => v.key === verseKey);
+          if (verseIndex !== -1) {
+            // Add to schedule with proper indices structure
+            addScheduleItem([verseIndex]);
+            console.log('[remote] Added verse to schedule at index:', verseIndex);
           } else {
-            console.error('[remote] scheduleItems not available');
+            console.error('[remote] Verse not found:', verseKey);
           }
         } else {
           console.warn('[remote] ADD_TO_SCHEDULE missing data:', data);

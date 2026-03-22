@@ -49,6 +49,12 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   const container = document.getElementById(containerId);
   if (!container) return;
 
+  const existingInput = document.getElementById('search-autocomplete-input');
+  if (existingInput && container.contains(existingInput)) {
+    existingInput._books = books;
+    return;
+  }
+
   container.innerHTML = '';
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
@@ -173,7 +179,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
 
   function updateMatchAndJump() {
     const value = input.value;
-    const ref = parseReference(value, books);
+    const ref = parseReference(value, input._books || books);
     const scriptureSearch = document.getElementById('scripture-search');
     if (ref && ref.book) {
       let display = ref.book;

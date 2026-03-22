@@ -883,6 +883,9 @@
       state.lastPassiveReconnectAt = now;
       try {
         await connectSidecar({ maxAttempts: 1, timeoutMs: 3000, attemptDelayMs: 500, quiet: true });
+        if (autoStartMode && !state.listening) {
+          startListening().catch(() => {});
+        }
       } catch (_) {
       } finally {
         state.reconnectInFlight = false;

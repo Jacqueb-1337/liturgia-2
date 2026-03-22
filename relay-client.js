@@ -13,10 +13,12 @@ class RelayClient extends EventEmitter {
     this.polling = false;
     this.heartbeatInterval = null;
     this.pollAbortController = null;
+    this.deviceName = 'Liturgia Desktop';
   }
 
   async register(deviceName = 'Liturgia Desktop') {
     try {
+      this.deviceName = deviceName;
       console.log('[relay] Attempting registration to:', this.relayUrl);
       console.log('[relay] Device name:', deviceName);
       console.log('[relay] Token length:', this.token ? this.token.length : 0);
@@ -83,7 +85,7 @@ class RelayClient extends EventEmitter {
         session_id: this.sessionId,
         direction: 'to_desktop',
         last_id: this.lastMessageId
-      }, 30000); // 30s timeout for long-poll
+      }, 5000); // 5s timeout for faster response
 
       if (result.ok && result.messages && result.messages.length > 0) {
         for (const msg of result.messages) {
@@ -99,9 +101,9 @@ class RelayClient extends EventEmitter {
       }
     }
 
-    // Re-poll with 2s delay to prevent callback queue buildup
+    // Re-poll with 500ms delay for responsive command execution
     if (this.polling) {
-      setTimeout(() => this.poll(), 2000);
+      setTimeout(() => this.poll(), 500);
     }
   }
 
@@ -120,7 +122,7 @@ class RelayClient extends EventEmitter {
           if (err.message && (err.message.includes('Session not found') || err.message.includes('HTTP 404'))) {
             console.warn('[relay] Session expired, re-registering...');
             this.sessionId = null;
-            this.register().catch(e => console.warn('[relay] Re-registration failed:', e.message));
+            this.register(this.deviceName).catch(e => console.warn('[relay] Re-registration failed:', e.message));
           } else {
             console.warn('[relay] Heartbeat failed:', err.message);
           }
