@@ -1661,11 +1661,10 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       ipcRenderer.send('license-status-update', { active: false, reason: 'signed-out' });
       document.getElementById('account-info').textContent = 'Not signed in';
       document.getElementById('subscription-info').textContent = '';
-      // Toggle buttons
       if (signInBtn) signInBtn.style.display = '';
       if (signOutBtn) signOutBtn.style.display = 'none';
       if (viewSubBtn) viewSubBtn.style.display = 'none';
-      if (purchaseBtn) purchaseBtn.style.display = '';
+      if (purchaseBtn) { purchaseBtn.style.display = ''; purchaseBtn.disabled = false; purchaseBtn.title = ''; }
     });
   }
 
@@ -1713,11 +1712,80 @@ document.getElementById('close-live-window').addEventListener('click', async () 
     });
   }
 
-  // Purchase subscription
+  // Subscribe — plan chooser modal
   if (purchaseBtn) {
-    purchaseBtn.addEventListener('click', async () => {
-      // Reuse setup modal flow to collect email and create checkout
-      ipcRenderer.send('show-setup-modal');
+    let _subscribePlan = null;
+    const overlay = document.getElementById('subscribe-modal-overlay');
+    const stepPlan = document.getElementById('subscribe-modal-step-plan');
+    const stepEmail = document.getElementById('subscribe-modal-step-email');
+    const planTitle = document.getElementById('subscribe-modal-plan-title');
+    const emailInput = document.getElementById('subscribe-modal-email');
+    const statusEl = document.getElementById('subscribe-modal-status');
+
+    function _openSubscribeModal() {
+      _subscribePlan = null;
+      stepPlan.style.display = '';
+      stepEmail.style.display = 'none';
+      if (statusEl) statusEl.textContent = '';
+      overlay.style.display = 'flex';
+    }
+    function _closeSubscribeModal() {
+      overlay.style.display = 'none';
+    }
+
+    purchaseBtn.addEventListener('click', _openSubscribeModal);
+
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeSubscribeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && overlay.style.display === 'flex') _closeSubscribeModal(); });
+
+    document.getElementById('subscribe-modal-cancel-plan').addEventListener('click', _closeSubscribeModal);
+
+    stepPlan.querySelectorAll('button[data-plan]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        _subscribePlan = btn.dataset.plan;
+        planTitle.textContent = `Subscribe — ${_subscribePlan === 'yearly' ? 'Yearly' : 'Monthly'}`;
+        if (statusEl) statusEl.textContent = '';
+        let prefillEmail = '';
+        try {
+          const tok = await ipcRenderer.invoke('secure-get-token');
+          if (tok) { const p = decodeJwtPayload(tok); if (p && (p.email || p.sub)) prefillEmail = p.email || p.sub; }
+        } catch (e) {}
+        emailInput.value = prefillEmail;
+        stepPlan.style.display = 'none';
+        stepEmail.style.display = '';
+        emailInput.focus();
+      });
+    });
+
+    document.getElementById('subscribe-modal-back').addEventListener('click', () => {
+      stepEmail.style.display = 'none';
+      stepPlan.style.display = '';
+    });
+
+    document.getElementById('subscribe-modal-confirm').addEventListener('click', async () => {
+      const email = emailInput.value.trim();
+      if (!email || !email.includes('@')) { if (statusEl) statusEl.textContent = 'Enter a valid email address.'; return; }
+      if (statusEl) statusEl.textContent = 'Creating checkout...';
+      const confirmBtn = document.getElementById('subscribe-modal-confirm');
+      confirmBtn.disabled = true;
+      try {
+        const settings = await ipcRenderer.invoke('load-settings');
+        const server = (settings && settings.licenseServer) ? settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+        const body = new URLSearchParams({ email, plan: _subscribePlan }).toString();
+        const res = await fetch(server + '/create-checkout-session.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+        let j = null;
+        try { j = await res.json(); } catch (e) { j = null; }
+        if (j && j.url) {
+          _closeSubscribeModal();
+          require('electron').shell.openExternal(j.url);
+        } else {
+          if (statusEl) statusEl.textContent = (j && j.error) ? j.error : 'Server error. Please try again.';
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = 'Request failed. Check your connection.';
+      } finally {
+        confirmBtn.disabled = false;
+      }
     });
   }
 
@@ -1753,17 +1821,27 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       }
 
       // Toggle buttons
+      const hasCustomerId = !!(status.user_row && status.user_row.stripe_customer_id);
       if (signInBtn) signInBtn.style.display = 'none';
       if (signOutBtn) signOutBtn.style.display = '';
-      if (viewSubBtn) viewSubBtn.style.display = '';
-      if (purchaseBtn) purchaseBtn.style.display = status.active ? 'none' : '';
+      if (hasCustomerId && status.active) {
+        if (viewSubBtn) viewSubBtn.style.display = '';
+        if (purchaseBtn) { purchaseBtn.style.display = 'none'; purchaseBtn.disabled = false; purchaseBtn.title = ''; }
+      } else {
+        if (viewSubBtn) viewSubBtn.style.display = 'none';
+        if (purchaseBtn) {
+          purchaseBtn.style.display = '';
+          purchaseBtn.disabled = !!status.active;
+          purchaseBtn.title = status.active ? 'You already have an active subscription' : '';
+        }
+      }
     } else {
       ai.textContent = 'Not signed in';
       si.textContent = '';
       if (signInBtn) signInBtn.style.display = '';
       if (signOutBtn) signOutBtn.style.display = 'none';
       if (viewSubBtn) viewSubBtn.style.display = 'none';
-      if (purchaseBtn) purchaseBtn.style.display = '';
+      if (purchaseBtn) { purchaseBtn.style.display = ''; purchaseBtn.disabled = false; purchaseBtn.title = ''; }
     }
   });
 // Load list of available local (imported) Bibles from userData

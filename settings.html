@@ -813,7 +813,7 @@
             <button id="btn-sign-in" class="btn primary">Sign in</button>
             <button id="btn-sign-out" class="btn">Sign out</button>
             <button id="btn-view-subscription" class="btn" style="display:none;">View Subscription</button>
-            <button id="btn-purchase-subscription" class="btn" style="display:none;">Purchase Subscription</button>
+            <button id="btn-purchase-subscription" class="btn" style="display:none;">Subscribe</button>
           </div>
         </div>
         <button class="save-settings btn" data-panel="general">Save</button>
@@ -1081,5 +1081,88 @@
     <div class="bible-export-format-option" data-format="json">JSON</div>
     <div class="bible-export-format-option" data-format="xml">XML</div>
   </div>
+
+  <!-- Subscribe plan chooser modal -->
+  <div id="subscribe-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+    <div id="subscribe-modal" class="subscribe-modal">
+      <div id="subscribe-modal-step-plan" class="subscribe-modal-step">
+        <h3>Choose a Plan</h3>
+        <div class="subscribe-plan-options">
+          <div class="subscribe-plan-card" data-plan="monthly">
+            <div class="subscribe-plan-name">Monthly</div>
+            <div class="subscribe-plan-desc">Billed monthly. Cancel anytime.</div>
+            <button class="btn" data-plan="monthly">Choose Monthly</button>
+          </div>
+          <div class="subscribe-plan-card subscribe-plan-featured" data-plan="yearly">
+            <div class="subscribe-plan-name">Yearly</div>
+            <div class="subscribe-plan-desc">Billed yearly — best value.</div>
+            <button class="btn primary" data-plan="yearly">Choose Yearly</button>
+          </div>
+        </div>
+        <div style="margin-top:12px;text-align:right;"><button class="btn" id="subscribe-modal-cancel-plan">Cancel</button></div>
+      </div>
+      <div id="subscribe-modal-step-email" class="subscribe-modal-step" style="display:none;">
+        <h3 id="subscribe-modal-plan-title">Subscribe</h3>
+        <p class="subscribe-modal-email-desc">Enter the email address to use for your subscription.</p>
+        <input type="email" id="subscribe-modal-email" class="subscribe-modal-email-input" placeholder="your@email.com" />
+        <div id="subscribe-modal-status" class="subscribe-modal-status"></div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+          <button class="btn" id="subscribe-modal-back">Back</button>
+          <button class="btn primary" id="subscribe-modal-confirm">Continue to Checkout</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .subscribe-modal {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px;
+      min-width: 340px;
+      max-width: 480px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    }
+    .subscribe-modal h3 { margin: 0 0 16px; font-size: 1.1em; }
+    .subscribe-plan-options { display: flex; gap: 12px; }
+    .subscribe-plan-card {
+      flex: 1;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .subscribe-plan-featured { border-color: #4a90d9; }
+    .subscribe-plan-name { font-weight: bold; font-size: 1em; }
+    .subscribe-plan-desc { font-size: 0.88em; color: #666; flex: 1; }
+    .subscribe-modal-email-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 0.95em;
+      margin-top: 4px;
+    }
+    .subscribe-modal-status { font-size: 0.9em; color: #c00; margin-top: 8px; min-height: 1.2em; }
+    .subscribe-modal-email-desc { font-size: 0.9em; color: #555; margin: 0 0 8px; }
+    body.dark-theme .subscribe-modal {
+      background: #2a2a2a;
+      color: #eee;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+    body.dark-theme .subscribe-plan-card { border-color: #444; }
+    body.dark-theme .subscribe-plan-featured { border-color: #4a90d9; }
+    body.dark-theme .subscribe-plan-desc { color: #aaa; }
+    body.dark-theme .subscribe-modal-email-input {
+      background: #1e1e1e;
+      color: #eee;
+      border-color: #555;
+    }
+    body.dark-theme .subscribe-modal-email-desc { color: #aaa; }
+    body.dark-theme .subscribe-modal-status { color: #f88; }
+  </style>
 </body>
 </html>

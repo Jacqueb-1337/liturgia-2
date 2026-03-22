@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.4.1 - 2026-03-22
+
+- fix: fixed some issues with the sign-in flow and the view subscription modal 
+
+
 ## 5.4.0 - 2026-03-22
 
 - fix: fixed an issue with search inputs not focusing on cold boot
