@@ -711,6 +711,67 @@ let allSongs = [];
 let filteredSongs = []; // For search results
 let lastRelayState = null;
 
+function buildRelayAllScheduleItems() {
+  return scheduleItems.map((item, idx) => {
+    if (item.type === 'verses') {
+      const label = item.indices ? getScheduleItemLabel(item.indices) : 'Unknown';
+      const subItems = item.indices ? item.indices.map(vi => ({
+        label: allVerses[vi] ? allVerses[vi].key : String(vi),
+        verseIndex: vi
+      })) : [];
+      return { index: idx, label, type: 'verses', subItems };
+    } else if (item.type === 'song') {
+      const song = item.songIndex !== undefined ? allSongs[item.songIndex] : null;
+      const label = song ? song.title : 'Unknown Song';
+      const subItems = song && song.lyrics ? song.lyrics.map((section, si) => ({
+        label: section.section || ('Section ' + (si + 1)),
+        sectionIndex: si,
+        preview: section.text ? section.text.split('\n')[0].substring(0, 60) : ''
+      })) : [];
+      return { index: idx, label, type: 'song', songIndex: item.songIndex, subItems };
+    } else if (item.type === 'media') {
+      const media = item.mediaIndex !== undefined ? allMedia[item.mediaIndex] : null;
+      const label = media ? (media.name || media.filename || 'Media') : 'Media';
+      return { index: idx, label, type: 'media', subItems: [] };
+    }
+    return { index: idx, label: 'Item', type: item.type || 'unknown', subItems: [] };
+  });
+}
+
+async function pushScheduleUpdate() {
+  try {
+    const allScheduleItems = buildRelayAllScheduleItems();
+    const scheduling = {
+      totalItems: scheduleItems.length,
+      currentItem: currentLiveScheduleIndex,
+      hasSchedule: scheduleItems.length > 0
+    };
+    const state = lastRelayState ? {
+      ...lastRelayState,
+      allScheduleItems,
+      scheduling,
+      lastUpdated: Date.now()
+    } : {
+      bible: [],
+      songs: [],
+      schedule: [],
+      scheduling,
+      allScheduleItems,
+      allSongs: allSongs.map((song, i) => ({
+        index: i,
+        title: song.title,
+        author: song.author || '',
+        lyrics: song.lyrics || []
+      })),
+      lastUpdated: Date.now()
+    };
+    lastRelayState = state;
+    await ipcRenderer.invoke('relay-push-state', state);
+  } catch (err) {
+    console.error('[relay] Failed to push schedule update:', err);
+  }
+}
+
 // Safety stub for showPopover: queues calls if popover isn't initialized yet
 if (typeof window !== 'undefined' && !window.showPopover) {
   const _showPopoverStub = function(name, key) {
@@ -3367,11 +3428,7 @@ async function updateLive(verseOrIndices) {
         currentItem: currentLiveScheduleIndex,
         hasSchedule: scheduleItems.length > 0
       },
-      allScheduleItems: scheduleItems.map((item, idx) => ({
-        index: idx,
-        label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
-        type: item.type
-      })),
+      allScheduleItems: buildRelayAllScheduleItems(),
       allSongs: allSongs.map((song, idx) => ({
         index: idx,
         title: song.title,
@@ -5152,8 +5209,8 @@ function navigateScheduleSongVerse(direction) {
 
 async function saveScheduleToSettings() {
   try {
-    // Use atomic update to avoid overwriting other settings
     await ipcRenderer.invoke('update-settings', { schedule: scheduleItems });
+    pushScheduleUpdate();
   } catch (err) {
     console.error('Failed to save schedule to settings:', err);
   }
@@ -5889,11 +5946,7 @@ async function updateLiveFromSongVerse(verseIndex) {
             currentItem: currentLiveScheduleIndex,
             hasSchedule: scheduleItems.length > 0
           },
-          allScheduleItems: scheduleItems.map((item, idx) => ({
-            index: idx,
-            label: getScheduleItemLabel(item.indices),
-            type: item.type
-          })),
+          allScheduleItems: buildRelayAllScheduleItems(),
           allSongs: allSongs.map((s, idx) => ({
             index: idx,
             title: s.title,
@@ -9305,11 +9358,7 @@ ipcRenderer.on('relay-push-state-request', async () => {
         currentItem: currentLiveScheduleIndex,
         hasSchedule: scheduleItems.length > 0
       },
-      allScheduleItems: scheduleItems.map((item, idx) => ({
-        index: idx,
-        label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
-        type: item.type
-      })),
+      allScheduleItems: buildRelayAllScheduleItems(),
       allSongs: allSongs.map((song, idx) => ({
         index: idx,
         title: song.title,
@@ -9340,11 +9389,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
               currentItem: currentLiveScheduleIndex,
               hasSchedule: scheduleItems.length > 0
             },
-            allScheduleItems: scheduleItems.map((item, idx) => ({
-              index: idx,
-              label: item.indices ? getScheduleItemLabel(item.indices) : (item.title || item.name || item.type || 'Item'),
-              type: item.type
-            })),
+            allScheduleItems: buildRelayAllScheduleItems(),
             allSongs: allSongs.map((song, idx) => ({
               index: idx,
               title: song.title,
@@ -9590,8 +9635,42 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
         }
         break;
         
-      default:
-        console.warn('[remote] Unknown command:', command);
+      case 'GO_LIVE_SCHEDULE_ITEM':
+        if (typeof data.scheduleIndex === 'number') {
+          const schedItem = scheduleItems[data.scheduleIndex];
+          if (schedItem) {
+            if (schedItem.type === 'verses') {
+              let verseIdx;
+              if (typeof data.subItemIndex === 'number' && schedItem.indices[data.subItemIndex] !== undefined) {
+                verseIdx = schedItem.indices[data.subItemIndex];
+              } else {
+                verseIdx = schedItem.indices;
+              }
+              if (currentTab !== 'verses') switchTab('verses');
+              await handleVerseDoubleClick(verseIdx);
+            } else if (schedItem.type === 'song') {
+              if (currentTab !== 'songs') switchTab('songs');
+              selectedSongIndices = [schedItem.songIndex];
+              selectedSongVerseIndex = typeof data.subItemIndex === 'number' ? data.subItemIndex : 0;
+              if (!liveMode) await toggleLive(true);
+              await updateLiveFromSongVerse(selectedSongVerseIndex);
+            }
+          }
+        }
+        break;
+
+      case 'REORDER_SCHEDULE':
+        if (typeof data.from === 'number' && typeof data.to === 'number' &&
+            data.from >= 0 && data.to >= 0 &&
+            data.from < scheduleItems.length && data.to < scheduleItems.length &&
+            data.from !== data.to) {
+          const moved = scheduleItems.splice(data.from, 1)[0];
+          scheduleItems.splice(data.to, 0, moved);
+          renderSchedule();
+          saveScheduleToSettings();
+        }
+        break;
+
     }
   } catch (e) {
     console.error('[remote] Error handling command:', e);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.4.3 - 2026-03-23
+
+- fix: lots of issues with verse selection in the mobile app
+
+
 ## 5.4.2 - 2026-03-22
 
 - fix: lots of bugs introduced in the previous update
