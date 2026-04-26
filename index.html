@@ -487,6 +487,19 @@
   <script src="renderer.js"></script>
   <script src="searchBox.js"></script>
 
+<!-- VideoPsalm import preview modal -->
+<div id="vp-import-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
+  <div class="vp-import-modal">
+    <h3 class="vp-import-modal-title">Import VideoPsalm</h3>
+    <p class="vp-import-modal-subtitle" id="vp-import-modal-subtitle"></p>
+    <div id="vp-import-modal-list" class="vp-import-modal-list"></div>
+    <div class="vp-import-modal-actions">
+      <button class="vp-import-modal-btn-primary" id="vp-import-modal-confirm">Import Selected</button>
+      <button class="vp-import-modal-btn-cancel" id="vp-import-modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- CSS Editing Popover -->
 <div id="css-popover" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border:1px solid #ccc; padding:20px; z-index:1000; box-shadow: 0 0 10px rgba(0,0,0,0.5);">
   <h3>Edit CSS for <span id="css-element-name"></span></h3>

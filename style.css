@@ -2348,6 +2348,125 @@ body.dark-theme .display-row-remove:hover {
   border-color: #e07070;
   color: #fff;
 }
+
+.vp-import-modal {
+  background: #fff;
+  border-radius: 8px;
+  padding: 24px 28px;
+  max-width: 520px;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+}
+.vp-import-modal-title {
+  margin: 0;
+  font-size: 1.1em;
+  color: #111;
+}
+.vp-import-modal-subtitle {
+  margin: 0;
+  font-size: 0.9em;
+  color: #555;
+}
+.vp-import-modal-list {
+  overflow-y: auto;
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 0.85em;
+  line-height: 1.7;
+  max-height: 340px;
+}
+.vp-book-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.vp-book-row:last-child {
+  border-bottom: none;
+}
+.vp-book-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #0078d4;
+}
+.vp-book-row-name {
+  flex: 1;
+  font-weight: 500;
+  color: #222;
+}
+.vp-book-row-stats {
+  color: #888;
+  flex-shrink: 0;
+}
+.vp-import-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.vp-import-modal-btn-primary,
+.vp-import-modal-btn-cancel {
+  padding: 8px 18px;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.vp-import-modal-btn-primary {
+  background: #0078d4;
+  color: #fff;
+}
+.vp-import-modal-btn-primary:hover {
+  background: #006abf;
+}
+.vp-import-modal-btn-cancel {
+  background: transparent;
+  border: 1px solid #ccc;
+  color: #333;
+}
+.vp-import-modal-btn-cancel:hover {
+  background: #f0f0f0;
+}
+body.dark-theme .vp-import-modal {
+  background: #23272a;
+  color: #eee;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+body.dark-theme .vp-import-modal-title {
+  color: #eee;
+}
+body.dark-theme .vp-import-modal-subtitle {
+  color: #aaa;
+}
+body.dark-theme .vp-import-modal-list {
+  border-color: #444;
+  background: #2a2e31;
+}
+body.dark-theme .vp-book-row {
+  border-bottom-color: #333;
+}
+body.dark-theme .vp-book-row-name {
+  color: #ddd;
+}
+body.dark-theme .vp-book-row-stats {
+  color: #777;
+}
+body.dark-theme .vp-import-modal-btn-cancel {
+  border-color: #555;
+  color: #ccc;
+}
+body.dark-theme .vp-import-modal-btn-cancel:hover {
+  background: #333;
+}
 body.dark-theme .website-vid-fullscreen-btn.active {
   background: #a02020;
   border-color: #d06060;

@@ -697,6 +697,7 @@ async function importEasyWorshipHandler() {
 
 // --- VideoPsalm Import ---
 function parseVideoPsalmJson(raw) {
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
   // VP JSON may contain literal (unescaped) newlines inside string values,
   // and sometimes unquoted object keys. Fix both before handing to JSON.parse.
   const result = [];
@@ -721,101 +722,31 @@ function parseVideoPsalmJson(raw) {
 }
 
 async function importVideoPsalmFromFile(jsonPath) {
-  const raw = fs.readFileSync(jsonPath, 'utf8');
+  let raw;
+  if (jsonPath.toLowerCase().endsWith('.vpc')) {
+    const AdmZip = require('adm-zip');
+    const zip = new AdmZip(jsonPath);
+    const entry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.json'));
+    if (!entry) throw new Error('No JSON found inside .vpc file');
+    raw = entry.getData().toString('utf8');
+  } else {
+    raw = fs.readFileSync(jsonPath, 'utf8');
+  }
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
   let data;
   try { data = JSON.parse(raw); } catch (_) { data = parseVideoPsalmJson(raw); }
-  const vpSongs = data.Songs || data.songs || [];
+  const vpSongs = data.Songs || data.songs || data.Items || data.items || [];
   if (!Array.isArray(vpSongs) || vpSongs.length === 0) return [];
   return vpSongs.map(vpSong => {
-    const title  = vpSong.Text || 'Untitled';
+    const title  = vpSong.Text || vpSong.Title || vpSong.Name || 'Untitled';
     const author = [vpSong.Author, vpSong.Composer].filter(Boolean).join(', ') || '';
-    const lyrics = (vpSong.Verses || []).map(v => ({
-      section: '',
-      text: (v.Text || '').replace(/\[[A-Ga-g][^\]]{0,10}\]/g, '').trim()
+    const verses = vpSong.Verses || vpSong.Items || vpSong.Lines || [];
+    const lyrics = verses.map(v => ({
+      section: v.Section || v.Type || '',
+      text: (v.Text || v.Content || v.Lyrics || '').replace(/\[[A-Ga-g][^\]]{0,10}\]/g, '').trim()
     })).filter(v => v.text);
     return { title, author, lyrics };
   }).filter(s => s.lyrics.length > 0);
-}
-
-async function importVideoPsalmHandler() {
-  const choice = await dialog.showMessageBox({
-    type: 'question',
-    buttons: ['Auto Scan', 'Select File', 'Cancel'],
-    defaultId: 0,
-    title: 'Import VideoPsalm database',
-    message: 'Import VideoPsalm songs',
-    detail: 'Auto Scan checks common VideoPsalm locations. Select File lets you pick a .json songbook file directly.'
-  });
-  if (choice.response === 2) return;
-
-  let jsonPath = null;
-  if (choice.response === 0) {
-    const candidates = [
-      path.join(os.homedir(), 'Documents', 'VideoPsalm'),
-      path.join(os.homedir(), 'Documents', 'VideoPsalm', 'Songbooks'),
-      path.join('C:\\ProgramData', 'VideoPsalm'),
-      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'VideoPsalm'),
-    ];
-    outer: for (const c of candidates) {
-      if (!fs.existsSync(c)) continue;
-      try {
-        const entries = fs.readdirSync(c);
-        const jsonFile = entries.find(f => f.toLowerCase().endsWith('.json') && !f.toLowerCase().startsWith('settings'));
-        if (jsonFile) { jsonPath = path.join(c, jsonFile); break outer; }
-        for (const entry of entries) {
-          const sub = path.join(c, entry);
-          try {
-            const subEntries = fs.readdirSync(sub);
-            const subJson = subEntries.find(f => f.toLowerCase().endsWith('.json') && !f.toLowerCase().startsWith('settings'));
-            if (subJson) { jsonPath = path.join(sub, subJson); break outer; }
-          } catch {}
-        }
-      } catch {}
-    }
-    if (!jsonPath) {
-      await dialog.showMessageBox({ type: 'info', message: 'No VideoPsalm database found', detail: 'No .json songbook found in common VideoPsalm locations. Please select the file manually.', buttons: ['OK'] });
-    }
-  }
-  if (!jsonPath) {
-    const sel = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      title: 'Select VideoPsalm database file',
-      filters: [{ name: 'VideoPsalm JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }]
-    });
-    if (sel.canceled || !sel.filePaths || sel.filePaths.length === 0) return;
-    jsonPath = sel.filePaths[0];
-  }
-
-  let songs;
-  try {
-    songs = await importVideoPsalmFromFile(jsonPath);
-  } catch (e) {
-    await dialog.showMessageBox({ type: 'error', message: 'Failed to import VideoPsalm file', detail: e.message || String(e), buttons: ['OK'] });
-    return;
-  }
-  if (!songs || songs.length === 0) {
-    await dialog.showMessageBox({ type: 'info', message: 'No songs found', detail: `No songs found in ${path.basename(jsonPath)}`, buttons: ['OK'] });
-    return;
-  }
-
-  const { getUserDataDir } = require('./lib/paths');
-  const songsPath = path.join(getUserDataDir(app), 'songs.json');
-  let existing = [];
-  try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
-  let added = 0;
-  for (const s of songs) {
-    const dup = existing.some(e => (e.title || '').trim() === (s.title || '').trim());
-    if (dup) continue;
-    existing.push(s);
-    added++;
-  }
-  try {
-    fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (e) {
-    await dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] });
-    return;
-  }
-  mainWindow && mainWindow.webContents.send('songs-imported', { addedCount: added, totalFound: songs.length, source: 'videopsalm' });
 }
 
 // ---------------------------
@@ -1406,8 +1337,100 @@ ipcMain.handle('import-easyworship', async () => {
   await importEasyWorshipHandler();
 });
 
-ipcMain.handle('import-videopsalm', async () => {
-  await importVideoPsalmHandler();
+ipcMain.handle('vp-collect-songbooks', async () => {
+  const choice = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Auto Scan', 'Select File', 'Cancel'],
+    defaultId: 0,
+    title: 'Import VideoPsalm',
+    message: 'Import VideoPsalm songs',
+    detail: 'Auto Scan checks common VideoPsalm locations. Select File lets you pick one or more songbook files.'
+  });
+  if (choice.response === 2) return { cancelled: true, songbooks: [] };
+
+  let filePaths = [];
+  if (choice.response === 0) {
+    const VP_EXCLUDE = ['settings', 'fontstyles', 'themes', 'options', 'config', 'prefs', 'preferences', 'layout', 'style'];
+    const isVpSongbook = f => (f.toLowerCase().endsWith('.vpc') || f.toLowerCase().endsWith('.json')) && !VP_EXCLUDE.some(x => f.toLowerCase().startsWith(x));
+    const candidates = [
+      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'VideoPsalm', 'SongBooks'),
+      path.join(process.env.PUBLIC || 'C:\\Users\\Public', 'Documents', 'VideoPsalm'),
+      path.join(os.homedir(), 'Documents', 'VideoPsalm', 'SongBooks'),
+      path.join(os.homedir(), 'Documents', 'VideoPsalm'),
+      path.join('C:\\ProgramData', 'VideoPsalm', 'SongBooks'),
+      path.join('C:\\ProgramData', 'VideoPsalm'),
+    ];
+    const seen = new Set();
+    for (const c of candidates) {
+      if (!fs.existsSync(c)) continue;
+      try {
+        const entries = fs.readdirSync(c);
+        for (const f of entries) {
+          if (isVpSongbook(f)) { const p = path.join(c, f); if (!seen.has(p)) { seen.add(p); filePaths.push(p); } }
+        }
+        for (const entry of entries) {
+          const sub = path.join(c, entry);
+          try {
+            const subEntries = fs.readdirSync(sub);
+            for (const f of subEntries) {
+              if (isVpSongbook(f)) { const p = path.join(sub, f); if (!seen.has(p)) { seen.add(p); filePaths.push(p); } }
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+    if (filePaths.length === 0) {
+      await dialog.showMessageBox({ type: 'info', message: 'No VideoPsalm songbooks found', detail: 'No songbook found in common VideoPsalm locations. Please select files manually.', buttons: ['OK'] });
+    }
+  }
+  if (filePaths.length === 0) {
+    const sel = await dialog.showOpenDialog({
+      properties: ['openFile', 'multiSelections'],
+      title: 'Select VideoPsalm songbook file(s)',
+      filters: [{ name: 'VideoPsalm Files', extensions: ['vpc', 'json'] }, { name: 'All Files', extensions: ['*'] }]
+    });
+    if (sel.canceled || !sel.filePaths || sel.filePaths.length === 0) return { cancelled: true, songbooks: [] };
+    filePaths = sel.filePaths;
+  }
+
+  const songbooks = [];
+  for (const p of filePaths) {
+    try {
+      const songs = await importVideoPsalmFromFile(p);
+      if (songs && songs.length > 0) {
+        songbooks.push({ path: p, name: path.basename(p), songCount: songs.length });
+      }
+    } catch {}
+  }
+  return { cancelled: false, songbooks };
+});
+
+ipcMain.handle('vp-do-import', async (_event, selectedPaths) => {
+  const { getUserDataDir } = require('./lib/paths');
+  const songsPath = path.join(getUserDataDir(app), 'songs.json');
+  let existing = [];
+  try { existing = JSON.parse(fs.readFileSync(songsPath, 'utf8') || '[]'); } catch { existing = []; }
+  let added = 0;
+  let total = 0;
+  for (const p of selectedPaths) {
+    let songs;
+    try { songs = await importVideoPsalmFromFile(p); } catch { continue; }
+    if (!songs || songs.length === 0) continue;
+    total += songs.length;
+    for (const s of songs) {
+      const dup = existing.some(e => (e.title || '').trim() === (s.title || '').trim());
+      if (dup) continue;
+      existing.push(s);
+      added++;
+    }
+  }
+  try {
+    fs.writeFileSync(songsPath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (e) {
+    dialog.showMessageBox({ type: 'error', message: 'Failed to save songs', detail: e.message || String(e), buttons: ['OK'] });
+    return { added: 0, total: 0 };
+  }
+  return { added, total };
 });
 
 ipcMain.handle('import-ew-db-file', async (_event, dbFilePath) => {
@@ -2437,7 +2460,7 @@ async function createWindow() {
         },
         {
           label: 'Import VideoPsalm database...',
-          click: async () => { await importVideoPsalmHandler(); }
+          click: () => { mainWindow && mainWindow.webContents.send('vp-start-import'); }
         },
         { type: 'separator' },
         {

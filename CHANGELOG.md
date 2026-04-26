@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.5.0 - 2026-04-26
+
+- fix: VideoPsalm import
+
+
 ## 5.4.3 - 2026-03-23
 
 - fix: lots of issues with verse selection in the mobile app

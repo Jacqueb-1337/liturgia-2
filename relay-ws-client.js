@@ -21,6 +21,7 @@ class RelayClient extends EventEmitter {
     this.phpPollTimer = null;
     this.lastMessageId = 0;
     this.heartbeatInterval = null;
+    this.pendingState = null;
   }
 
   async register(deviceName = 'Liturgia Desktop') {
@@ -80,6 +81,11 @@ class RelayClient extends EventEmitter {
         console.log('[RelayWS] Connected via WebSocket');
         this.reconnectDelay = 1000;
         this.emit('connection-method', 'WebSocket');
+        if (this.pendingState) {
+          console.log('[RelayWS] Flushing queued state after reconnect');
+          this.ws.send(JSON.stringify(this.pendingState));
+          this.pendingState = null;
+        }
       });
 
       this.ws.on('message', (data) => {
@@ -255,7 +261,9 @@ class RelayClient extends EventEmitter {
       this.ws.send(JSON.stringify(stateMessage));
       return true;
     } else {
-      return this.updateState(state);
+      this.pendingState = stateMessage;
+      console.log('[RelayWS] WS not connected — state queued, will send on reconnect');
+      return false;
     }
   }
 

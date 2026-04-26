@@ -711,6 +711,14 @@ let allSongs = [];
 let filteredSongs = []; // For search results
 let lastRelayState = null;
 
+function getCurrentLiveFields() {
+  if (!liveMode) return { bible: [], songs: [] };
+  return {
+    bible: lastRelayState ? (lastRelayState.bible || []) : [],
+    songs: lastRelayState ? (lastRelayState.songs || []) : []
+  };
+}
+
 function buildRelayAllScheduleItems() {
   return scheduleItems.map((item, idx) => {
     if (item.type === 'verses') {
@@ -746,14 +754,15 @@ async function pushScheduleUpdate() {
       currentItem: currentLiveScheduleIndex,
       hasSchedule: scheduleItems.length > 0
     };
+    const liveFields = getCurrentLiveFields();
     const state = lastRelayState ? {
       ...lastRelayState,
+      ...liveFields,
       allScheduleItems,
       scheduling,
       lastUpdated: Date.now()
     } : {
-      bible: [],
-      songs: [],
+      ...liveFields,
       schedule: [],
       scheduling,
       allScheduleItems,
@@ -3853,6 +3862,7 @@ async function toggleLive(isActive) {
     }
   } else {
     ipcRenderer.invoke('close-live-window');
+    pushScheduleUpdate();
   }
   // Update the Live button state in the UI
   updateLiveButtonState(isActive);
@@ -6227,6 +6237,68 @@ function closeContextMenu(id) {
   if (m) m.style.display = 'none';
 }
 
+async function startVpImport() {
+  let result;
+  try { result = await ipcRenderer.invoke('vp-collect-songbooks'); } catch { return; }
+  if (!result || result.cancelled || !result.songbooks || result.songbooks.length === 0) return;
+  showVpImportPreview(result.songbooks);
+}
+
+function showVpImportPreview(songbooks) {
+  const overlay = document.getElementById('vp-import-modal-overlay');
+  const subtitle = document.getElementById('vp-import-modal-subtitle');
+  const list = document.getElementById('vp-import-modal-list');
+  const confirmBtn = document.getElementById('vp-import-modal-confirm');
+  const cancelBtn = document.getElementById('vp-import-modal-cancel');
+
+  const totalSongs = songbooks.reduce((s, sb) => s + sb.songCount, 0);
+  subtitle.textContent = `${songbooks.length} songbook${songbooks.length !== 1 ? 's' : ''} found, ${totalSongs.toLocaleString()} songs total. Select which to import:`;
+  list.innerHTML = songbooks.map((sb, i) =>
+    `<label class="vp-book-row">
+       <input type="checkbox" class="vp-book-check" data-idx="${i}" checked />
+       <span class="vp-book-row-name">${sb.name}</span>
+       <span class="vp-book-row-stats">${sb.songCount.toLocaleString()} song${sb.songCount !== 1 ? 's' : ''}</span>
+     </label>`
+  ).join('');
+
+  overlay.style.display = 'flex';
+
+  function cleanup() {
+    confirmBtn.removeEventListener('click', doConfirm);
+    cancelBtn.removeEventListener('click', doCancel);
+    overlay.removeEventListener('click', onOverlayClick);
+    document.removeEventListener('keydown', onKeyDown);
+    overlay.style.display = 'none';
+  }
+
+  async function doConfirm() {
+    const selected = [...list.querySelectorAll('.vp-book-check:checked')]
+      .map(cb => songbooks[parseInt(cb.dataset.idx, 10)].path);
+    if (!selected.length) { cleanup(); return; }
+    cleanup();
+    let res;
+    try { res = await ipcRenderer.invoke('vp-do-import', selected); } catch { return; }
+    if (!res) return;
+    const _t = document.createElement('div');
+    _t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0078d4;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;';
+    _t.textContent = `VideoPsalm: found ${res.total} song(s), imported ${res.added} new song(s).`;
+    document.body.appendChild(_t);
+    setTimeout(() => { try { document.body.removeChild(_t); } catch {} }, 4000);
+    loadSongs();
+  }
+
+  function doCancel() { cleanup(); }
+  function onOverlayClick(e) { if (e.target === overlay) doCancel(); }
+  function onKeyDown(e) { if (e.key === 'Escape') doCancel(); }
+
+  confirmBtn.addEventListener('click', doConfirm);
+  cancelBtn.addEventListener('click', doCancel);
+  overlay.addEventListener('click', onOverlayClick);
+  document.addEventListener('keydown', onKeyDown);
+}
+
+ipcRenderer.on('vp-start-import', () => startVpImport());
+
 function initSongContextMenu() {
   const editBtn = document.getElementById('song-context-edit');
   const deleteBtn = document.getElementById('song-context-delete');
@@ -6275,7 +6347,7 @@ function initSongContextMenu() {
   if (vpImportBtn) {
     vpImportBtn.addEventListener('click', () => {
       closeContextMenu('song-context-menu');
-      ipcRenderer.invoke('import-videopsalm');
+      startVpImport();
     });
   }
 
@@ -9349,9 +9421,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Remote Control Command Handler
 ipcRenderer.on('relay-push-state-request', async () => {
   try {
-    const state = {
-      bible: [],
-      songs: [],
+    const liveFields = getCurrentLiveFields();
+    const verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
+    const state = lastRelayState ? {
+      ...lastRelayState,
+      ...liveFields,
+      verseMeta,
+      lastUpdated: Date.now()
+    } : {
+      ...liveFields,
       schedule: [],
       scheduling: {
         totalItems: scheduleItems.length,
@@ -9365,6 +9443,7 @@ ipcRenderer.on('relay-push-state-request', async () => {
         author: song.author || '',
         lyrics: song.lyrics || []
       })),
+      verseMeta,
       lastUpdated: Date.now()
     };
     await ipcRenderer.invoke('relay-push-state', state);
@@ -9398,6 +9477,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
             })),
             lastUpdated: Date.now()
           };
+          reqState.verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
           await ipcRenderer.invoke('relay-push-state', reqState);
         } catch (err) {
           console.error('[relay] Failed to push state on REQUEST_STATE:', err);
