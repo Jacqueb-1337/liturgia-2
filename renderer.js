@@ -5628,8 +5628,13 @@ async function loadSongs() {
 }
 
 function renderSongList(songs) {
-  // Always display A-Z by title
-  songs = songs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
+  // When no search query is active, display A-Z by title.
+  // When a search query is active, preserve the caller's order (title matches first, then lyric matches).
+  if (!currentSearchQuery) {
+    songs = songs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
+  } else {
+    songs = songs.slice();
+  }
   const songListContainer = document.getElementById('song-list');
   const wrapper = document.getElementById('song-virtual-list');
   if (!wrapper || !songListContainer) return;
@@ -6156,23 +6161,21 @@ function applyFiltersAndRender() {
     return;
   }
 
-  // Text search by title and lyrics
-  const results = [];
-  pool.forEach((song, _poolIdx) => {
-    let score = 0;
+  // Text search by title and lyrics — title matches first (A-Z), then lyric-only matches (A-Z)
+  const titleMatches = [];
+  const lyricMatches = [];
+  pool.forEach(song => {
     const titleLower = song.title.toLowerCase();
-    if (titleLower.includes(query)) {
-      score += 1000;
-      if (titleLower.startsWith(query)) score += 500;
-    }
-    song.lyrics.forEach(section => {
-      if (section.text.toLowerCase().includes(query)) score += 10;
-    });
-    if (score > 0) results.push({ song, score });
+    const inTitle = titleLower.includes(query);
+    const inLyrics = !inTitle && song.lyrics.some(section => section.text.toLowerCase().includes(query));
+    if (inTitle) titleMatches.push(song);
+    else if (inLyrics) lyricMatches.push(song);
   });
 
-  results.sort((a, b) => b.score - a.score);
-  filteredSongs = results.map(r => r.song);
+  const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
+  titleMatches.sort(byTitle);
+  lyricMatches.sort(byTitle);
+  filteredSongs = [...titleMatches, ...lyricMatches];
   renderSongList(filteredSongs);
   displaySelectedSong();
 }

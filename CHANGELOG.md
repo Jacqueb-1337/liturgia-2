@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.7.0 - 2026-05-10
+
+- fix: sorting of searched items in SONGS tab
+- fix: overflow of changelog/diff in the update popover
+
+
 ## 5.6.0 - 2026-05-10
 
 - fix: a race condition caused CLEAR and BLACK to not work correctly in tandem with schedule items

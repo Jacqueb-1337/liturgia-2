@@ -896,23 +896,6 @@ body.dark-theme .setup-card {
 body.dark-theme .update-changelog-wrap {
   --cl-bg: #23272a;
 }
-.update-changelog-wrap::before,
-.update-changelog-wrap::after {
-  content: '';
-  position: absolute;
-  left: 0; right: 0;
-  height: 28px;
-  pointer-events: none;
-  z-index: 1;
-}
-.update-changelog-wrap::before {
-  top: 0;
-  background: linear-gradient(to bottom, var(--cl-bg), transparent);
-}
-.update-changelog-wrap::after {
-  bottom: 0;
-  background: linear-gradient(to top, var(--cl-bg), transparent);
-}
 .update-changelog-scroll {
   max-height: 220px;
   overflow-y: auto;
@@ -920,6 +903,8 @@ body.dark-theme .update-changelog-wrap {
   line-height: 1.5;
   padding: 4px 2px;
   scrollbar-width: thin;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 22px, black calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 22px, black calc(100% - 22px), transparent);
 }
 .update-cl-version {
   font-weight: 600;
