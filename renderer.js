@@ -4975,9 +4975,20 @@ function handleScheduleItemClick(itemIndex, event) {
     if (itemType === 'song') {
       switchTab('songs');
       selectedSongIndices = [item.songIndex];
-      renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+      const songsForList = filteredSongs.length > 0 ? filteredSongs : allSongs;
+      renderSongList(songsForList);
       displaySelectedSong();
-      
+      // Scroll the song list to show the selected song
+      const songListContainer = document.getElementById('song-list');
+      if (songListContainer) {
+        const sortedSongs = songsForList.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
+        const song = allSongs[item.songIndex];
+        const posInList = song ? sortedSongs.findIndex(s => s.title === song.title && s.author === song.author) : -1;
+        if (posInList >= 0) {
+          songListContainer.scrollTop = Math.max(0, posInList * 32 - 80);
+          renderSongList(songsForList);
+        }
+      }
       // Preview first verse (use first selected verse if expanded, otherwise verse 0)
       const firstVerseIndex = (item.expanded && item.selectedVerses.length > 0) ? item.selectedVerses[0] : 0;
       const verseData = getScheduleSongVerseText(item.songIndex, firstVerseIndex);
@@ -4991,6 +5002,18 @@ function handleScheduleItemClick(itemIndex, event) {
       if (media) {
         displayMediaOnPreview(media);
       }
+    } else if (itemType === 'verses') {
+      // Switch to Bible tab and focus the verse(s) in the list
+      switchTab('verses');
+      selectedIndices = item.indices.slice();
+      // Scroll the verse list so the first verse is visible
+      const verseListContainer = document.getElementById('verse-list');
+      if (verseListContainer && item.indices.length > 0) {
+        verseListContainer.scrollTop = Math.max(0, item.indices[0] * ITEM_HEIGHT - 80);
+        // Re-render the virtual list at the new scroll position
+        renderWindow(allVerses, verseListContainer.scrollTop, selectedIndices, handleVerseClick);
+      }
+      updateVerseDisplay();
     }
   }
   
@@ -5009,9 +5032,7 @@ function handleScheduleItemDoubleClick(itemIndex) {
   const item = scheduleItems[itemIndex];
   const itemType = item.type || 'verses';
   
-  // Disable clear/black mode when going live
-  if (clearMode) clearMode = false;
-  if (blackMode) blackMode = false;
+  // Do not change clear/black mode here - respect user's current display mode
   
   if (itemType === 'song') {
     // For songs, switch to songs tab and select the song
@@ -5918,7 +5939,18 @@ async function updateLiveFromSongVerse(verseIndex) {
       backgroundMedia: backgroundMedia,
       styles
     };
-    renderToCanvas(liveCanvas, window.currentContent, width, height);
+    if (blackMode) {
+      const ctx = liveCanvas.getContext('2d');
+      liveCanvas.width = width;
+      liveCanvas.height = height;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, width, height);
+    } else if (clearMode) {
+      const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
+      renderToCanvas(liveCanvas, contentWithoutText, width, height);
+    } else {
+      renderToCanvas(liveCanvas, window.currentContent, width, height);
+    }
   }
   
   const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);

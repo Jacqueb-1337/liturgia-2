@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.6.0 - 2026-05-10
+
+- fix: a race condition caused CLEAR and BLACK to not work correctly in tandem with schedule items
+- fix: clicking an item in schedule will now go-to the item in either songs or bible tab and select it for go-live
+
+
 ## 5.5.0 - 2026-04-26
 
 - fix: VideoPsalm import
