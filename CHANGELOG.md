@@ -1,5 +1,10 @@
 # Changelog
 
+## 5.7.1 - 2026-05-10
+
+- feat: improved some of the transitions and aesthetics
+
+
 ## 5.7.0 - 2026-05-10
 
 - fix: sorting of searched items in SONGS tab

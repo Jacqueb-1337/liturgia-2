@@ -1548,7 +1548,7 @@ ipcRenderer.on('update-available', (event, res) => {
                 <button id="update-download" class="btn primary">Download &amp; Install</button>
                 <button id="update-dismiss" class="btn">Dismiss</button>
               </div>
-              <div id="update-progress" style="margin-top:12px;display:none;">
+              <div id="update-progress">
                 <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
                 <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
               </div>
@@ -1569,7 +1569,8 @@ ipcRenderer.on('update-available', (event, res) => {
             const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
             if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
             downloading = true;
-            progressEl.style.display = 'block';
+            // Use rAF so the element is in the DOM at max-height:0 before we add .visible
+            requestAnimationFrame(() => requestAnimationFrame(() => progressEl.classList.add('visible')));
             downloadBtn.disabled = true;
             try {
               const res = await ipcRenderer.invoke('download-update', { url: asset.url });

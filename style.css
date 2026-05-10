@@ -875,6 +875,21 @@ body.dark-theme .song-verse-block:hover {
   padding: 18px;
   width: 520px;
   max-width: calc(100% - 40px);
+  transition: height 0.28s ease;
+}
+
+/* Animated reveal for the download progress block */
+#update-progress {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.25s ease, margin-top 0.3s ease;
+  margin-top: 0;
+}
+#update-progress.visible {
+  max-height: 120px;
+  opacity: 1;
+  margin-top: 12px;
 }
 
 body.dark-theme .setup-card {
