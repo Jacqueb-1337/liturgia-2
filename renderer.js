@@ -1548,7 +1548,7 @@ ipcRenderer.on('update-available', (event, res) => {
                 <button id="update-download" class="btn primary">Download &amp; Install</button>
                 <button id="update-dismiss" class="btn">Dismiss</button>
               </div>
-              <div id="update-progress">
+              <div id="update-progress" style="margin-top:12px;display:none;">
                 <div class="progress"><div class="progress-inner" style="width:0%"></div></div>
                 <div style="display:flex;justify-content:space-between;margin-top:6px;"><span id="update-progress-text">0%</span><button id="update-cancel" class="btn">Cancel</button></div>
               </div>
@@ -1569,8 +1569,7 @@ ipcRenderer.on('update-available', (event, res) => {
             const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
             if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
             downloading = true;
-            // Use rAF so the element is in the DOM at max-height:0 before we add .visible
-            requestAnimationFrame(() => requestAnimationFrame(() => progressEl.classList.add('visible')));
+            progressEl.style.display = 'block';
             downloadBtn.disabled = true;
             try {
               const res = await ipcRenderer.invoke('download-update', { url: asset.url });
@@ -4976,20 +4975,9 @@ function handleScheduleItemClick(itemIndex, event) {
     if (itemType === 'song') {
       switchTab('songs');
       selectedSongIndices = [item.songIndex];
-      const songsForList = filteredSongs.length > 0 ? filteredSongs : allSongs;
-      renderSongList(songsForList);
+      renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
       displaySelectedSong();
-      // Scroll the song list to show the selected song
-      const songListContainer = document.getElementById('song-list');
-      if (songListContainer) {
-        const sortedSongs = songsForList.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
-        const song = allSongs[item.songIndex];
-        const posInList = song ? sortedSongs.findIndex(s => s.title === song.title && s.author === song.author) : -1;
-        if (posInList >= 0) {
-          songListContainer.scrollTop = Math.max(0, posInList * 32 - 80);
-          renderSongList(songsForList);
-        }
-      }
+      
       // Preview first verse (use first selected verse if expanded, otherwise verse 0)
       const firstVerseIndex = (item.expanded && item.selectedVerses.length > 0) ? item.selectedVerses[0] : 0;
       const verseData = getScheduleSongVerseText(item.songIndex, firstVerseIndex);
@@ -5003,18 +4991,6 @@ function handleScheduleItemClick(itemIndex, event) {
       if (media) {
         displayMediaOnPreview(media);
       }
-    } else if (itemType === 'verses') {
-      // Switch to Bible tab and focus the verse(s) in the list
-      switchTab('verses');
-      selectedIndices = item.indices.slice();
-      // Scroll the verse list so the first verse is visible
-      const verseListContainer = document.getElementById('verse-list');
-      if (verseListContainer && item.indices.length > 0) {
-        verseListContainer.scrollTop = Math.max(0, item.indices[0] * ITEM_HEIGHT - 80);
-        // Re-render the virtual list at the new scroll position
-        renderWindow(allVerses, verseListContainer.scrollTop, selectedIndices, handleVerseClick);
-      }
-      updateVerseDisplay();
     }
   }
   
@@ -5033,7 +5009,9 @@ function handleScheduleItemDoubleClick(itemIndex) {
   const item = scheduleItems[itemIndex];
   const itemType = item.type || 'verses';
   
-  // Do not change clear/black mode here - respect user's current display mode
+  // Disable clear/black mode when going live
+  if (clearMode) clearMode = false;
+  if (blackMode) blackMode = false;
   
   if (itemType === 'song') {
     // For songs, switch to songs tab and select the song
@@ -5629,13 +5607,8 @@ async function loadSongs() {
 }
 
 function renderSongList(songs) {
-  // When no search query is active, display A-Z by title.
-  // When a search query is active, preserve the caller's order (title matches first, then lyric matches).
-  if (!currentSearchQuery) {
-    songs = songs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
-  } else {
-    songs = songs.slice();
-  }
+  // Always display A-Z by title
+  songs = songs.slice().sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
   const songListContainer = document.getElementById('song-list');
   const wrapper = document.getElementById('song-virtual-list');
   if (!wrapper || !songListContainer) return;
@@ -5945,18 +5918,7 @@ async function updateLiveFromSongVerse(verseIndex) {
       backgroundMedia: backgroundMedia,
       styles
     };
-    if (blackMode) {
-      const ctx = liveCanvas.getContext('2d');
-      liveCanvas.width = width;
-      liveCanvas.height = height;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, width, height);
-    } else if (clearMode) {
-      const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
-      renderToCanvas(liveCanvas, contentWithoutText, width, height);
-    } else {
-      renderToCanvas(liveCanvas, window.currentContent, width, height);
-    }
+    renderToCanvas(liveCanvas, window.currentContent, width, height);
   }
   
   const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
@@ -6162,21 +6124,23 @@ function applyFiltersAndRender() {
     return;
   }
 
-  // Text search by title and lyrics — title matches first (A-Z), then lyric-only matches (A-Z)
-  const titleMatches = [];
-  const lyricMatches = [];
-  pool.forEach(song => {
+  // Text search by title and lyrics
+  const results = [];
+  pool.forEach((song, _poolIdx) => {
+    let score = 0;
     const titleLower = song.title.toLowerCase();
-    const inTitle = titleLower.includes(query);
-    const inLyrics = !inTitle && song.lyrics.some(section => section.text.toLowerCase().includes(query));
-    if (inTitle) titleMatches.push(song);
-    else if (inLyrics) lyricMatches.push(song);
+    if (titleLower.includes(query)) {
+      score += 1000;
+      if (titleLower.startsWith(query)) score += 500;
+    }
+    song.lyrics.forEach(section => {
+      if (section.text.toLowerCase().includes(query)) score += 10;
+    });
+    if (score > 0) results.push({ song, score });
   });
 
-  const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
-  titleMatches.sort(byTitle);
-  lyricMatches.sort(byTitle);
-  filteredSongs = [...titleMatches, ...lyricMatches];
+  results.sort((a, b) => b.score - a.score);
+  filteredSongs = results.map(r => r.song);
   renderSongList(filteredSongs);
   displaySelectedSong();
 }
@@ -6993,6 +6957,79 @@ function initSongEditor() {
       if (e.target === modal) {
         closeSongEditor();
       }
+    });
+  }
+
+  // Right-click context menu for all editable fields in the song editor
+  const ctxMenu = document.getElementById('song-editor-ctx-menu');
+  if (ctxMenu && modal) {
+    let ctxTarget = null;
+
+    function hideCtxMenu() {
+      ctxMenu.style.display = 'none';
+      ctxTarget = null;
+    }
+
+    const editorPanel = document.getElementById('song-editor-panel');
+    if (editorPanel) {
+      editorPanel.addEventListener('contextmenu', (e) => {
+        const t = e.target;
+        const isEditable = t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA';
+        if (!isEditable) return;
+        e.preventDefault();
+        ctxTarget = t;
+        const x = Math.min(e.clientX, window.innerWidth - 160);
+        const y = Math.min(e.clientY, window.innerHeight - 160);
+        ctxMenu.style.left = x + 'px';
+        ctxMenu.style.top = y + 'px';
+        ctxMenu.style.display = 'block';
+      });
+    }
+
+    ctxMenu.addEventListener('click', async (e) => {
+      const item = e.target.closest('.song-editor-ctx-item');
+      if (!item || !ctxTarget) return;
+      const action = item.dataset.action;
+      ctxTarget.focus();
+      if (action === 'cut') {
+        document.execCommand('cut');
+      } else if (action === 'copy') {
+        document.execCommand('copy');
+      } else if (action === 'paste') {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (ctxTarget.isContentEditable) {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              range.insertNode(document.createTextNode(text));
+              range.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } else {
+              document.execCommand('insertText', false, text);
+            }
+          } else {
+            const start = ctxTarget.selectionStart;
+            const end = ctxTarget.selectionEnd;
+            ctxTarget.value = ctxTarget.value.slice(0, start) + text + ctxTarget.value.slice(end);
+            ctxTarget.selectionStart = ctxTarget.selectionEnd = start + text.length;
+          }
+        } catch {
+          document.execCommand('paste');
+        }
+      } else if (action === 'selectall') {
+        document.execCommand('selectAll');
+      }
+      hideCtxMenu();
+    });
+
+    document.addEventListener('mousedown', (e) => {
+      if (!ctxMenu.contains(e.target)) hideCtxMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideCtxMenu();
     });
   }
 }

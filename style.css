@@ -875,21 +875,6 @@ body.dark-theme .song-verse-block:hover {
   padding: 18px;
   width: 520px;
   max-width: calc(100% - 40px);
-  transition: height 0.28s ease;
-}
-
-/* Animated reveal for the download progress block */
-#update-progress {
-  overflow: hidden;
-  max-height: 0;
-  opacity: 0;
-  transition: max-height 0.3s ease, opacity 0.25s ease, margin-top 0.3s ease;
-  margin-top: 0;
-}
-#update-progress.visible {
-  max-height: 120px;
-  opacity: 1;
-  margin-top: 12px;
 }
 
 body.dark-theme .setup-card {
@@ -911,6 +896,23 @@ body.dark-theme .setup-card {
 body.dark-theme .update-changelog-wrap {
   --cl-bg: #23272a;
 }
+.update-changelog-wrap::before,
+.update-changelog-wrap::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 28px;
+  pointer-events: none;
+  z-index: 1;
+}
+.update-changelog-wrap::before {
+  top: 0;
+  background: linear-gradient(to bottom, var(--cl-bg), transparent);
+}
+.update-changelog-wrap::after {
+  bottom: 0;
+  background: linear-gradient(to top, var(--cl-bg), transparent);
+}
 .update-changelog-scroll {
   max-height: 220px;
   overflow-y: auto;
@@ -918,8 +920,6 @@ body.dark-theme .update-changelog-wrap {
   line-height: 1.5;
   padding: 4px 2px;
   scrollbar-width: thin;
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 22px, black calc(100% - 22px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, black 22px, black calc(100% - 22px), transparent);
 }
 .update-cl-version {
   font-weight: 600;
@@ -2466,6 +2466,46 @@ body.dark-theme .vp-import-modal-btn-cancel {
 }
 body.dark-theme .vp-import-modal-btn-cancel:hover {
   background: #333;
+}
+
+.song-editor-ctx-menu {
+  position: fixed;
+  z-index: 9000;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  padding: 4px 0;
+  min-width: 130px;
+  user-select: none;
+}
+.song-editor-ctx-item {
+  padding: 7px 16px;
+  font-size: 0.9em;
+  cursor: pointer;
+  color: #222;
+}
+.song-editor-ctx-item:hover {
+  background: #f0f0f0;
+}
+.song-editor-ctx-sep {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 3px 0;
+}
+body.dark-theme .song-editor-ctx-menu {
+  background: #2a2a2a;
+  border-color: #444;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+body.dark-theme .song-editor-ctx-item {
+  color: #eee;
+}
+body.dark-theme .song-editor-ctx-item:hover {
+  background: #333;
+}
+body.dark-theme .song-editor-ctx-sep {
+  background: #3a3a3a;
 }
 body.dark-theme .website-vid-fullscreen-btn.active {
   background: #a02020;

@@ -487,6 +487,15 @@
   <script src="renderer.js"></script>
   <script src="searchBox.js"></script>
 
+<!-- Song editor right-click context menu -->
+<div id="song-editor-ctx-menu" class="song-editor-ctx-menu" style="display:none;">
+  <div class="song-editor-ctx-item" data-action="cut">Cut</div>
+  <div class="song-editor-ctx-item" data-action="copy">Copy</div>
+  <div class="song-editor-ctx-item" data-action="paste">Paste</div>
+  <div class="song-editor-ctx-sep"></div>
+  <div class="song-editor-ctx-item" data-action="selectall">Select All</div>
+</div>
+
 <!-- VideoPsalm import preview modal -->
 <div id="vp-import-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
   <div class="vp-import-modal">

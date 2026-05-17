@@ -1,21 +1,8 @@
 # Changelog
 
-## 5.7.1 - 2026-05-10
+## 5.6.0 - 2026-05-17
 
-- feat: improved some of the transitions and aesthetics
-
-
-## 5.7.0 - 2026-05-10
-
-- fix: sorting of searched items in SONGS tab
-- fix: overflow of changelog/diff in the update popover
-
-
-## 5.6.0 - 2026-05-10
-
-- fix: a race condition caused CLEAR and BLACK to not work correctly in tandem with schedule items
-- fix: clicking an item in schedule will now go-to the item in either songs or bible tab and select it for go-live
-
+- feat: right-click context menu (Cut, Copy, Paste, Select All) in song editor
 
 ## 5.5.0 - 2026-04-26
 
