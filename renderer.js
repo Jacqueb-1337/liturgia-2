@@ -6959,6 +6959,79 @@ function initSongEditor() {
     editStylesBtn.style.marginRight = '8px';
     const footer = document.querySelector('.song-editor-footer');
     if (footer) footer.insertBefore(editStylesBtn, footer.firstChild);
+
+  // Right-click context menu for all editable fields in the song editor
+  const ctxMenu = document.getElementById('song-editor-ctx-menu');
+  if (ctxMenu && modal) {
+    let ctxTarget = null;
+
+    function hideCtxMenu() {
+      ctxMenu.style.display = 'none';
+      ctxTarget = null;
+    }
+
+    const editorPanel = document.getElementById('song-editor-panel');
+    if (editorPanel) {
+      editorPanel.addEventListener('contextmenu', (e) => {
+        const t = e.target;
+        const isEditable = t.isContentEditable || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA';
+        if (!isEditable) return;
+        e.preventDefault();
+        ctxTarget = t;
+        const x = Math.min(e.clientX, window.innerWidth - 160);
+        const y = Math.min(e.clientY, window.innerHeight - 160);
+        ctxMenu.style.left = x + 'px';
+        ctxMenu.style.top = y + 'px';
+        ctxMenu.style.display = 'block';
+      });
+    }
+
+    ctxMenu.addEventListener('click', async (e) => {
+      const item = e.target.closest('.song-editor-ctx-item');
+      if (!item || !ctxTarget) return;
+      const action = item.dataset.action;
+      ctxTarget.focus();
+      if (action === 'cut') {
+        document.execCommand('cut');
+      } else if (action === 'copy') {
+        document.execCommand('copy');
+      } else if (action === 'paste') {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (ctxTarget.isContentEditable) {
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount) {
+              const range = sel.getRangeAt(0);
+              range.deleteContents();
+              range.insertNode(document.createTextNode(text));
+              range.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } else {
+              document.execCommand('insertText', false, text);
+            }
+          } else {
+            const start = ctxTarget.selectionStart;
+            const end = ctxTarget.selectionEnd;
+            ctxTarget.value = ctxTarget.value.slice(0, start) + text + ctxTarget.value.slice(end);
+            ctxTarget.selectionStart = ctxTarget.selectionEnd = start + text.length;
+          }
+        } catch {
+          document.execCommand('paste');
+        }
+      } else if (action === 'selectall') {
+        document.execCommand('selectAll');
+      }
+      hideCtxMenu();
+    });
+
+    document.addEventListener('mousedown', (e) => {
+      if (!ctxMenu.contains(e.target)) hideCtxMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideCtxMenu();
+    });
+  }
   }
 
   editStylesBtn.addEventListener('click', () => {

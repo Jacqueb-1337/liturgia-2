@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.8.0 - 2026-05-17
+
+- feat: right-click context menu (Cut, Copy, Paste, Select All) in song editor
+
 ## 5.7.1 - 2026-05-10
 
 - feat: improved some of the transitions and aesthetics

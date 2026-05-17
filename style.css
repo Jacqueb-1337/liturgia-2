@@ -2866,3 +2866,43 @@ body:not(.dark-theme) .vlb-device-item:hover {
   background: #2e2e2e;
   color: #fff;
 }
+
+.song-editor-ctx-menu {
+  position: fixed;
+  z-index: 9000;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  padding: 4px 0;
+  min-width: 130px;
+  user-select: none;
+}
+.song-editor-ctx-item {
+  padding: 7px 16px;
+  font-size: 0.9em;
+  cursor: pointer;
+  color: #222;
+}
+.song-editor-ctx-item:hover {
+  background: #f0f0f0;
+}
+.song-editor-ctx-sep {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 3px 0;
+}
+body.dark-theme .song-editor-ctx-menu {
+  background: #2a2a2a;
+  border-color: #444;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+body.dark-theme .song-editor-ctx-item {
+  color: #eee;
+}
+body.dark-theme .song-editor-ctx-item:hover {
+  background: #333;
+}
+body.dark-theme .song-editor-ctx-sep {
+  background: #3a3a3a;
+}
