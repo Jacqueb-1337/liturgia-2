@@ -1,6 +1,8 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', 'liturgia', 'relay-ws', '.env') });
 const http = require('http');
 
-const url = 'http://apiliturgia.jacqueb.me:3001/diag';
+const port = process.env.RELAY_PORT || 3001;
+const url = `http://apiliturgia.jacqueb.me:${port}/diag`;
 
 console.log('Checking WebSocket server diagnostics...');
 console.log('URL:', url);
@@ -44,7 +46,7 @@ http.get(url, (res) => {
   console.log('');
   console.log('Possible issues:');
   console.log('- Server is not running');
-  console.log('- Port 3001 is blocked');
+  console.log(`- Port ${port} is blocked`);
   console.log('- URL is incorrect');
   process.exit(1);
 });

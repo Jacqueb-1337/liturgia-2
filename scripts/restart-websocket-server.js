@@ -1,6 +1,8 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', 'liturgia', 'relay-ws', '.env') });
 const http = require('http');
 
-const url = 'http://apiliturgia.jacqueb.me:3001/restart';
+const port = process.env.RELAY_PORT || 3001;
+const url = `http://apiliturgia.jacqueb.me:${port}/restart`;
 
 console.log('Sending restart command to WebSocket server...');
 console.log('URL:', url);
@@ -18,12 +20,12 @@ const req = http.request(url, {
   
   res.on('end', () => {
     console.log('Response:', data);
-    console.log('');
-    console.log('Server should restart automatically if using PM2 or systemd.');
-    console.log('If using cPanel Node.js, you need to restart it manually in cPanel.');
-    console.log('');
-    console.log('Wait 5 seconds, then run: node scripts/check-websocket-server.js');
-  });
+  console.log('');
+  console.log('Server should restart automatically if using PM2 or systemd.');
+  console.log('If using cPanel Node.js, you need to restart it manually in cPanel.');
+  console.log('');
+  console.log('Wait 5 seconds, then run: node scripts/check-websocket-server.js');
+});
 });
 
 req.on('error', (err) => {

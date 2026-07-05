@@ -7,7 +7,7 @@ class RelayClient extends EventEmitter {
   constructor(relayUrl, token) {
     super();
     this.phpBaseUrl = relayUrl || 'https://jacqueb.me/liturgia/relay';
-    this.wsUrl = 'ws://apiliturgia.jacqueb.me:3001';
+    this.wsUrl = process.env.RELAY_WS_URL || 'ws://apiliturgia.jacqueb.me:41829';
     this.token = token;
     this.sessionId = null;
     this.clientType = 'desktop';
@@ -117,7 +117,8 @@ class RelayClient extends EventEmitter {
 
       this.ws.on('error', (err) => {
         console.error('[RelayWS] Error:', err.message);
-        if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+        const fallbackCodes = new Set(['ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT']);
+        if (fallbackCodes.has(err.code) || /socket hang up/i.test(err.message || '')) {
           console.log('[RelayWS] Server unavailable, falling back to PHP');
           this.fallbackToPhp();
         }
@@ -333,6 +334,9 @@ class RelayClient extends EventEmitter {
   }
 
   sendViaPhp(direction, message) {
+    if (!this.sessionId) {
+      return Promise.resolve(false);
+    }
     return new Promise((resolve, reject) => {
       const body = JSON.stringify({
         session_id: this.sessionId,
