@@ -210,6 +210,135 @@
       background: #0074d9 !important;
       color: white !important;
     }
+    .local-widget-kind-picker {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .local-widget-kind-card {
+      border: 1px solid #22324a;
+      background: #0b1220;
+      color: #e8eef9;
+      border-radius: 12px;
+      padding: 10px;
+      cursor: pointer;
+      text-align: left;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .local-widget-kind-card:hover {
+      transform: translateY(-1px);
+      border-color: #3f5f92;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.18);
+    }
+    .local-widget-kind-card.active {
+      border-color: #8ab4f8;
+      box-shadow: 0 0 0 1px rgba(138,180,248,0.35), 0 10px 22px rgba(0,0,0,0.22);
+    }
+    .local-widget-kind-card-preview {
+      height: 64px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      position: relative;
+      overflow: hidden;
+      background: #121a2f;
+    }
+    .local-widget-kind-card-label {
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .local-widget-choice-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .local-widget-choice-grid .local-widget-choice {
+      min-width: 34px;
+    }
+    .local-widget-choice {
+      border: 1px solid #22324a;
+      background: #0b1220;
+      color: #dce6f7;
+      border-radius: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .local-widget-choice:hover {
+      transform: translateY(-1px);
+      border-color: #3c5b86;
+    }
+    .local-widget-choice.active {
+      background: #1f3b66;
+      border-color: #8ab4f8;
+      color: #fff;
+    }
+    .local-widget-kind-preview-timer::before,
+    .local-widget-kind-preview-lowerthird::before,
+    .local-widget-kind-preview-alert::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      animation: widgetPreviewPulse 1.8s ease-in-out infinite;
+    }
+    .local-widget-kind-preview-timer::before {
+      background: linear-gradient(135deg, #0f172a 0%, #111827 100%);
+    }
+    .local-widget-kind-preview-timer::after {
+      content: "12:34";
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      z-index: 2;
+    }
+    .local-widget-kind-preview-lowerthird::before {
+      background: linear-gradient(90deg, #1a1a2e 0%, #0f3460 50%, #e94560 100%);
+    }
+    .local-widget-kind-preview-lowerthird::after {
+      content: "";
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      bottom: 16%;
+      height: 26%;
+      border-radius: 10px;
+      border: 2px solid rgba(255,255,255,0.8);
+      background: rgba(7,10,18,0.25);
+      z-index: 2;
+    }
+    .local-widget-kind-preview-alert::before {
+      background: linear-gradient(135deg, #380848 0%, #6a1b4d 100%);
+    }
+    .local-widget-kind-preview-alert::after {
+      content: "";
+      position: absolute;
+      left: 10%;
+      top: 10%;
+      width: 62%;
+      height: 26%;
+      border-radius: 10px;
+      border: 2px solid rgba(255,255,255,0.85);
+      background: rgba(7,10,18,0.25);
+      z-index: 2;
+    }
+    .local-widget-modal-footer {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      padding-top: 12px;
+    }
+    
+    @keyframes widgetPreviewPulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.02); }
+    }
 
     /* Founder fixed bottom-right subtext */
     .founder-subtext-fixed {
@@ -426,9 +555,11 @@
   </div>
   <!-- Media add context menu -->
   <div id="media-add-context-menu">
-    <div class="context-menu-item" id="media-add-menu-files">Photo / Video</div>
-    <div class="context-menu-item" id="media-add-menu-website">Website</div>
-    <div class="context-menu-item" id="media-add-menu-color">Color</div>
+        <div class="context-menu-item" id="media-add-menu-files">Photo / Video</div>
+        <div class="context-menu-item" id="media-add-menu-website">Website</div>
+        <div class="context-menu-item" id="media-add-menu-local-widget">Local OBS Widget</div>
+        <div class="context-menu-item" id="media-add-menu-color">Color</div>
+        <div class="context-menu-item" id="media-add-menu-announcement">Announcement</div>
   </div>
   <!-- Song context menu -->
   <div id="song-context-menu">
@@ -496,6 +627,58 @@
   <div class="song-editor-ctx-item" data-action="selectall">Select All</div>
 </div>
 
+<!-- Announcement Editor Modal -->
+<div id="announcement-modal" class="color-editor-backdrop">
+  <div class="color-editor-content announcement-editor-content">
+    <div class="color-editor-header">
+      <h3 id="announcement-modal-title">Create Announcement</h3>
+      <button id="announcement-modal-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    <div class="color-editor-field">
+      <label>Name (for media library):</label>
+      <input type="text" id="announcement-name-input" class="color-editor-select" style="width: 100%;" placeholder="Spring Revival" />
+    </div>
+    <div class="color-editor-field">
+      <label>Title:</label>
+      <input type="text" id="announcement-title-input" class="color-editor-select" style="width: 100%;" placeholder="Spring Revival" />
+    </div>
+    <div class="color-editor-field">
+      <label>Body:</label>
+      <textarea id="announcement-body-input" class="color-editor-select announcement-textarea" placeholder="April 15-18 at 7pm nightly"></textarea>
+    </div>
+    <div class="color-editor-field">
+      <label>Subtext (optional):</label>
+      <input type="text" id="announcement-subtext-input" class="color-editor-select" style="width: 100%;" placeholder="All are welcome" />
+    </div>
+    <div class="announcement-color-row">
+      <div class="color-editor-field" style="flex: 1;">
+        <label>Background:</label>
+        <input type="color" id="announcement-bg-color" value="#1a1a2e" class="color-editor-color-input announcement-color-swatch">
+      </div>
+      <div class="color-editor-field" style="flex: 1;">
+        <label>Text color:</label>
+        <input type="color" id="announcement-text-color" value="#ffffff" class="color-editor-color-input announcement-color-swatch">
+      </div>
+    </div>
+    <div class="color-editor-field">
+      <label>Alignment:</label>
+      <select id="announcement-align" class="color-editor-select">
+        <option value="center">Center</option>
+        <option value="left">Left</option>
+        <option value="right">Right</option>
+      </select>
+    </div>
+    <div style="margin: 12px 0;">
+      <label class="color-editor-label">Preview:</label>
+      <canvas id="announcement-preview-canvas" width="1920" height="1080" class="announcement-preview-canvas"></canvas>
+    </div>
+    <div class="color-editor-buttons">
+      <button id="announcement-modal-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="announcement-modal-save" class="color-editor-btn color-editor-btn-save">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- VideoPsalm import preview modal -->
 <div id="vp-import-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
   <div class="vp-import-modal">
@@ -505,6 +688,184 @@
     <div class="vp-import-modal-actions">
       <button class="vp-import-modal-btn-primary" id="vp-import-modal-confirm">Import Selected</button>
       <button class="vp-import-modal-btn-cancel" id="vp-import-modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Local OBS Widget Modal -->
+<div id="local-widget-modal" class="color-editor-backdrop">
+  <div class="color-editor-content">
+    <div class="color-editor-header">
+      <h3 id="local-widget-modal-title">Add Local OBS Widget</h3>
+      <button id="local-widget-modal-close" class="color-editor-close-btn">&times;</button>
+    </div>
+    <div class="color-editor-field">
+      <label>Name (for media library):</label>
+      <input type="text" id="local-widget-name-input" class="color-editor-select" style="width: 100%;" placeholder="Timer" />
+    </div>
+    <div class="color-editor-field">
+      <label>Widget type:</label>
+      <input type="hidden" id="local-widget-kind-input" value="timer" />
+      <div id="local-widget-kind-picker" class="local-widget-kind-picker">
+        <button type="button" class="local-widget-kind-card active" data-kind="timer">
+          <div class="local-widget-kind-card-preview local-widget-kind-preview-timer"></div>
+          <div class="local-widget-kind-card-label">Timer</div>
+        </button>
+        <button type="button" class="local-widget-kind-card" data-kind="lowerthird">
+          <div class="local-widget-kind-card-preview local-widget-kind-preview-lowerthird"></div>
+          <div class="local-widget-kind-card-label">Lower Third</div>
+        </button>
+        <button type="button" class="local-widget-kind-card" data-kind="alert">
+          <div class="local-widget-kind-card-preview local-widget-kind-preview-alert"></div>
+          <div class="local-widget-kind-card-label">Alert</div>
+        </button>
+      </div>
+    </div>
+    <div id="local-widget-fields-timer" class="local-widget-fields">
+      <div class="color-editor-field">
+        <label>Seconds:</label>
+        <input type="number" id="local-widget-timer-seconds" class="color-editor-select" style="width: 100%;" min="0" step="1" value="60" />
+      </div>
+      <div class="color-editor-field">
+        <label>Title:</label>
+        <input type="text" id="local-widget-timer-title" class="color-editor-select" style="width: 100%;" placeholder="Stream starting soon" />
+      </div>
+      <div class="color-editor-field">
+        <label>Subtitle:</label>
+        <input type="text" id="local-widget-timer-subtitle" class="color-editor-select" style="width: 100%;" placeholder="Please wait" />
+      </div>
+    </div>
+    <div id="local-widget-fields-lowerthird" class="local-widget-fields" style="display:none;">
+      <div class="color-editor-field">
+        <label>Name:</label>
+        <input type="text" id="local-widget-lt-name" class="color-editor-select" style="width: 100%;" placeholder="John Doe" />
+      </div>
+      <div class="color-editor-field">
+        <label>Title:</label>
+        <input type="text" id="local-widget-lt-title" class="color-editor-select" style="width: 100%;" placeholder="Software Engineer" />
+      </div>
+      <div class="color-editor-field">
+        <label>Primary color:</label>
+        <input type="color" id="local-widget-lt-primary" value="#1a1a2e" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Secondary color:</label>
+        <input type="color" id="local-widget-lt-secondary" value="#0f3460" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Accent color:</label>
+        <input type="color" id="local-widget-lt-accent" value="#e94560" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Text color:</label>
+        <input type="color" id="local-widget-lt-text" value="#ffffff" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Text secondary:</label>
+        <input type="color" id="local-widget-lt-textsecondary" value="#b8bcc8" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Animation:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-lt-animation">
+          <button type="button" class="local-widget-choice active" data-value="slide">Slide</button>
+          <button type="button" class="local-widget-choice" data-value="fade">Fade</button>
+          <button type="button" class="local-widget-choice" data-value="scale">Scale</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Theme:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-lt-theme">
+          <button type="button" class="local-widget-choice active" data-value="default">Default</button>
+          <button type="button" class="local-widget-choice" data-value="minimal">Minimal</button>
+          <button type="button" class="local-widget-choice" data-value="modern">Modern</button>
+          <button type="button" class="local-widget-choice" data-value="broadcast">Broadcast</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Position:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-lt-position">
+          <button type="button" class="local-widget-choice active" data-value="bottomleft">Bottom Left</button>
+          <button type="button" class="local-widget-choice" data-value="topleft">Top Left</button>
+          <button type="button" class="local-widget-choice" data-value="bottomright">Bottom Right</button>
+          <button type="button" class="local-widget-choice" data-value="topright">Top Right</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Style:</label>
+        <div class="local-widget-choice-row local-widget-choice-grid" data-group="local-widget-lt-style">
+          <button type="button" class="local-widget-choice active" data-value="1">1</button>
+          <button type="button" class="local-widget-choice" data-value="2">2</button>
+          <button type="button" class="local-widget-choice" data-value="3">3</button>
+          <button type="button" class="local-widget-choice" data-value="4">4</button>
+          <button type="button" class="local-widget-choice" data-value="5">5</button>
+          <button type="button" class="local-widget-choice" data-value="6">6</button>
+          <button type="button" class="local-widget-choice" data-value="7">7</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Timeout:</label>
+        <input type="text" id="local-widget-lt-timeout" class="color-editor-select" style="width:100%;" placeholder="30s or 2m" />
+      </div>
+      <div class="color-editor-field">
+        <label>Box Align:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-lt-box-align">
+          <button type="button" class="local-widget-choice" data-value="left">Left</button>
+          <button type="button" class="local-widget-choice active" data-value="center">Center</button>
+          <button type="button" class="local-widget-choice" data-value="right">Right</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Transition Out:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-lt-transition-out">
+          <button type="button" class="local-widget-choice active" data-value="fade">Fade</button>
+          <button type="button" class="local-widget-choice" data-value="slide-up">Slide Up</button>
+          <button type="button" class="local-widget-choice" data-value="slide-down">Slide Down</button>
+        </div>
+      </div>
+    </div>
+    <div id="local-widget-fields-alert" class="local-widget-fields" style="display:none;">
+      <div class="color-editor-field">
+        <label>Title:</label>
+        <input type="text" id="local-widget-alert-title" class="color-editor-select" style="width: 100%;" placeholder="This is a test notification." />
+      </div>
+      <div class="color-editor-field">
+        <label>Color:</label>
+        <input type="color" id="local-widget-alert-color" value="#380848" class="color-editor-color-input" />
+      </div>
+      <div class="color-editor-field">
+        <label>Box Align:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-alert-align">
+          <button type="button" class="local-widget-choice" data-value="left">Left</button>
+          <button type="button" class="local-widget-choice active" data-value="center">Center</button>
+          <button type="button" class="local-widget-choice" data-value="right">Right</button>
+        </div>
+      </div>
+      <div class="color-editor-field">
+        <label>Transition Out:</label>
+        <div class="local-widget-choice-row" data-group="local-widget-alert-transition-out">
+          <button type="button" class="local-widget-choice active" data-value="fade">Fade</button>
+          <button type="button" class="local-widget-choice" data-value="slide-up">Slide Up</button>
+          <button type="button" class="local-widget-choice" data-value="slide-down">Slide Down</button>
+        </div>
+      </div>
+    </div>
+    <div id="local-widget-layout-editor" class="color-editor-field" style="display:none;">
+      <label>Preview / Layout:</label>
+      <div style="margin-bottom:8px;color:#666;font-size:12px;line-height:1.45">
+        The preview below is driven by the fields above. Drag the preview to move it and drag the corner to resize it.
+      </div>
+      <div id="local-widget-layout-stage" style="position:relative;width:100%;aspect-ratio:16/9;background:#0b1220;border:1px solid #22324a;border-radius:8px;overflow:hidden;">
+        <div id="local-widget-preview-shell" style="position:absolute;left:10%;top:10%;width:80%;height:24%;box-sizing:border-box;cursor:move;outline:1px solid #8ab4f8;border-radius:8px;">
+          <iframe id="local-widget-preview-frame" title="Local widget preview" style="width:100%;height:100%;display:block;background:transparent;border:none;box-sizing:border-box;pointer-events:none;"></iframe>
+          <div id="local-widget-layout-handle" style="position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;background:#8ab4f8;border:2px solid #0b1220;cursor:nwse-resize;"></div>
+        </div>
+      </div>
+      <div style="color:#666;font-size:12px;margin-top:6px;">Drag to move. Drag corner to resize. Each item keeps its own layout.</div>
+      <button id="local-widget-layout-reset" class="color-editor-btn color-editor-btn-cancel" style="margin-top:8px;">Reset to Default Layout</button>
+    </div>
+    <div class="color-editor-buttons local-widget-modal-footer">
+      <button id="local-widget-modal-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
+      <button id="local-widget-modal-save" class="color-editor-btn color-editor-btn-save">Save</button>
     </div>
   </div>
 </div>
@@ -822,6 +1183,112 @@
       <button id="transition-editor-cancel" class="color-editor-btn color-editor-btn-cancel">Cancel</button>
       <button id="transition-editor-save" class="color-editor-btn color-editor-btn-save">Save</button>
     </div>
+  </div>
+</div>
+
+<!-- Lower Thirds Popover -->
+<div id="lower-third-popover" class="lt-popover">
+  <div class="lt-popover-body">
+    <div class="lt-section-hdr">Text</div>
+    <input type="text" id="lt-text" class="lt-full-input" placeholder="Lower third text...">
+
+    <div class="lt-section-hdr">Presets</div>
+    <div class="lt-presets">
+      <button class="lt-preset-btn" data-preset="classic">Classic</button>
+      <button class="lt-preset-btn" data-preset="news">News Ticker</button>
+      <button class="lt-preset-btn" data-preset="elegant">Elegant</button>
+      <button class="lt-preset-btn" data-preset="light">Light</button>
+      <button class="lt-preset-btn" data-preset="alert">Alert</button>
+      <button class="lt-preset-btn" data-preset="ghost">Ghost</button>
+    </div>
+
+    <div class="lt-section-hdr">Appearance</div>
+    <div class="lt-row">
+      <div class="lt-field">
+        <label>Background</label>
+        <input type="color" id="lt-bg-color" value="#000000">
+      </div>
+      <div class="lt-field lt-field-grow">
+        <label>Opacity</label>
+        <input type="range" id="lt-bg-opacity" min="0" max="100" value="85">
+        <span class="lt-range-val" id="lt-bg-opacity-val">85%</span>
+      </div>
+    </div>
+    <div class="lt-row">
+      <div class="lt-field">
+        <label>Text</label>
+        <input type="color" id="lt-text-color" value="#ffffff">
+      </div>
+      <div class="lt-field lt-field-grow">
+        <label>Size</label>
+        <input type="range" id="lt-font-size" min="16" max="80" value="36">
+        <span class="lt-range-val" id="lt-font-size-val">36px</span>
+      </div>
+    </div>
+    <div class="lt-row">
+      <div class="lt-field lt-field-grow">
+        <label>Font</label>
+        <select id="lt-font">
+          <option value="Arial">Arial</option>
+          <option value="Impact">Impact</option>
+          <option value="Georgia">Georgia</option>
+          <option value="'Times New Roman'">Times New Roman</option>
+          <option value="'Trebuchet MS'">Trebuchet MS</option>
+          <option value="Verdana">Verdana</option>
+          <option value="'Courier New'">Courier New</option>
+          <option value="'Palatino Linotype'">Palatino</option>
+        </select>
+      </div>
+      <div class="lt-field">
+        <label>Align</label>
+        <div class="lt-align-grp">
+          <button class="lt-toggle" data-align="left">L</button>
+          <button class="lt-toggle lt-active" data-align="center">C</button>
+          <button class="lt-toggle" data-align="right">R</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="lt-section-hdr">Effect</div>
+    <div class="lt-row">
+      <div class="lt-field">
+        <label>Scroll</label>
+        <button id="lt-toggle-scroll" class="lt-toggle">Off</button>
+      </div>
+      <div class="lt-field lt-field-grow" id="lt-speed-field" style="display:none;">
+        <label>Speed</label>
+        <select id="lt-scroll-speed">
+          <option value="35">Slow</option>
+          <option value="20" selected>Medium</option>
+          <option value="10">Fast</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="lt-section-hdr">Transition</div>
+    <div class="lt-row">
+      <div class="lt-field lt-field-grow">
+        <label>In</label>
+        <select id="lt-transition-in">
+          <option value="none">None</option>
+          <option value="fade" selected>Fade</option>
+          <option value="slide-up">Slide Up</option>
+          <option value="slide-down">Slide Down</option>
+        </select>
+      </div>
+      <div class="lt-field lt-field-grow">
+        <label>Out</label>
+        <select id="lt-transition-out">
+          <option value="none">None</option>
+          <option value="fade" selected>Fade</option>
+          <option value="slide-up">Slide Up</option>
+          <option value="slide-down">Slide Down</option>
+        </select>
+      </div>
+    </div>
+  </div>
+  <div class="lt-footer">
+    <button id="lt-toggle-visible" class="lt-show-btn">Show</button>
   </div>
 </div>
 </body>

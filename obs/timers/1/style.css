@@ -1,0 +1,326 @@
+.container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+.container section {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+.container section#longCountdown {
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.container section#longCountdown.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.container section#longCountdown .background {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  /*z-index: -1;*/
+}
+.container section#longCountdown .background > * {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+.container section#longCountdown .background .bgImage {
+  background-size: cover;
+  background-position: center;
+  opacity: 0.75;
+}
+.container section#longCountdown .background .bgUnderlay {
+  background: #360033;
+  /* fallback for old browsers */
+  /* Chrome 10-25, Safari 5.1-6 */
+  background: linear-gradient(to right, #0b8793, #360033);
+  /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+}
+.container section#longCountdown .background .bgOverlay {
+  opacity: 0.5;
+  background: black;
+}
+.container section#longCountdown .content {
+  position: absolute;
+  bottom: 10%;
+  right: 10%;
+  color: white;
+  border-right: 4px solid white;
+  padding: 10px 30px;
+  text-align: right;
+}
+.container section#longCountdown .content .text {
+  font-family: "MuseoModerno", cursive;
+  display: block;
+  font-size: 3em;
+}
+.container section#longCountdown .content .countdown {
+  font-family: "Roboto Mono", monospace;
+  display: block;
+  font-size: 4em;
+}
+.container section#minuteCountdown {
+  opacity: 0;
+  transition: opacity 0.5s;
+  pointer-events: none;
+}
+.container section#minuteCountdown.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+.container section#minuteCountdown .background {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  /*z-index: -1;*/
+}
+.container section#minuteCountdown .background > * {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+.container section#minuteCountdown .background .bgImage {
+  background-size: cover;
+  background-position: center;
+  opacity: 0.75;
+}
+.container section#minuteCountdown .background .bgUnderlay {
+  background: #360033;
+  /* fallback for old browsers */
+  /* Chrome 10-25, Safari 5.1-6 */
+  background: linear-gradient(to right, #0b8793, #360033);
+  /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+}
+.container section#minuteCountdown .background .bgOverlay {
+  opacity: 0.5;
+  background: black;
+}
+.container section#minuteCountdown .content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  color: white;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+.container section#minuteCountdown .content .text {
+  font-family: "MuseoModerno", cursive;
+  display: block;
+  font-size: 3em;
+}
+.container section#minuteCountdown .content .countdown {
+  font-family: "Roboto Mono", monospace;
+  display: block;
+  font-size: 4em;
+}
+.container section#numberThree {
+  -webkit-clip-path: inset(0 0 100% 0);
+          clip-path: inset(0 0 100% 0);
+  transition: -webkit-clip-path 0.25s;
+  transition: clip-path 0.25s;
+  transition: clip-path 0.25s, -webkit-clip-path 0.25s;
+  pointer-events: none;
+}
+.container section#numberThree.show {
+  -webkit-clip-path: inset(0 0 0 0);
+          clip-path: inset(0 0 0 0);
+  pointer-events: auto;
+}
+.container section#numberThree .background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #2b1c1c;
+  background-image: url('data:image/svg+xml,%3Csvg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M8 16c4.418 0 8-3.582 8-8s-3.582-8-8-8-8 3.582-8 8 3.582 8 8 8zm0-2c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6zm33.414-6l5.95-5.95L45.95.636 40 6.586 34.05.636 32.636 2.05 38.586 8l-5.95 5.95 1.414 1.414L40 9.414l5.95 5.95 1.414-1.414L41.414 8zM40 48c4.418 0 8-3.582 8-8s-3.582-8-8-8-8 3.582-8 8 3.582 8 8 8zm0-2c3.314 0 6-2.686 6-6s-2.686-6-6-6-6 2.686-6 6 2.686 6 6 6zM9.414 40l5.95-5.95-1.414-1.414L8 38.586l-5.95-5.95L.636 34.05 6.586 40l-5.95 5.95 1.414 1.414L8 41.414l5.95 5.95 1.414-1.414L9.414 40z" fill="%239C92AC" fill-opacity="0.4" fill-rule="evenodd"/%3E%3C/svg%3E');
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 20s;
+          animation-duration: 20s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  animation-direction: reverse;
+}
+.container section#numberThree .numberBg {
+  display: block;
+  text-align: center;
+  font-weight: 700;
+  font-family: "Roboto Mono", monospace;
+  font-size: 30em;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #4b7bec;
+  background-image: url('data:image/svg+xml,%3Csvg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="%239C92AC" fill-opacity="0.4" fill-rule="evenodd"%3E%3Cpath d="M0 40L40 0H20L0 20M40 40V20L20 40"/%3E%3C/g%3E%3C/svg%3E');
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 20s;
+          animation-duration: 20s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  -webkit-animation-direction: normal;
+          animation-direction: normal;
+}
+.container section#numberTwo {
+  -webkit-clip-path: inset(0 100% 0 0);
+          clip-path: inset(0 100% 0 0);
+  transition: -webkit-clip-path 0.25s;
+  transition: clip-path 0.25s;
+  transition: clip-path 0.25s, -webkit-clip-path 0.25s;
+  pointer-events: none;
+}
+.container section#numberTwo.show {
+  -webkit-clip-path: inset(0 0 0 0);
+          clip-path: inset(0 0 0 0);
+  pointer-events: auto;
+}
+.container section#numberTwo .background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #1c1c2b;
+  background-image: url('data:image/svg+xml,%3Csvg width="52" height="26" viewBox="0 0 52 26" xmlns="http://www.w3.org/2000/svg"%3E%3Cg fill="none" fill-rule="evenodd"%3E%3Cg fill="%239C92AC" fill-opacity="0.4"%3E%3Cpath d="M10 10c0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6h2c0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4 3.314 0 6 2.686 6 6 0 2.21 1.79 4 4 4v2c-3.314 0-6-2.686-6-6 0-2.21-1.79-4-4-4-3.314 0-6-2.686-6-6zm25.464-1.95l8.486 8.486-1.414 1.414-8.486-8.486 1.414-1.414z" /%3E%3C/g%3E%3C/g%3E%3C/svg%3E');
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 20s;
+          animation-duration: 20s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  -webkit-animation-direction: normal;
+          animation-direction: normal;
+}
+.container section#numberTwo .numberBg {
+  display: block;
+  text-align: center;
+  font-weight: 700;
+  font-family: "Roboto Mono", monospace;
+  font-size: 30em;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #a55eea;
+  background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="28" height="49" viewBox="0 0 28 49"%3E%3Cg fill-rule="evenodd"%3E%3Cg id="hexagons" fill="%239C92AC" fill-opacity="0.4" fill-rule="nonzero"%3E%3Cpath d="M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z"/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 20s;
+          animation-duration: 20s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  animation-direction: reverse;
+}
+.container section#numberOne {
+  -webkit-clip-path: inset(100% 0 0 0);
+          clip-path: inset(100% 0 0 0);
+  transition: -webkit-clip-path 0.25s;
+  transition: clip-path 0.25s;
+  transition: clip-path 0.25s, -webkit-clip-path 0.25s;
+  pointer-events: none;
+}
+.container section#numberOne.show {
+  -webkit-clip-path: inset(0 0 0 0);
+          clip-path: inset(0 0 0 0);
+  pointer-events: auto;
+}
+.container section#numberOne .background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #1c1c1c;
+  background-image: url(https://cdn.flaresystems.org/assets/textures/patterns/camo.png);
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 20s;
+          animation-duration: 20s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  animation-direction: reverse;
+}
+.container section#numberOne .numberBg {
+  display: block;
+  text-align: center;
+  font-weight: 700;
+  font-family: "Roboto Mono", monospace;
+  font-size: 30em;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #fa8231;
+  background-image: url(https://cdn.flaresystems.org/assets/textures/patterns/hex.png);
+  -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-animation-name: moveBg1;
+          animation-name: moveBg1;
+  -webkit-animation-duration: 5s;
+          animation-duration: 5s;
+  -webkit-animation-timing-function: linear;
+          animation-timing-function: linear;
+  -webkit-animation-iteration-count: infinite;
+          animation-iteration-count: infinite;
+  animation-direction: reverse;
+}
+
+@-webkit-keyframes moveBg1 {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100% 100%;
+  }
+}
+
+@keyframes moveBg1 {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 100% 100%;
+  }
+}
+
+body {
+  background-color: black; /* Start with a black background */
+  animation: fadeIn 1s ease-in-out forwards; /* Fade-in animation */
+}
+
+/* Keyframes for fade-in */
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}

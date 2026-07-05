@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stream Countdown</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="container">
+    <section id="longCountdown" class="show">
+      <div class="background">
+        <div class="bgUnderlay"></div>
+        <div class="bgOverlay"></div>
+      </div>
+      <div class="content">
+        <span class="text">Stream starting soon</span>
+        <span class="countdown"><span class="cdHours">-</span>:<span class="cdMinutes">--</span>:<span class="cdSeconds">--</span></span>
+      </div>
+    </section>
+    <section id="minuteCountdown">
+      <div class="background">
+        <div class="bgUnderlay"></div>
+        <div class="bgOverlay"></div>
+      </div>
+      <div class="content">
+        <div class="countdown">
+          <span class="number cdSecondsPure">60</span>
+          <span class="unit">Seconds</span>
+        </div>
+        <span class="text">Stream starting soon</span>
+      </div>
+    </section>
+    <section id="numberThree">
+      <div class="background"></div>
+      <div class="numberBg"><span class="number">3</span></div>
+    </section>
+    <section id="numberTwo">
+      <div class="background"></div>
+      <div class="numberBg"><span class="number">2</span></div>
+    </section>
+    <section id="numberOne">
+      <div class="background"></div>
+      <div class="numberBg"><span class="number">1</span></div>
+    </section>
+  </div>
+  <script src="./script.js"></script>
+</body>
+</html>

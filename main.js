@@ -3439,6 +3439,13 @@ ipcMain.on('video-live-control', (event, data) => {
   }
 });
 
+// Forward lower thirds state to all live windows
+ipcMain.on('update-lower-third', (event, data) => {
+  for (const win of liveWindows.values()) {
+    if (!win.isDestroyed()) win.webContents.send('update-lower-third', data);
+  }
+});
+
 // Move the live window to a different display (close all existing, open on new display)
 ipcMain.handle('set-live-display', async (event, displayId) => {
   // Close all existing live windows

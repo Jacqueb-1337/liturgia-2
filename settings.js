@@ -3,6 +3,7 @@ const { CDN_BASE, BIBLE_STORAGE_DIR } = require('./constants');
 const fs = require('fs');
 const path = require('path');
 let cachedSettings = null;
+let _allDisplays = [];
 
 // Secure storage API using IPC to main (same as in renderer.js)
 const secure = {
@@ -1735,8 +1736,10 @@ document.getElementById('close-live-window').addEventListener('click', async () 
 
     purchaseBtn.addEventListener('click', _openSubscribeModal);
 
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeSubscribeModal(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && overlay.style.display === 'flex') _closeSubscribeModal(); });
+    if (overlay) {
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeSubscribeModal(); });
+    }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && overlay && overlay.style.display === 'flex') _closeSubscribeModal(); });
 
     document.getElementById('subscribe-modal-cancel-plan').addEventListener('click', _closeSubscribeModal);
 
@@ -2203,8 +2206,6 @@ async function selectBible(bible) {
     searchInput.placeholder = originalPlaceholder;
   }, 2000);
 }
-
-let _allDisplays = [];
 
 async function loadDisplays() {
   _allDisplays = await ipcRenderer.invoke('get-displays');

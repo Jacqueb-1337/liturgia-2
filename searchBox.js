@@ -82,6 +82,19 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
     buttonsContainer.innerHTML = ''; // Clear any existing buttons
   }
 
+  // Widget toggle button
+  const ltBtn = document.createElement('button');
+  ltBtn.id = 'lower-third-btn';
+  ltBtn.textContent = 'Widget';
+  ltBtn.style.padding = '4px 8px';
+  ltBtn.style.borderRadius = '6px';
+  ltBtn.style.marginRight = '6px';
+  ltBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (window.onToggleLowerThird) window.onToggleLowerThird();
+  });
+  window.lowerThirdButton = ltBtn;
+
   // Go Live button
   const goLiveBtn = document.createElement('button');
   goLiveBtn.textContent = 'Go Live';
@@ -160,6 +173,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   window.dualButton = dualBtn;
 
   if (buttonsContainer) {
+    buttonsContainer.appendChild(ltBtn);
     buttonsContainer.appendChild(goLiveBtn);
     buttonsContainer.appendChild(liveBtn);
     buttonsContainer.appendChild(clearBtn);
