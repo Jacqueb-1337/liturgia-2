@@ -3952,7 +3952,7 @@ async function toggleLive(isActive) {
       }
     } else if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
       updateLiveFromSongVerse(selectedSongVerseIndex);
-    } else if (selectedIndices.length > 0) {
+    } else if (currentTab === 'verses' && selectedIndices.length > 0) {
       updateLive(selectedIndices);
     }
   } else {
@@ -8306,7 +8306,16 @@ function initLowerThird() {
   }
 
   function _sendWidgetToggle(visible) {
-    const activeWidget = window.__activeObsWidget || {};
+    let activeWidget = window.__activeObsWidget || {};
+    if (!activeWidget.url && _rememberedWidget && _rememberedWidget.url) {
+      activeWidget = {
+        url: _rememberedWidget.url,
+        layout: _rememberedWidget.layout || null,
+        visible: false,
+        transitionOut: _rememberedWidget.transitionOut || 'fade'
+      };
+      window.__activeObsWidget = activeWidget;
+    }
     if (!activeWidget.url) return;
     ipcRenderer.send('update-live-window', {
       isWebsite: true,
