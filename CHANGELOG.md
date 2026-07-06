@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.5 - 2026-07-05
+
+- fix: widget toggle restore and live selection precedence
+
 ## 6.1.4 - 2026-07-05
 
 - fix: keep widget overlays active across normal verse/song changes
