@@ -2541,6 +2541,15 @@ async function createWindow() {
           }
         },
         {
+          label: 'Tutorial',
+          click: async () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('open-tutorial-hub');
+              mainWindow.focus();
+            }
+          }
+        },
+        {
           label: 'Learn More',
           click: async () => {
             await shell.openExternal('https://electronjs.org')

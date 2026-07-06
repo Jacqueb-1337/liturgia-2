@@ -25,6 +25,10 @@ ipcRenderer.on('deep-link:auth-token', async (event, data) => {
   }
 });
 
+ipcRenderer.on('open-tutorial-hub', () => {
+  openTutorialHub();
+});
+
 let fetch;
 if (typeof window !== 'undefined' && window.fetch) {
   fetch = window.fetch.bind(window);
@@ -819,6 +823,64 @@ window.__activeObsWidget = window.__activeObsWidget || {
   visible: false,
   transitionOut: 'fade'
 };
+let _tutorialState = null;
+let _tutorialPrompted = false;
+let _tutorialSignedIn = false;
+
+const TUTORIAL_TOPICS = {
+  displays: {
+    title: 'Displays',
+    intro: 'Set up your preview/live outputs and network displays.',
+    steps: [
+      { title: 'Open display settings', body: 'Go to Settings and choose Displays to configure your output screens.' },
+      { title: 'Enable a network display', body: 'Turn on the network display server for the screen you want to mirror.' },
+      { title: 'Pick the target screen', body: 'Select the display you want Liturgia to send output to.' }
+    ]
+  },
+  songs: {
+    title: 'Songs',
+    intro: 'Add songs and send them live.',
+    steps: [
+      { title: 'Open Songs', body: 'Use the Songs tab to manage and search your song library.' },
+      { title: 'Add a song', body: 'Create or import a song, then save it to the library.' },
+      { title: 'Go live', body: 'Select a song and press Go Live to display it.' }
+    ]
+  },
+  bibles: {
+    title: 'Bibles',
+    intro: 'Load Bible versions and prepare verse service slides.',
+    steps: [
+      { title: 'Open Bible tools', body: 'Go to the Bible section and choose the version you want.' },
+      { title: 'Import or select a Bible', body: 'Add the Bible translation you need for service.' },
+      { title: 'Use verses live', body: 'Select verses and send them live just like a song.' }
+    ]
+  },
+  widgets: {
+    title: 'Widgets',
+    intro: 'Create timers, alerts, and lower thirds.',
+    steps: [
+      { title: 'Add a widget', body: 'Use the media menu and choose Local OBS Widget.' },
+      { title: 'Pick a type', body: 'Choose Timer, Lower Third, or Alert from the widget picker.' },
+      { title: 'Use the tutorial preview', body: 'Edit placement, text, and transitions, then go live.' }
+    ]
+  },
+  relay: {
+    title: 'Relay',
+    intro: 'Connect remote control and auth.',
+    steps: [
+      { title: 'Sign in', body: 'Use your account so the relay can authorize your session.' },
+      { title: 'Start the relay', body: 'Make sure the websocket relay is running on the host.' },
+      { title: 'Test remote control', body: 'Open the remote page or another device and verify it connects.' }
+    ]
+  }
+};
+
+const TUTORIAL_ONBOARDING = [
+  { title: 'Welcome', body: 'This quick tour covers the minimum steps needed before a service.' },
+  { title: 'Displays', body: 'Set up your preview, live, and any network displays first.' },
+  { title: 'Songs and Bibles', body: 'Add at least one song and one Bible so you can send text live.' },
+  { title: 'Ready to go live', body: 'After that, you can use widgets, media, and the remote features as needed.' }
+];
 
 function _syncWidgetButtonVisibility() {
   const widgetBtn = document.getElementById('lower-third-btn');
@@ -903,6 +965,9 @@ async function loadAndApplySettings() {
   }
   if (settings && settings.displaySettings) {
     cachedDisplaySettings = settings.displaySettings;
+  }
+  if (settings && settings.tutorialState) {
+    _tutorialState = settings.tutorialState;
   }
   // Load keybinds with defaults
   const defaultKeybinds = {
@@ -4235,6 +4300,8 @@ async function ensureAuthSetup() {
     const result = await validateTokenAndActivate(token, server);
     if (result && result.ok) {
       scheduleLicensePolling();
+      _tutorialSignedIn = true;
+      setTimeout(() => promptTutorialAfterSignIn(), 800);
       return; // proceed
     }
     
@@ -4277,6 +4344,9 @@ async function ensureAuthSetup() {
         if (!res || !res.ok) {
           if (!document.getElementById('setup-modal')) createSetupModal();
           else { const m = document.getElementById('setup-modal'); if (m) { m.style.display='flex'; const el = document.getElementById('setup-email'); if (el) setTimeout(()=>el.focus(),50); }}
+        } else {
+          _tutorialSignedIn = true;
+          setTimeout(() => promptTutorialAfterSignIn(), 800);
         }
       }
       try { window.focus(); } catch(e){}
@@ -4291,6 +4361,7 @@ async function ensureAuthSetup() {
       if (closed) {
         const token = await getSavedToken();
         if (!token) { if (!document.getElementById('setup-modal')) createSetupModal(); }
+        else { _tutorialSignedIn = true; setTimeout(() => promptTutorialAfterSignIn(), 800); }
       }
     } catch(e) { /* ignore */ }
 
@@ -6677,6 +6748,207 @@ function exportSongs(songIndices) {
   };
 }
 
+function saveTutorialState(patch = {}) {
+  _tutorialState = { ...(_tutorialState || {}), ...patch };
+  try { ipcRenderer.invoke('update-settings', { tutorialState: _tutorialState }).catch(() => {}); } catch (_) {}
+}
+
+function ensureTutorialOverlay() {
+  return document.getElementById('tutorial-overlay');
+}
+
+function renderTutorialStep(step, index, total, mode) {
+  const titleEl = document.getElementById('tutorial-title');
+  const bodyEl = document.getElementById('tutorial-body');
+  const stepEl = document.getElementById('tutorial-step');
+  const topicsEl = document.getElementById('tutorial-topics');
+  const backBtn = document.getElementById('tutorial-back');
+  const nextBtn = document.getElementById('tutorial-next');
+  const skipBtn = document.getElementById('tutorial-skip');
+  if (!titleEl || !bodyEl || !stepEl || !topicsEl || !backBtn || !nextBtn || !skipBtn) return;
+
+  topicsEl.style.display = 'none';
+  topicsEl.innerHTML = '';
+  titleEl.textContent = step.title || 'Tutorial';
+  bodyEl.textContent = step.body || '';
+  stepEl.textContent = mode === 'topics' ? 'Choose a topic' : `Step ${index + 1} of ${total}`;
+  backBtn.style.display = index > 0 ? '' : 'none';
+  nextBtn.style.display = mode === 'topics' ? 'none' : '';
+  skipBtn.style.display = mode === 'topics' ? 'none' : '';
+  backBtn.textContent = mode === 'topics' ? 'Close' : 'Back';
+}
+
+function openTutorialHub(startMode = 'auto') {
+  const overlay = ensureTutorialOverlay();
+  if (!overlay) return;
+
+  const signedIn = !!_tutorialSignedIn;
+  const firstRun = !(_tutorialState && _tutorialState.seenOnboarding);
+  const mode = startMode === 'auto' ? (firstRun ? 'onboarding' : 'topics') : startMode;
+
+  let stepIndex = 0;
+  let activeTopic = null;
+
+  const close = () => {
+    overlay.style.display = 'none';
+    saveTutorialState({ lastOpened: Date.now() });
+  };
+
+  const showTopics = () => {
+    activeTopic = null;
+    const titleEl = document.getElementById('tutorial-title');
+    const bodyEl = document.getElementById('tutorial-body');
+    const topicsEl = document.getElementById('tutorial-topics');
+    const backBtn = document.getElementById('tutorial-back');
+    const nextBtn = document.getElementById('tutorial-next');
+    const skipBtn = document.getElementById('tutorial-skip');
+    if (!titleEl || !bodyEl || !topicsEl || !backBtn || !nextBtn || !skipBtn) return;
+
+    titleEl.textContent = 'Tutorial Topics';
+    bodyEl.textContent = 'Pick a topic and we will guide you through that feature only.';
+    topicsEl.style.display = 'grid';
+    topicsEl.innerHTML = '';
+    Object.entries(TUTORIAL_TOPICS).forEach(([key, topic]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.style.cssText = 'border:1px solid #29405f;background:#13233b;color:#e8eef9;border-radius:14px;padding:16px;text-align:left;cursor:pointer;';
+      btn.innerHTML = `<div style="font-weight:700;font-size:16px;margin-bottom:6px;">${topic.title}</div><div style="font-size:13px;color:#b8c4d6;">${topic.intro}</div>`;
+      btn.addEventListener('click', () => startTopicTour(key));
+      topicsEl.appendChild(btn);
+    });
+    backBtn.style.display = 'none';
+    nextBtn.style.display = 'none';
+    skipBtn.style.display = 'none';
+  };
+
+  const startTopicTour = (topicKey) => {
+    const topic = TUTORIAL_TOPICS[topicKey];
+    if (!topic) return;
+    activeTopic = topicKey;
+    stepIndex = 0;
+
+    const update = () => {
+      const step = topic.steps[stepIndex];
+      renderTutorialStep(
+        { title: topic.title + ' - ' + step.title, body: step.body },
+        stepIndex,
+        topic.steps.length,
+        'topic'
+      );
+      const nextBtn = document.getElementById('tutorial-next');
+      const backBtn = document.getElementById('tutorial-back');
+      const skipBtn = document.getElementById('tutorial-skip');
+      if (nextBtn) nextBtn.textContent = stepIndex === topic.steps.length - 1 ? 'Done' : 'Next';
+      if (backBtn) backBtn.style.display = 'none';
+      if (skipBtn) skipBtn.style.display = 'none';
+    };
+
+    const next = () => {
+      if (stepIndex < topic.steps.length - 1) {
+        stepIndex += 1;
+        update();
+      } else {
+        overlay.removeEventListener('click', onBackdrop);
+        close();
+      }
+    };
+
+    const onBackdrop = (e) => { if (e.target === overlay) close(); };
+    overlay.addEventListener('click', onBackdrop, { once: true });
+    update();
+    const nextBtn = document.getElementById('tutorial-next');
+    if (nextBtn) nextBtn.onclick = next;
+    const backBtn = document.getElementById('tutorial-back');
+    if (backBtn) backBtn.onclick = showTopics;
+  };
+
+  overlay.style.display = 'flex';
+
+  const backBtn = document.getElementById('tutorial-back');
+  const nextBtn = document.getElementById('tutorial-next');
+  const skipBtn = document.getElementById('tutorial-skip');
+  const closeBtn = document.getElementById('tutorial-close');
+
+  const onBackdrop = (e) => { if (e.target === overlay) close(); };
+  overlay.addEventListener('click', onBackdrop, { once: true });
+  if (closeBtn) closeBtn.onclick = close;
+
+  if (mode === 'onboarding') {
+    const update = () => {
+      const step = TUTORIAL_ONBOARDING[stepIndex];
+      renderTutorialStep(step, stepIndex, TUTORIAL_ONBOARDING.length, 'onboarding');
+      if (nextBtn) nextBtn.textContent = stepIndex === TUTORIAL_ONBOARDING.length - 1 ? 'Finish' : 'Next';
+      if (backBtn) backBtn.style.display = stepIndex > 0 ? '' : 'none';
+      if (skipBtn) skipBtn.textContent = 'Skip Tour';
+    };
+    const next = () => {
+      if (stepIndex < TUTORIAL_ONBOARDING.length - 1) {
+        stepIndex += 1;
+        update();
+      } else {
+        saveTutorialState({ seenOnboarding: true, seenTopics: true });
+        close();
+      }
+    };
+    const back = () => { if (stepIndex > 0) { stepIndex -= 1; update(); } };
+    if (nextBtn) nextBtn.onclick = next;
+    if (backBtn) backBtn.onclick = back;
+    if (skipBtn) skipBtn.onclick = () => { saveTutorialState({ seenOnboarding: true }); showTopics(); };
+    update();
+    return;
+  }
+
+  showTopics();
+  if (backBtn) backBtn.onclick = close;
+  if (nextBtn) nextBtn.onclick = () => {};
+  if (skipBtn) skipBtn.onclick = () => {};
+}
+
+function promptTutorialAfterSignIn() {
+  if (_tutorialPrompted) return;
+  const state = _tutorialState || {};
+  if (state.seenOnboarding) return;
+  _tutorialPrompted = true;
+  const overlay = ensureTutorialOverlay();
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  const titleEl = document.getElementById('tutorial-title');
+  const bodyEl = document.getElementById('tutorial-body');
+  const topicsEl = document.getElementById('tutorial-topics');
+  const stepEl = document.getElementById('tutorial-step');
+  const backBtn = document.getElementById('tutorial-back');
+  const nextBtn = document.getElementById('tutorial-next');
+  const skipBtn = document.getElementById('tutorial-skip');
+  const closeBtn = document.getElementById('tutorial-close');
+  if (titleEl) titleEl.textContent = 'Take a quick tour?';
+  if (bodyEl) bodyEl.textContent = 'We can walk you through the minimum steps to get ready for service, or you can skip and open Help → Tutorial later.';
+  if (topicsEl) { topicsEl.style.display = 'none'; topicsEl.innerHTML = ''; }
+  if (stepEl) stepEl.textContent = 'First sign-in only';
+  if (backBtn) { backBtn.style.display = 'none'; }
+  if (nextBtn) {
+    nextBtn.style.display = '';
+    nextBtn.textContent = 'Start Tour';
+    nextBtn.onclick = () => {
+      saveTutorialState({ seenOnboarding: false, promptedOnboarding: true });
+      openTutorialHub('onboarding');
+    };
+  }
+  if (skipBtn) {
+    skipBtn.style.display = '';
+    skipBtn.textContent = 'Not Now';
+    skipBtn.onclick = () => {
+      saveTutorialState({ promptedOnboarding: true });
+      overlay.style.display = 'none';
+    };
+  }
+  if (closeBtn) {
+    closeBtn.onclick = () => {
+      saveTutorialState({ promptedOnboarding: true });
+      overlay.style.display = 'none';
+    };
+  }
+}
+
 function importSongs() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -8105,7 +8377,7 @@ function initLowerThird() {
     }
     const selected = selectedMediaIndex !== null ? allMedia[selectedMediaIndex] : null;
     if (selected && selected.type === 'OBS_WIDGET') {
-    const url = buildLocalWidgetFileUrl(selected);
+    const url = buildLocalWidgetNetworkUrl(selected);
       const layout = selected.layout || getDefaultLocalWidgetLayout(selected.kind);
       const transitionOut = selected.params?.transitionOut || 'fade';
       window.__activeObsWidget = { url, layout, visible: true, transitionOut };
@@ -8920,6 +9192,19 @@ function buildLocalWidgetFileUrl(media) {
   const query = params.toString();
   const base = pathToFileURL(filePath).toString();
   return query ? base + '?' + query : base;
+}
+
+function buildLocalWidgetNetworkUrl(media) {
+  if (!media || !media.kind) return '';
+  const relPath = {
+    timer: '/obs/timers/1/index.html',
+    lowerthird: '/obs/lowerthirds/1/index.html',
+    alert: '/obs/alerts/1/index.html'
+  }[media.kind];
+  if (!relPath) return '';
+  const params = new URLSearchParams(media.params || {});
+  const query = params.toString();
+  return query ? relPath + '?' + query : relPath;
 }
 
 function syncLocalWidgetFieldVisibility() {
@@ -10005,7 +10290,7 @@ async function displayMediaOnLive(media) {
     if (window.clearButton) window.clearButton.classList.remove('active');
     if (window.blackButton) window.blackButton.classList.remove('active');
     const widgetPath = buildLocalWidgetUrl(media);
-    const widgetUrl = buildLocalWidgetFileUrl(media);
+    const widgetUrl = buildLocalWidgetNetworkUrl(media);
     showWebsiteLivePanel(widgetUrl);
     const widgetState = {
       url: widgetUrl,

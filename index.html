@@ -680,7 +680,7 @@
 </div>
 
 <!-- VideoPsalm import preview modal -->
-<div id="vp-import-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
+  <div id="vp-import-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:2000;align-items:center;justify-content:center;">
   <div class="vp-import-modal">
     <h3 class="vp-import-modal-title">Import VideoPsalm</h3>
     <p class="vp-import-modal-subtitle" id="vp-import-modal-subtitle"></p>
@@ -1290,7 +1290,28 @@
   <div class="lt-footer">
     <button id="lt-toggle-visible" class="lt-show-btn">Show</button>
   </div>
-</div>
+  </div>
+  <div id="tutorial-overlay" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,0.82);z-index:10000;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <div id="tutorial-card" style="width:min(920px, 100%);max-height:90vh;overflow:auto;background:#0b1220;color:#e8eef9;border:1px solid #22324a;border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,0.45);padding:24px;position:relative;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px;">
+        <div>
+          <div id="tutorial-kicker" style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#8ab4f8;font-weight:700;">Tutorial</div>
+          <h2 id="tutorial-title" style="margin:4px 0 0;font-size:28px;">Welcome</h2>
+        </div>
+        <button id="tutorial-close" style="border:1px solid #29405f;background:#13233b;color:#e8eef9;border-radius:10px;padding:10px 14px;cursor:pointer;">Close</button>
+      </div>
+      <div id="tutorial-body" style="font-size:15px;line-height:1.55;color:#c7d3e6;"></div>
+      <div id="tutorial-topics" style="display:none;margin-top:18px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;"></div>
+      <div id="tutorial-foot" style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:22px;flex-wrap:wrap;">
+        <div id="tutorial-step" style="color:#8b9ab3;font-size:13px;"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="tutorial-back" style="border:1px solid #29405f;background:#13233b;color:#e8eef9;border-radius:10px;padding:10px 14px;cursor:pointer;">Back</button>
+          <button id="tutorial-next" style="border:1px solid #3f5f92;background:#1d4ed8;color:#fff;border-radius:10px;padding:10px 14px;cursor:pointer;">Next</button>
+          <button id="tutorial-skip" style="border:1px solid #29405f;background:transparent;color:#c7d3e6;border-radius:10px;padding:10px 14px;cursor:pointer;">Skip Tour</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
 
