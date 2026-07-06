@@ -8105,7 +8105,7 @@ function initLowerThird() {
     }
     const selected = selectedMediaIndex !== null ? allMedia[selectedMediaIndex] : null;
     if (selected && selected.type === 'OBS_WIDGET') {
-      const url = buildLocalWidgetUrl(selected);
+    const url = buildLocalWidgetFileUrl(selected);
       const layout = selected.layout || getDefaultLocalWidgetLayout(selected.kind);
       const transitionOut = selected.params?.transitionOut || 'fade';
       window.__activeObsWidget = { url, layout, visible: true, transitionOut };
@@ -8901,10 +8901,24 @@ function buildLocalWidgetUrl(media) {
     lowerthird: path.join(__dirname, 'obs', 'lowerthirds', '1', 'index.html'),
     alert: path.join(__dirname, 'obs', 'alerts', '1', 'index.html')
   }[media.kind];
-  const base = basePath ? pathToFileURL(basePath).toString() : '';
-  if (!base) return '';
+  if (!basePath) return '';
   const params = new URLSearchParams(media.params || {});
   const query = params.toString();
+  const relPath = '/obs/' + path.relative(path.join(__dirname, 'obs'), basePath).replace(/\\/g, '/');
+  return query ? relPath + '?' + query : relPath;
+}
+
+function buildLocalWidgetFileUrl(media) {
+  if (!media || !media.kind) return '';
+  const filePath = {
+    timer: path.join(__dirname, 'obs', 'timers', '1', 'index.html'),
+    lowerthird: path.join(__dirname, 'obs', 'lowerthirds', '1', 'index.html'),
+    alert: path.join(__dirname, 'obs', 'alerts', '1', 'index.html')
+  }[media.kind];
+  if (!filePath) return '';
+  const params = new URLSearchParams(media.params || {});
+  const query = params.toString();
+  const base = pathToFileURL(filePath).toString();
   return query ? base + '?' + query : base;
 }
 
@@ -9990,10 +10004,12 @@ async function displayMediaOnLive(media) {
     clearMode = false; blackMode = false;
     if (window.clearButton) window.clearButton.classList.remove('active');
     if (window.blackButton) window.blackButton.classList.remove('active');
-    const widgetUrl = buildLocalWidgetUrl(media);
+    const widgetPath = buildLocalWidgetUrl(media);
+    const widgetUrl = buildLocalWidgetFileUrl(media);
     showWebsiteLivePanel(widgetUrl);
     const widgetState = {
       url: widgetUrl,
+      path: widgetPath,
       layout: media.layout || getDefaultLocalWidgetLayout(media.kind),
       visible: true,
       transitionOut: media.params?.transitionOut || 'fade'
@@ -10007,6 +10023,7 @@ async function displayMediaOnLive(media) {
       obsWidgetLayout: media.layout || getDefaultLocalWidgetLayout(media.kind),
       obsWidgetKind: media.kind || 'timer',
       obsWidgetUrl: widgetUrl,
+      obsWidgetPath: widgetPath,
       obsWidgetVisible: true,
       obsWidgetTransitionOut: media.params?.transitionOut || 'fade'
     });

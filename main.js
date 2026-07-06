@@ -3623,6 +3623,7 @@ function startDisplayNetServer(displayId, port) {
   displayNetServers.set(displayId, ns);
 
   const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
+  const obsRoot = path.join(__dirname, 'obs');
 
   const server = http.createServer((req, res) => {
     let pathname = '/';
@@ -3638,6 +3639,35 @@ function startDisplayNetServer(displayId, port) {
         if (err) { res.writeHead(404); res.end('Receiver page not found'); return; }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(data);
+      });
+      return;
+    }
+
+    if (pathname.startsWith('/obs/')) {
+      const rel = pathname.slice('/obs/'.length);
+      const resolved = path.resolve(obsRoot, rel);
+      if (!resolved.startsWith(path.resolve(obsRoot))) {
+        res.writeHead(403); res.end('Forbidden'); return;
+      }
+      fs.stat(resolved, (err, stat) => {
+        if (err || !stat.isFile()) { res.writeHead(404); res.end('Not found'); return; }
+        const ext = path.extname(resolved).toLowerCase();
+        const mimeMap = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'application/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.gif': 'image/gif',
+          '.webp': 'image/webp',
+          '.svg': 'image/svg+xml'
+        };
+        res.writeHead(200, {
+          'Content-Type': mimeMap[ext] || 'application/octet-stream',
+          'Cache-Control': 'no-cache'
+        });
+        fs.createReadStream(resolved).pipe(res);
       });
       return;
     }

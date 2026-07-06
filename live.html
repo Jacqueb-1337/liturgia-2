@@ -118,7 +118,24 @@
         incoming.style.opacity = '1';
         requestAnimationFrame(() => { if (token === _widgetLoadToken) widgetOverlay.style.opacity = '1'; });
       };
-      incoming.src = url || 'about:blank';
+      incoming.src = resolveWidgetUrl(url) || 'about:blank';
+    }
+
+    function resolveWidgetUrl(url) {
+      if (!url) return '';
+      if (/^https?:\/\//.test(url) || /^data:/.test(url)) return url;
+      if (/^file:\/\//.test(url)) {
+        const m = url.match(/\/obs\/(timers|lowerthirds|alerts)\/1\/index\.html(?:\?[^#]*)?$/i);
+        if (m) return url.replace(/^file:\/\/\/?[A-Za-z]:/i, '');
+        return url;
+      }
+      if (/^[A-Za-z]:[\\/]/.test(url)) {
+        const idx = url.toLowerCase().lastIndexOf('\\obs\\');
+        if (idx >= 0) return '/obs/' + url.slice(idx + 5).replace(/\\/g, '/');
+        const idx2 = url.toLowerCase().lastIndexOf('/obs/');
+        if (idx2 >= 0) return '/obs/' + url.slice(idx2 + 5).replace(/\\/g, '/');
+      }
+      return `${location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
     }
     function hideWidgetOverlay() {
       if (!widgetOverlay || !widgetFrameA || !widgetFrameB) return;
@@ -2155,10 +2172,10 @@
       // WEBSITE: mirror overlays on top of canvases — don't wipe window.currentContent
       // so clear/black modes can fall back to the last verse/song content underneath.
       if (data && data.isWebsite) {
-        if (data.obsWidgetUrl) {
+        if (data.obsWidgetUrl || data.obsWidgetPath) {
           _widgetTransitionOut = data.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
           if (data.obsWidgetVisible === false) hideWidgetOverlay();
-          else showWidgetOverlay(data.obsWidgetUrl, data.obsWidgetLayout);
+          else showWidgetOverlay(data.obsWidgetPath || data.obsWidgetUrl, data.obsWidgetLayout);
         } else hideWidgetOverlay();
         return;
       }

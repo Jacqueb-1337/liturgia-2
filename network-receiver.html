@@ -38,6 +38,10 @@
   <img id="gif-bg" alt="">
   <canvas id="bg-canvas"></canvas>
   <canvas id="text-canvas"></canvas>
+  <div id="widget-overlay" style="position:absolute;inset:0;z-index:110;display:none;pointer-events:none;opacity:0;transition:opacity 0.22s ease;">
+    <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
+    <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
+  </div>
   <div id="status" class="connecting">Connecting...</div>
   <script>
     const bgCanvas  = document.getElementById('bg-canvas');
@@ -46,6 +50,13 @@
     const textCtx   = textCanvas.getContext('2d');
     const gifBg     = document.getElementById('gif-bg');
     const statusEl  = document.getElementById('status');
+    const widgetOverlay = document.getElementById('widget-overlay');
+    const widgetFrameA = document.getElementById('widget-frame-a');
+    const widgetFrameB = document.getElementById('widget-frame-b');
+    let _widgetActiveFrame = null;
+    let _widgetLoadToken = 0;
+    let _widgetTransitionOut = 'fade';
+    let lastContentPayload = null;
 
     // ── URL option flags ──────────────────────────────────────────────
     const _urlParams    = new URLSearchParams(location.search);
@@ -71,6 +82,73 @@
     let prevTextCanvas = null;
     let textAnimId     = null;
     function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
+
+    function showWidgetOverlay(url, layout) {
+      if (!widgetOverlay || !widgetFrameA || !widgetFrameB) return;
+      const token = ++_widgetLoadToken;
+      const outgoing = _widgetActiveFrame;
+      const incoming = outgoing === widgetFrameA ? widgetFrameB : widgetFrameA;
+      _widgetActiveFrame = incoming;
+      const l = layout || { x: 0, y: 0, w: 1, h: 1 };
+      widgetOverlay.style.opacity = '0';
+      widgetOverlay.style.display = 'block';
+      incoming.style.left = (l.x * 100) + '%';
+      incoming.style.top = (l.y * 100) + '%';
+      incoming.style.width = (l.w * 100) + '%';
+      incoming.style.height = (l.h * 100) + '%';
+      incoming.style.opacity = '0';
+      incoming.style.display = 'block';
+      incoming.onload = () => {
+        if (token !== _widgetLoadToken) return;
+        if (outgoing && outgoing !== incoming) outgoing.style.display = 'none';
+        incoming.style.opacity = '1';
+        requestAnimationFrame(() => { if (token === _widgetLoadToken) widgetOverlay.style.opacity = '1'; });
+      };
+      incoming.src = resolveWidgetUrl(url) || 'about:blank';
+    }
+
+    function resolveWidgetUrl(url) {
+      if (!url) return '';
+      if (/^https?:\/\//.test(url) || /^data:/.test(url)) return url;
+      if (/^file:\/\//.test(url)) {
+        const m = url.match(/\/obs\/(timers|lowerthirds|alerts)\/1\/index\.html(?:\?[^#]*)?$/i);
+        if (m) return url.replace(/^file:\/\/\/?[A-Za-z]:/i, '');
+        return url;
+      }
+      if (/^[A-Za-z]:[\\/]/.test(url)) {
+        const idx = url.toLowerCase().lastIndexOf('\\obs\\');
+        if (idx >= 0) return '/obs/' + url.slice(idx + 5).replace(/\\/g, '/');
+        const idx2 = url.toLowerCase().lastIndexOf('/obs/');
+        if (idx2 >= 0) return '/obs/' + url.slice(idx2 + 5).replace(/\\/g, '/');
+      }
+      return `${location.origin}${url.startsWith('/') ? '' : '/'}${url}`;
+    }
+
+    function hideWidgetOverlay() {
+      if (!widgetOverlay || !widgetFrameA || !widgetFrameB) return;
+      _widgetLoadToken += 1;
+      const tout = _widgetTransitionOut || 'fade';
+      const activeFrame = _widgetActiveFrame || widgetFrameA;
+      if (tout === 'slide-up') {
+        activeFrame.style.transform = 'translateY(-12%)';
+      } else if (tout === 'slide-down') {
+        activeFrame.style.transform = 'translateY(12%)';
+      } else {
+        activeFrame.style.opacity = '0';
+      }
+      widgetOverlay.style.opacity = '0';
+      setTimeout(() => {
+        widgetOverlay.style.display = 'none';
+        widgetFrameA.style.display = 'none';
+        widgetFrameB.style.display = 'none';
+        widgetFrameA.style.opacity = '0';
+        widgetFrameB.style.opacity = '0';
+        widgetFrameA.style.transform = '';
+        widgetFrameB.style.transform = '';
+        widgetFrameA.src = 'about:blank';
+        widgetFrameB.src = 'about:blank';
+      }, tout === 'fade' ? 220 : 260);
+    }
 
     // ── Canvas resize ──────────────────────────────────────────────────
     function resize() {
@@ -691,14 +769,35 @@
         let msg;
         try { msg = JSON.parse(evt.data); } catch (e) { return; }
         if (msg.type === 'content') {
+          if (msg.data && msg.data.isWebsite) {
+            if (msg.data.obsWidgetUrl || msg.data.obsWidgetPath) {
+              _widgetTransitionOut = msg.data.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
+              if (msg.data.obsWidgetVisible === false) hideWidgetOverlay();
+              else showWidgetOverlay(msg.data.obsWidgetPath || msg.data.obsWidgetUrl, msg.data.obsWidgetLayout || null);
+            } else {
+              hideWidgetOverlay();
+            }
+            return;
+          }
           isBlack = false; isClear = false;
+          lastContentPayload = msg.data;
+          hideWidgetOverlay();
           renderContent(msg.data);
         } else if (msg.type === 'mode') {
+          if (msg.mode !== 'normal') hideWidgetOverlay();
           setMode(msg.mode);
         } else if (msg.type === 'sync') {
           // On connect: restore current state
           if (msg.mode) setMode(msg.mode);
-          if (msg.payload && msg.mode !== 'black') renderContent(msg.payload);
+          if (msg.payload && msg.mode !== 'black') {
+            lastContentPayload = msg.payload;
+            renderContent(msg.payload);
+          }
+          if (msg.payload && msg.payload.isWebsite && (msg.payload.obsWidgetUrl || msg.payload.obsWidgetPath)) {
+            _widgetTransitionOut = msg.payload.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
+            if (msg.payload.obsWidgetVisible === false) hideWidgetOverlay();
+            else showWidgetOverlay(msg.payload.obsWidgetPath || msg.payload.obsWidgetUrl, msg.payload.obsWidgetLayout || null);
+          }
         }
       };
 
