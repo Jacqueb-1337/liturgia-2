@@ -6937,13 +6937,13 @@ function promptTutorialAfterSignIn() {
     skipBtn.style.display = '';
     skipBtn.textContent = 'Not Now';
     skipBtn.onclick = () => {
-      saveTutorialState({ promptedOnboarding: true });
+      saveTutorialState({ seenOnboarding: true, promptedOnboarding: true });
       overlay.style.display = 'none';
     };
   }
   if (closeBtn) {
     closeBtn.onclick = () => {
-      saveTutorialState({ promptedOnboarding: true });
+      saveTutorialState({ seenOnboarding: true, promptedOnboarding: true });
       overlay.style.display = 'none';
     };
   }
@@ -8377,8 +8377,8 @@ function initLowerThird() {
     }
     const selected = selectedMediaIndex !== null ? allMedia[selectedMediaIndex] : null;
     if (selected && selected.type === 'OBS_WIDGET') {
-    const url = buildLocalWidgetNetworkUrl(selected);
-      const layout = selected.layout || getDefaultLocalWidgetLayout(selected.kind);
+      const url = buildLocalWidgetNetworkUrl(selected);
+      const layout = normalizeLocalWidgetLayout(selected.kind, selected.layout);
       const transitionOut = selected.params?.transitionOut || 'fade';
       window.__activeObsWidget = { url, layout, visible: true, transitionOut };
       _rememberedWidget = { url, layout, transitionOut };
@@ -9167,17 +9167,7 @@ function closeLocalWidgetModal() {
 }
 
 function buildLocalWidgetUrl(media) {
-  if (!media || !media.kind) return '';
-  const basePath = {
-    timer: path.join(__dirname, 'obs', 'timers', '1', 'index.html'),
-    lowerthird: path.join(__dirname, 'obs', 'lowerthirds', '1', 'index.html'),
-    alert: path.join(__dirname, 'obs', 'alerts', '1', 'index.html')
-  }[media.kind];
-  if (!basePath) return '';
-  const params = new URLSearchParams(media.params || {});
-  const query = params.toString();
-  const relPath = '/obs/' + path.relative(path.join(__dirname, 'obs'), basePath).replace(/\\/g, '/');
-  return query ? relPath + '?' + query : relPath;
+  return buildLocalWidgetFileUrl(media);
 }
 
 function buildLocalWidgetFileUrl(media) {
@@ -9228,6 +9218,7 @@ function loadLocalWidgetFields(media) {
     document.getElementById('local-widget-timer-seconds').value = media.params?.seconds ?? 60;
     document.getElementById('local-widget-timer-title').value = media.params?.title ?? '';
     document.getElementById('local-widget-timer-subtitle').value = media.params?.subtitle ?? '';
+    setChoiceGroupValue('local-widget-timer-transition-out', media.params?.transitionOut ?? 'fade');
   } else if (kind === 'lowerthird') {
     document.getElementById('local-widget-lt-name').value = media.params?.name ?? '';
     document.getElementById('local-widget-lt-title').value = media.params?.title ?? '';
@@ -9253,9 +9244,28 @@ function loadLocalWidgetFields(media) {
 }
 
 function getDefaultLocalWidgetLayout(kind) {
+  if (kind === 'timer') return { x: 0, y: 0, w: 1, h: 1 };
   if (kind === 'lowerthird') return { x: 0.06, y: 0.74, w: 0.88, h: 0.22 };
   if (kind === 'alert') return { x: 0.18, y: 0.24, w: 0.64, h: 0.28 };
   return { x: 0.5, y: 0.58, w: 0.8, h: 0.28 };
+}
+
+function normalizeLocalWidgetLayout(kind, layout) {
+  const def = getDefaultLocalWidgetLayout(kind);
+  if (kind === 'timer') return def;
+  if (!layout || typeof layout !== 'object') return def;
+  const x = Number(layout.x);
+  const y = Number(layout.y);
+  const w = Number(layout.w);
+  const h = Number(layout.h);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return def;
+  if (w <= 0.01 || h <= 0.01) return def;
+  return {
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y)),
+    w: Math.max(0.05, Math.min(1, w)),
+    h: Math.max(0.05, Math.min(1, h))
+  };
 }
 
 function updateLocalWidgetKindPicker(kind) {
@@ -9284,6 +9294,7 @@ function updateLocalWidgetPreview() {
     media.params.seconds = parseInt(document.getElementById('local-widget-timer-seconds').value, 10) || 0;
     media.params.title = document.getElementById('local-widget-timer-title').value.trim();
     media.params.subtitle = document.getElementById('local-widget-timer-subtitle').value.trim();
+    media.params.transitionOut = getChoiceGroupValue('local-widget-timer-transition-out') || 'fade';
   } else if (kind === 'lowerthird') {
     media.params.name = document.getElementById('local-widget-lt-name').value.trim();
     media.params.title = document.getElementById('local-widget-lt-title').value.trim();
@@ -9312,7 +9323,7 @@ function updateLocalWidgetPreview() {
 
 function loadLocalWidgetLayout(media) {
   const kind = media.kind || 'timer';
-  const layout = media.layout || getDefaultLocalWidgetLayout(kind);
+  const layout = normalizeLocalWidgetLayout(kind, media.layout);
   const shell = document.getElementById('local-widget-preview-shell');
   if (!shell) return;
   shell.style.left = `${layout.x * 100}%`;
@@ -9336,6 +9347,7 @@ async function saveLocalWidgetItem() {
     params.seconds = parseInt(document.getElementById('local-widget-timer-seconds').value, 10) || 0;
     params.title = document.getElementById('local-widget-timer-title').value.trim();
     params.subtitle = document.getElementById('local-widget-timer-subtitle').value.trim();
+    params.transitionOut = getChoiceGroupValue('local-widget-timer-transition-out') || 'fade';
   } else if (kind === 'lowerthird') {
     params.name = document.getElementById('local-widget-lt-name').value.trim();
     params.title = document.getElementById('local-widget-lt-title').value.trim();
@@ -9364,12 +9376,16 @@ async function saveLocalWidgetItem() {
   if (box && stage) {
     const sr = stage.getBoundingClientRect();
     const br = box.getBoundingClientRect();
-    layout = {
-      x: Math.max(0, Math.min(1, (br.left - sr.left) / sr.width)),
-      y: Math.max(0, Math.min(1, (br.top - sr.top) / sr.height)),
-      w: Math.max(0.05, Math.min(1, br.width / sr.width)),
-      h: Math.max(0.05, Math.min(1, br.height / sr.height))
-    };
+    const rawW = sr.width ? br.width / sr.width : 0;
+    const rawH = sr.height ? br.height / sr.height : 0;
+    if (rawW > 0.01 && rawH > 0.01) {
+      layout = {
+        x: Math.max(0, Math.min(1, (br.left - sr.left) / sr.width)),
+        y: Math.max(0, Math.min(1, (br.top - sr.top) / sr.height)),
+        w: Math.max(0.05, Math.min(1, rawW)),
+        h: Math.max(0.05, Math.min(1, rawH))
+      };
+    }
   }
   const item = { name, type: 'OBS_WIDGET', kind, params, layout, size: '-', addedDate: new Date().toISOString() };
   if (editingMediaIndex !== null) allMedia[editingMediaIndex] = { ...allMedia[editingMediaIndex], ...item };
@@ -9422,6 +9438,7 @@ function initLocalWidgetModal() {
    'local-widget-lt-name','local-widget-lt-title','local-widget-lt-primary','local-widget-lt-secondary',
    'local-widget-lt-accent','local-widget-lt-text','local-widget-lt-textsecondary',
    'local-widget-lt-timeout',
+   'local-widget-timer-transition-out',
    'local-widget-alert-title','local-widget-alert-color'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
@@ -10291,11 +10308,11 @@ async function displayMediaOnLive(media) {
     if (window.blackButton) window.blackButton.classList.remove('active');
     const widgetPath = buildLocalWidgetUrl(media);
     const widgetUrl = buildLocalWidgetNetworkUrl(media);
-    showWebsiteLivePanel(widgetUrl);
+    showWebsiteLivePanel(widgetPath);
     const widgetState = {
       url: widgetUrl,
       path: widgetPath,
-      layout: media.layout || getDefaultLocalWidgetLayout(media.kind),
+      layout: normalizeLocalWidgetLayout(media.kind, media.layout),
       visible: true,
       transitionOut: media.params?.transitionOut || 'fade'
     };
@@ -10305,7 +10322,7 @@ async function displayMediaOnLive(media) {
     _syncWidgetButtonVisibility();
     ipcRenderer.send('update-live-window', {
       isWebsite: true,
-      obsWidgetLayout: media.layout || getDefaultLocalWidgetLayout(media.kind),
+      obsWidgetLayout: normalizeLocalWidgetLayout(media.kind, media.layout),
       obsWidgetKind: media.kind || 'timer',
       obsWidgetUrl: widgetUrl,
       obsWidgetPath: widgetPath,

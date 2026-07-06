@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.1.4 - 2026-07-05
+
+- fix: keep widget overlays active across normal verse/song changes
+- fix: widget exit animations now play on the iframe surface
+- fix: timer widgets normalize bad layouts and no longer save 0x0 bounds
+- fix: tutorial prompt now respects dismissal on next launch
+
 ## 5.8.0 - 2026-05-17
 
 - feat: right-click context menu (Cut, Copy, Paste, Select All) in song editor

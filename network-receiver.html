@@ -39,8 +39,8 @@
   <canvas id="bg-canvas"></canvas>
   <canvas id="text-canvas"></canvas>
   <div id="widget-overlay" style="position:absolute;inset:0;z-index:110;display:none;pointer-events:none;opacity:0;transition:opacity 0.22s ease;">
-    <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
-    <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
+    <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
+    <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
   </div>
   <div id="status" class="connecting">Connecting...</div>
   <script>
@@ -90,7 +90,13 @@
       const incoming = outgoing === widgetFrameA ? widgetFrameB : widgetFrameA;
       _widgetActiveFrame = incoming;
       const l = layout || { x: 0, y: 0, w: 1, h: 1 };
-      widgetOverlay.style.opacity = '0';
+      const switchDelay = outgoing && outgoing !== incoming ? (_widgetTransitionOut === 'fade' ? 220 : 260) : 0;
+      if (outgoing && outgoing !== incoming) {
+        if (_widgetTransitionOut === 'slide-up') outgoing.style.transform = 'translateY(-12%)';
+        else if (_widgetTransitionOut === 'slide-down') outgoing.style.transform = 'translateY(12%)';
+        else outgoing.style.opacity = '0';
+      }
+      if (!outgoing || outgoing === incoming) widgetOverlay.style.opacity = '0';
       widgetOverlay.style.display = 'block';
       incoming.style.left = (l.x * 100) + '%';
       incoming.style.top = (l.y * 100) + '%';
@@ -104,15 +110,22 @@
         incoming.style.opacity = '1';
         requestAnimationFrame(() => { if (token === _widgetLoadToken) widgetOverlay.style.opacity = '1'; });
       };
-      incoming.src = resolveWidgetUrl(url) || 'about:blank';
+      if (switchDelay) {
+        setTimeout(() => {
+          if (token !== _widgetLoadToken) return;
+          incoming.src = resolveWidgetUrl(url) || 'about:blank';
+        }, switchDelay);
+      } else {
+        incoming.src = resolveWidgetUrl(url) || 'about:blank';
+      }
     }
 
     function resolveWidgetUrl(url) {
       if (!url) return '';
       if (/^https?:\/\//.test(url) || /^data:/.test(url)) return url;
       if (/^file:\/\//.test(url)) {
-        const m = url.match(/\/obs\/(timers|lowerthirds|alerts)\/1\/index\.html(?:\?[^#]*)?$/i);
-        if (m) return url.replace(/^file:\/\/\/?[A-Za-z]:/i, '');
+        const m = url.match(/(\/obs\/(timers|lowerthirds|alerts)\/1\/index\.html(?:\?[^#]*)?)$/i);
+        if (m) return m[1];
         return url;
       }
       if (/^[A-Za-z]:[\\/]/.test(url)) {
@@ -136,7 +149,6 @@
       } else {
         activeFrame.style.opacity = '0';
       }
-      widgetOverlay.style.opacity = '0';
       setTimeout(() => {
         widgetOverlay.style.display = 'none';
         widgetFrameA.style.display = 'none';
@@ -147,6 +159,7 @@
         widgetFrameB.style.transform = '';
         widgetFrameA.src = 'about:blank';
         widgetFrameB.src = 'about:blank';
+        widgetOverlay.style.opacity = '0';
       }, tout === 'fade' ? 220 : 260);
     }
 
@@ -773,7 +786,7 @@
             if (msg.data.obsWidgetUrl || msg.data.obsWidgetPath) {
               _widgetTransitionOut = msg.data.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
               if (msg.data.obsWidgetVisible === false) hideWidgetOverlay();
-              else showWidgetOverlay(msg.data.obsWidgetPath || msg.data.obsWidgetUrl, msg.data.obsWidgetLayout || null);
+              else showWidgetOverlay(msg.data.obsWidgetUrl || msg.data.obsWidgetPath, msg.data.obsWidgetLayout || null);
             } else {
               hideWidgetOverlay();
             }
@@ -781,7 +794,6 @@
           }
           isBlack = false; isClear = false;
           lastContentPayload = msg.data;
-          hideWidgetOverlay();
           renderContent(msg.data);
         } else if (msg.type === 'mode') {
           if (msg.mode !== 'normal') hideWidgetOverlay();
@@ -796,7 +808,7 @@
           if (msg.payload && msg.payload.isWebsite && (msg.payload.obsWidgetUrl || msg.payload.obsWidgetPath)) {
             _widgetTransitionOut = msg.payload.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
             if (msg.payload.obsWidgetVisible === false) hideWidgetOverlay();
-            else showWidgetOverlay(msg.payload.obsWidgetPath || msg.payload.obsWidgetUrl, msg.payload.obsWidgetLayout || null);
+            else showWidgetOverlay(msg.payload.obsWidgetUrl || msg.payload.obsWidgetPath, msg.payload.obsWidgetLayout || null);
           }
         }
       };

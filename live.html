@@ -75,8 +75,8 @@
   <canvas id="live-canvas" style="position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:1;will-change:transform;"></canvas>
   <canvas id="live-text-canvas" style="position:absolute;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2;display:block;will-change:transform;"></canvas>
   <div id="widget-overlay" style="position:absolute;inset:0;z-index:110;display:none;pointer-events:none;opacity:0;transition:opacity 0.22s ease;">
-    <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
-    <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;"></iframe>
+    <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
+    <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
   </div>
   <div id="lower-third-overlay" style="display:none;position:absolute;bottom:0;left:0;width:100%;z-index:10;box-sizing:border-box;overflow:hidden;"></div>
   <script>
@@ -104,7 +104,13 @@
       const incoming = outgoing === widgetFrameA ? widgetFrameB : widgetFrameA;
       _widgetActiveFrame = incoming;
       const l = layout || { x: 0, y: 0, w: 1, h: 1 };
-      widgetOverlay.style.opacity = '0';
+      const switchDelay = outgoing && outgoing !== incoming ? (_widgetTransitionOut === 'fade' ? 220 : 260) : 0;
+      if (outgoing && outgoing !== incoming) {
+        if (_widgetTransitionOut === 'slide-up') outgoing.style.transform = 'translateY(-12%)';
+        else if (_widgetTransitionOut === 'slide-down') outgoing.style.transform = 'translateY(12%)';
+        else outgoing.style.opacity = '0';
+      }
+      if (!outgoing || outgoing === incoming) widgetOverlay.style.opacity = '0';
       widgetOverlay.style.display = 'block';
       incoming.style.left = (l.x * 100) + '%';
       incoming.style.top = (l.y * 100) + '%';
@@ -118,15 +124,20 @@
         incoming.style.opacity = '1';
         requestAnimationFrame(() => { if (token === _widgetLoadToken) widgetOverlay.style.opacity = '1'; });
       };
-      incoming.src = resolveWidgetUrl(url) || 'about:blank';
+      if (switchDelay) {
+        setTimeout(() => {
+          if (token !== _widgetLoadToken) return;
+          incoming.src = resolveWidgetUrl(url) || 'about:blank';
+        }, switchDelay);
+      } else {
+        incoming.src = resolveWidgetUrl(url) || 'about:blank';
+      }
     }
 
     function resolveWidgetUrl(url) {
       if (!url) return '';
       if (/^https?:\/\//.test(url) || /^data:/.test(url)) return url;
       if (/^file:\/\//.test(url)) {
-        const m = url.match(/\/obs\/(timers|lowerthirds|alerts)\/1\/index\.html(?:\?[^#]*)?$/i);
-        if (m) return url.replace(/^file:\/\/\/?[A-Za-z]:/i, '');
         return url;
       }
       if (/^[A-Za-z]:[\\/]/.test(url)) {
@@ -150,7 +161,6 @@
       } else {
         activeFrame.style.opacity = '0';
       }
-      widgetOverlay.style.opacity = '0';
       setTimeout(() => {
         widgetOverlay.style.display = 'none';
         widgetFrameA.style.display = 'none';
@@ -161,6 +171,7 @@
         widgetFrameB.style.transform = '';
         widgetFrameA.src = 'about:blank';
         widgetFrameB.src = 'about:blank';
+        widgetOverlay.style.opacity = '0';
       }, tout === 'fade' ? 220 : 260);
     }
 
@@ -2182,7 +2193,6 @@
 
       // Non-website: update content and disable mirror
       window.currentContent = data;
-      hideWidgetOverlay();
 
       // Respect current mode: keep screen black or cleared if those modes are active
       if (isBlackMode) {

@@ -255,7 +255,7 @@
   width: 100%;
   height: 100%;
   background-color: #1c1c1c;
-  background-image: url(https://cdn.flaresystems.org/assets/textures/patterns/camo.png);
+  background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"%3E%3Cpath d="M0 40h20l10-10h20L40 60H20z" fill="%23ffffff" fill-opacity=".08"/%3E%3Cpath d="M40 0h20l20 20v20L50 20z" fill="%23ffffff" fill-opacity=".05"/%3E%3Cpath d="M10 70l20-20h15L20 80z" fill="%23ffffff" fill-opacity=".06"/%3E%3C/svg%3E');
   -webkit-animation-name: moveBg1;
           animation-name: moveBg1;
   -webkit-animation-duration: 20s;
@@ -277,7 +277,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   background-color: #fa8231;
-  background-image: url(https://cdn.flaresystems.org/assets/textures/patterns/hex.png);
+  background-image: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56"%3E%3Cg fill="%23ffffff" fill-opacity=".12"%3E%3Cpath d="M24 0l20 11.5v23L24 46 4 34.5v-23z"/%3E%3C/g%3E%3C/svg%3E');
   -webkit-text-fill-color: transparent;
   -webkit-background-clip: text;
           background-clip: text;
