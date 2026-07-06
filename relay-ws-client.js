@@ -38,6 +38,7 @@ class RelayClient extends EventEmitter {
       if (result.ok) {
         this.sessionId = result.session_id;
         console.log('[relay] Registered session:', this.sessionId);
+        await this.loadRelayConfig().catch(() => {});
         
         if (this.useWebSocket) {
           this.connectWebSocket();
@@ -55,6 +56,20 @@ class RelayClient extends EventEmitter {
       console.error('[relay] Registration error:', err);
       this.emit('error', err);
       return false;
+    }
+  }
+
+  async loadRelayConfig() {
+    try {
+      const cfg = await this.phpRequest('GET', '/config.php', null, 5000, true);
+      if (cfg && cfg.ws_url) {
+        this.wsUrl = cfg.ws_url;
+        console.log('[relay] Loaded websocket URL from backend:', this.wsUrl);
+      }
+      return cfg;
+    } catch (err) {
+      console.warn('[relay] Failed to load relay config, using default websocket URL:', err.message);
+      return null;
     }
   }
 
