@@ -9590,6 +9590,10 @@ function drawObsWidgetNative(ctx, media, w, h) {
 // Website mirror — capturePage polling state
 let _mirrorActive = false;
 let _mirrorTimer = null;
+const WEBSITE_MIRROR_FPS = 24;
+const WEBSITE_MIRROR_FRAME_INTERVAL_MS = 1000 / WEBSITE_MIRROR_FPS;
+let _websiteVideoFillIndex = null;
+let _websiteMirrorCrop = null;
 
 // Preview webview dom-ready tracking (for loading URL into interactive preview)
 let _websiteWvReady = false;
@@ -9636,6 +9640,10 @@ function hideWebsiteLivePanel(stopMirror = false) {
   if (panel) panel.classList.remove('visible');
   _websiteActiveMediaIndex = null;
   _websiteIsLive = false;
+  _websiteVideoFillIndex = null;
+  _websiteMirrorCrop = null;
+  const videoFillButton = document.getElementById('website-vid-fullscreen-btn');
+  if (videoFillButton) videoFillButton.classList.remove('active');
   // Destroy the page — navigate to blank so video/audio stops completely,
   // just like any other content type when it goes offline.
   if (wv) {
@@ -9678,13 +9686,26 @@ function startWebsiteMirror() {
   _mirrorActive = true;
   const capture = async () => {
     if (!_mirrorActive) return;
+    const frameStartedAt = Date.now();
     try {
-      const img = await wv.capturePage();
+      // Video fill is output-only: crop the captured live frame without changing
+      // the interactive website shown in Liturgia's right-hand preview.
+      const crop = _websiteVideoFillIndex !== null && _websiteMirrorCrop
+        ? { ..._websiteMirrorCrop }
+        : null;
+      const img = _websiteVideoFillIndex === null
+        ? await wv.capturePage()
+        : crop
+          ? await wv.capturePage(crop)
+          : null;
       if (_mirrorActive && img && img.getSize().width > 0) {
         ipcRenderer.send('mirror-frame', img.toJPEG(75));
       }
     } catch (_) {}
-    if (_mirrorActive) _mirrorTimer = setTimeout(capture, 66); // restore less aggressive polling
+    if (_mirrorActive) {
+      const elapsed = Date.now() - frameStartedAt;
+      _mirrorTimer = setTimeout(capture, Math.max(0, WEBSITE_MIRROR_FRAME_INTERVAL_MS - elapsed));
+    }
   };
   _mirrorTimer = setTimeout(capture, 0);
 }
@@ -9820,9 +9841,8 @@ function initWebsitePanels() {
     });
   }
   // Detects video elements on the loaded page and shows a floating button.
-  // Clicking it injects a fixed overlay into the webview that moves the active
-  // video to fill 100vw×100vh (= 1920×1080 in webview-space, scaled to canvas).
-  let _vidFillActive = false;
+  // Video fill crops only the captured output frame; the interactive preview
+  // webview remains untouched.
   let _vidList = []; // [{index, w, h, src, paused}]
 
   const vidWrap  = document.getElementById('website-vid-picker-wrap');
@@ -9867,6 +9887,7 @@ function initWebsitePanels() {
       }
       vidWrap.style.display = '';
       if (vidBadge) vidBadge.textContent = vids.length;
+      if (_websiteVideoFillIndex !== null) refreshVideoFillCrop(_websiteVideoFillIndex);
     }).catch(() => {
       _vidList = [];
       if (vidWrap) vidWrap.style.display = 'none';
@@ -9876,7 +9897,7 @@ function initWebsitePanels() {
   const buildDropdown = () => {
     if (!vidDrop) return;
     vidDrop.innerHTML = '';
-    if (_vidFillActive) {
+    if (_websiteVideoFillIndex !== null) {
       const exit = document.createElement('div');
       exit.className = 'exit-row';
       exit.textContent = 'X  Exit video fill';
@@ -9896,55 +9917,47 @@ function initWebsitePanels() {
       item.appendChild(meta);
       item.addEventListener('click', () => {
         vidDrop.style.display = 'none';
-        if (_vidFillActive) exitVidFill(() => enterVidFill(v.index));
+        if (_websiteVideoFillIndex !== null) exitVidFill(() => enterVidFill(v.index));
         else enterVidFill(v.index);
       });
       vidDrop.appendChild(item);
     });
   };
 
+  const refreshVideoFillCrop = async (vidIndex) => {
+    try {
+      const bounds = await wv.executeJavaScript(`
+        (function(idx) {
+          const all = [...document.querySelectorAll('video')];
+          const vid = all[idx] || all.find(v => !v.paused) || all[0];
+          if (!vid) return null;
+          const r = vid.getBoundingClientRect();
+          const x = Math.max(0, Math.floor(r.left));
+          const y = Math.max(0, Math.floor(r.top));
+          const right = Math.min(window.innerWidth, Math.ceil(r.right));
+          const bottom = Math.min(window.innerHeight, Math.ceil(r.bottom));
+          if (right - x < 2 || bottom - y < 2) return null;
+          return { x, y, width: right - x, height: bottom - y };
+        })(${vidIndex})
+      `);
+      if (_websiteVideoFillIndex === vidIndex) _websiteMirrorCrop = bounds || null;
+    } catch (_) {
+      if (_websiteVideoFillIndex === vidIndex) _websiteMirrorCrop = null;
+    }
+  };
+
   const enterVidFill = (vidIndex) => {
-    _vidFillActive = true;
+    _websiteVideoFillIndex = vidIndex;
+    _websiteMirrorCrop = null;
     if (vidBtn) vidBtn.classList.add('active');
-    wv.executeJavaScript(`
-      (function(idx) {
-        if (document.getElementById('_liturgia_vid_overlay')) return;
-        const all = [...document.querySelectorAll('video')];
-        const vid = all[idx] || all.find(v => !v.paused) || all[0];
-        if (!vid) return;
-        const overlay = document.createElement('div');
-        overlay.id = '_liturgia_vid_overlay';
-        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:2147483647;display:flex;align-items:center;justify-content:center;';
-        const placeholder = document.createElement('span');
-        placeholder.id = '_liturgia_vid_placeholder';
-        placeholder.style.display = 'none';
-        vid.parentNode.insertBefore(placeholder, vid);
-        overlay._vidOrigStyle = vid.getAttribute('style') || '';
-        vid.style.cssText = 'width:100%;height:100%;max-width:100%;max-height:100%;object-fit:contain;display:block;background:#000;';
-        overlay.appendChild(vid);
-        document.documentElement.appendChild(overlay);
-      })(${vidIndex})
-    `).catch(() => {});
+    refreshVideoFillCrop(vidIndex);
   };
 
   const exitVidFill = (callback) => {
-    _vidFillActive = false;
+    _websiteVideoFillIndex = null;
+    _websiteMirrorCrop = null;
     if (vidBtn) vidBtn.classList.remove('active');
-    wv.executeJavaScript(`
-      (function() {
-        const overlay = document.getElementById('_liturgia_vid_overlay');
-        if (!overlay) return;
-        const vid = overlay.querySelector('video');
-        const placeholder = document.getElementById('_liturgia_vid_placeholder');
-        if (vid) {
-          vid.setAttribute('style', overlay._vidOrigStyle || '');
-          if (placeholder && placeholder.parentNode) placeholder.parentNode.insertBefore(vid, placeholder);
-          else document.body.appendChild(vid);
-        }
-        if (placeholder) placeholder.remove();
-        overlay.remove();
-      })()
-    `).then(() => { if (callback) callback(); }).catch(() => { if (callback) callback(); });
+    if (callback) callback();
   };
 
   if (vidBtn) {
@@ -9963,7 +9976,7 @@ function initWebsitePanels() {
 
   // Check for video after each page load; reset fill state on navigation
   wv.addEventListener('did-finish-load', () => {
-    if (_vidFillActive) { _vidFillActive = false; if (vidBtn) vidBtn.classList.remove('active'); }
+    if (_websiteVideoFillIndex !== null) exitVidFill();
     checkForVideo();
   });
   wv.addEventListener('did-fail-load', checkForVideo);
@@ -9977,7 +9990,7 @@ function initWebsitePanels() {
   };
   wv.addEventListener('did-finish-load', startVidPoll);
   wv.addEventListener('did-navigate', () => {
-    if (_vidFillActive) exitVidFill();
+    if (_websiteVideoFillIndex !== null) exitVidFill();
     startVidPoll();
   });
 

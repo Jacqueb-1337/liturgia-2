@@ -74,6 +74,8 @@
   <img id="live-gif-bg" style="position:absolute;top:0;left:0;width:100vw;height:100vh;object-fit:cover;display:none;z-index:0;" alt="">
   <canvas id="live-canvas" style="position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:1;will-change:transform;"></canvas>
   <canvas id="live-text-canvas" style="position:absolute;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:2;display:block;will-change:transform;"></canvas>
+  <img id="live-mirror-img" alt=""
+       style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:100;display:none;">
   <div id="widget-overlay" style="position:absolute;inset:0;z-index:110;display:none;pointer-events:none;opacity:0;transition:opacity 0.22s ease;">
     <iframe id="widget-frame-a" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
     <iframe id="widget-frame-b" src="about:blank" style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;background:transparent;transform-origin:top left;opacity:0;transition:opacity 0.24s ease, transform 0.24s ease;"></iframe>
@@ -91,6 +93,21 @@
     const ctx = bgCtx;
 
     // Website mirror — receives JPEG frames from preview webview via IPC
+    const mirrorImg = document.getElementById('live-mirror-img');
+    let _mirrorBlobUrl = null;
+    let _mirrorEnabled = false;
+
+    function showMirrorVideo() { // keep old name so existing transition call sites work
+      mirrorImg.style.display = 'block';
+    }
+    function hideMirrorVideo() {
+      mirrorImg.style.display = 'none';
+      mirrorImg.src = '';
+      if (_mirrorBlobUrl) {
+        URL.revokeObjectURL(_mirrorBlobUrl);
+        _mirrorBlobUrl = null;
+      }
+    }
     const widgetOverlay = document.getElementById('widget-overlay');
     const widgetFrameA = document.getElementById('widget-frame-a');
     const widgetFrameB = document.getElementById('widget-frame-b');
@@ -2184,15 +2201,28 @@
       // so clear/black modes can fall back to the last verse/song content underneath.
       if (data && data.isWebsite) {
         if (data.obsWidgetUrl || data.obsWidgetPath) {
+          _mirrorEnabled = false;
+          hideMirrorVideo();
           _widgetTransitionOut = data.obsWidgetTransitionOut || _widgetTransitionOut || 'fade';
           if (data.obsWidgetVisible === false) hideWidgetOverlay();
           else showWidgetOverlay(data.obsWidgetPath || data.obsWidgetUrl, data.obsWidgetLayout);
-        } else hideWidgetOverlay();
+        } else {
+          hideWidgetOverlay();
+          isClearMode = false;
+          isBlackMode = false;
+          _mirrorEnabled = true;
+          const fadeDuration = (window.currentContent && window.currentContent.transitionIn)
+            ? window.currentContent.transitionIn.duration
+            : 0.4;
+          _fadeMirrorIn(fadeDuration);
+        }
         return;
       }
 
       // Non-website: update content and disable mirror
       window.currentContent = data;
+      _mirrorEnabled = false;
+      hideMirrorVideo();
 
       // Respect current mode: keep screen black or cleared if those modes are active
       if (isBlackMode) {
@@ -2271,6 +2301,22 @@
 
     // New unified mode handler
     ipcRenderer.on('set-live-mode', (event, mode) => setLiveMode(mode));
+
+    // Receive website screenshots captured by the interactive preview webview.
+    ipcRenderer.on('mirror-frame', (event, jpegBuffer) => {
+      // A queued frame must not bring the website back after another item went live.
+      if (!_mirrorEnabled) return;
+      const previousUrl = _mirrorBlobUrl;
+      _mirrorBlobUrl = URL.createObjectURL(new Blob([jpegBuffer], { type: 'image/jpeg' }));
+      mirrorImg.src = _mirrorBlobUrl;
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      if (mirrorImg.style.display === 'none') showMirrorVideo();
+    });
+
+    ipcRenderer.on('website-mirror-stop', () => {
+      _mirrorEnabled = false;
+      hideMirrorVideo();
+    });
 
     // Lower thirds overlay
     ipcRenderer.on('update-lower-third', (event, data) => {

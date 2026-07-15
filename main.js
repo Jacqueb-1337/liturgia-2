@@ -3428,6 +3428,9 @@ ipcMain.on('mirror-frame', (event, jpegBuffer) => {
   for (const win of liveWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('mirror-frame', jpegBuffer);
   }
+  for (const ns of displayNetServers.values()) {
+    if (ns.server) broadcastMirrorFrameToDisplayClients(ns, jpegBuffer);
+  }
 });
 
 // Tell all live windows to hide the mirror (e.g. switching to another item)
@@ -3435,6 +3438,7 @@ ipcMain.on('website-mirror-stop', () => {
   for (const win of liveWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('website-mirror-stop');
   }
+  broadcastToAllNetDisplays({ type: 'mirror-stop' });
 });
 
 // Legacy — no-ops so no errors if old sends arrive
@@ -3533,24 +3537,24 @@ ipcMain.on('display-setting-changed', (event, data) => {
 // ── Network Display WebSocket Server ────────────────────────────────────────
 
 /**
- * Encode a text string as a WebSocket frame (server→client, unmasked, opcode 0x1).
+ * Encode a text or binary WebSocket frame (server→client, unmasked).
  */
-function encodeWsFrame(data) {
+function encodeWsFrame(data, opcode = 0x1) {
   const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
   const len = payload.length;
   let header;
   if (len < 126) {
     header = Buffer.allocUnsafe(2);
-    header[0] = 0x81; // FIN + text
+    header[0] = 0x80 | opcode;
     header[1] = len;
   } else if (len < 65536) {
     header = Buffer.allocUnsafe(4);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 126;
     header.writeUInt16BE(len, 2);
   } else {
     header = Buffer.allocUnsafe(10);
-    header[0] = 0x81;
+    header[0] = 0x80 | opcode;
     header[1] = 127;
     header.writeUInt32BE(Math.floor(len / 0x100000000), 2);
     header.writeUInt32BE(len >>> 0, 6);
@@ -3609,6 +3613,21 @@ function broadcastToDisplayClients(ns, obj) {
   for (const socket of [...ns.clients]) {
     try { socket.write(frame); }
     catch (_) { try { socket.destroy(); } catch (__) {} ns.clients.delete(socket); }
+  }
+}
+
+function broadcastMirrorFrameToDisplayClients(ns, jpegBuffer) {
+  if (!ns.clients.size) return;
+  const frame = encodeWsFrame(Buffer.from(jpegBuffer), 0x2);
+  for (const socket of [...ns.clients]) {
+    try {
+      // Drop frames for a slow client instead of accumulating visible lag.
+      if (socket.writableLength > frame.length * 2) continue;
+      socket.write(frame);
+    } catch (_) {
+      try { socket.destroy(); } catch (__) {}
+      ns.clients.delete(socket);
+    }
   }
 }
 

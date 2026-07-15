@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.6 - 2026-07-15
+
+- fix: restore website live output with 24 FPS output-only video fill and network display mirroring
+
+
 ## 6.1.5 - 2026-07-05
 
 - fix: widget toggle restore and live selection precedence
