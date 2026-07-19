@@ -1,0 +1,44 @@
+name: Temporary ChatGPT source export
+
+on:
+  push:
+    branches:
+      - chatgpt-liturgia-asset-export-20260719
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create source archive
+        run: zip -q -r liturgia-source.zip . -x '.git/*' 'liturgia-source.zip'
+
+      - name: Upload source archive
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: liturgia-source-export
+          path: liturgia-source.zip
+          retention-days: 1
+          compression-level: 0
+
+      - name: Publish temporary artifact metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: |
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "[temporary] ChatGPT Liturgia source export $GITHUB_RUN_ID" \
+            --body "artifact_id=$ARTIFACT_ID
+artifact_url=$ARTIFACT_URL
+run_id=$GITHUB_RUN_ID
+branch=$GITHUB_REF_NAME"
