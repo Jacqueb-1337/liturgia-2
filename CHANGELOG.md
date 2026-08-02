@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.8 - 2026-08-02
+
+- feat: add offline license cache and desktop account access
+
+
 ## 6.1.7 - 2026-08-02
 
 - fix: keep cloud relay state and mobile sessions available after websocket fallback

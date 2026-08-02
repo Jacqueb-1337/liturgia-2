@@ -795,6 +795,7 @@
   <div class="settings-container">
     <div class="sidebar">
       <button class="active" data-panel="general">General</button>
+      <button data-panel="account">Account Access</button>
       <button data-panel="display">Display</button>
       <button data-panel="ai">Speech Recognition</button>
       <button data-panel="about">About</button>
@@ -818,6 +819,35 @@
         </div>
         <button class="save-settings btn" data-panel="general">Save</button>
         <span class="save-status" data-panel="general"></span>
+      </div>
+      <!-- Authenticated account management mirrors the website token/delegation controls. -->
+      <div class="settings-panel" id="panel-account">
+        <h2>Account Access</h2>
+        <p id="account-access-status" class="muted-text">Checking sign-in status…</p>
+
+        <div id="account-access-content" style="display:none">
+          <div class="form-row">
+            <label>Tokens & Devices <small id="account-token-count" class="muted-text"></small></label>
+            <div id="account-token-list" class="account-box"></div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+              <input id="account-token-label" class="input" placeholder="Label (for example, Home laptop)" style="flex:1" />
+              <button id="account-create-token" class="btn">Create Token</button>
+            </div>
+            <textarea id="account-created-token" class="input" readonly placeholder="New tokens appear here once. Copy and store them safely." style="display:none;margin-top:8px;width:100%;min-height:58px"></textarea>
+            <button id="account-copy-created-token" class="btn" style="display:none;margin-top:6px">Copy New Token</button>
+          </div>
+
+          <div class="form-row" style="margin-top:22px">
+            <label>Delegated Email Access <small id="account-delegate-count" class="muted-text"></small></label>
+            <div id="account-delegate-list" class="account-box"></div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+              <input id="account-delegate-email" class="input" type="email" placeholder="name@example.com" style="flex:1" />
+              <button id="account-add-delegate" class="btn">Add Email</button>
+            </div>
+            <p class="muted-text" style="margin:8px 0 0">A delegated address can request its own token and will open this same account. Up to 10 addresses can share an account.</p>
+          </div>
+        </div>
+        <button id="account-refresh-access" class="btn" style="margin-top:12px">Refresh Account Access</button>
       </div>
       <div class="settings-panel" id="panel-display">
         <h2>Display Settings</h2>

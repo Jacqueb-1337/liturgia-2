@@ -43,6 +43,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
+const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib/offlineLicenseCache');
 const RemoteServer = require('./remote-server');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -190,13 +191,18 @@ ipcMain.handle('secure-get-token', async () => {
 
 ipcMain.handle('secure-set-token', async (event, token) => {
   try {
-    if (keytar) { await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token); return true; }
+    if (keytar) {
+      await keytar.setPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT, token);
+      await clearOfflineLicenseCache();
+      return true;
+    }
     // fallback: write to settings.json
     const settingsFilePath = path.join(getUserDataDir(app), 'settings.json');
     let settings = {};
     try { const txt = await fs.promises.readFile(settingsFilePath, 'utf8'); settings = JSON.parse(txt); } catch {}
     settings.auth = settings.auth || {};
     settings.auth.token = token;
+    delete settings.auth.licenseCache;
     // Write settings file safely
     try { await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error('Failed to write token to settings', e); return false; }
     return true;
@@ -205,11 +211,18 @@ ipcMain.handle('secure-set-token', async (event, token) => {
 
 ipcMain.handle('secure-delete-token', async () => {
   try {
-    if (keytar) { await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT); return true; }
+    if (keytar) {
+      await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+      await clearOfflineLicenseCache();
+      return true;
+    }
     const settingsFilePath = path.join(getUserDataDir(app), 'settings.json');
     let settings = {};
     try { const txt = await fs.promises.readFile(settingsFilePath, 'utf8'); settings = JSON.parse(txt); } catch {}
-    if (settings.auth) delete settings.auth.token;
+    if (settings.auth) {
+      delete settings.auth.token;
+      delete settings.auth.licenseCache;
+    }
     // Write settings file safely
     try { await fs.promises.writeFile(settingsFilePath, JSON.stringify(settings, null, 2), 'utf8'); } catch (e) { console.error('Failed to delete token from settings', e); return false; }
     return true;
@@ -1210,6 +1223,67 @@ ipcMain.handle('update-settings', async (event, patch) => {
     mainWindow.webContents.send('settings-updated', { keybinds: patch.keybinds });
   }
   return result;
+});
+
+// Persist only server-confirmed, active subscriptions for offline use. The
+// raw token is never placed in this cache; a SHA-256 fingerprint binds it to
+// the exact token that was validated successfully.
+function updateAuthSettings(patch) {
+  _settingsUpdateQueue = _settingsUpdateQueue.then(async () => {
+    let current = {};
+    try { current = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (e) {}
+    current.auth = current.auth || {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete current.auth[key];
+      else if (value !== undefined) current.auth[key] = value;
+    }
+    await writeSettingsSafe(current);
+    return current;
+  }).catch((e) => { console.error('updateAuthSettings error:', e); });
+  return _settingsUpdateQueue;
+}
+
+async function readStoredAuthToken() {
+  try {
+    if (keytar) {
+      const token = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT);
+      if (token) return token;
+    }
+  } catch (e) { console.warn('readStoredAuthToken keytar error:', e && e.message); }
+  try {
+    const settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
+    return settings && settings.auth && settings.auth.token ? settings.auth.token : null;
+  } catch (e) { return null; }
+}
+
+async function clearOfflineLicenseCache() {
+  await updateAuthSettings({ licenseCache: null });
+}
+
+ipcMain.handle('offline-license-cache:save', async (event, token, status) => {
+  try {
+    // A renderer may only cache a status for the token currently saved by the
+    // app; entering an arbitrary token cannot create an offline entitlement.
+    if (!token || token !== await readStoredAuthToken()) return false;
+    const cache = createOfflineLicenseCache(token, status);
+    if (!cache) return false;
+    await updateAuthSettings({ licenseCache: cache });
+    return true;
+  } catch (e) {
+    console.error('offline-license-cache:save error:', e);
+    return false;
+  }
+});
+
+ipcMain.handle('offline-license-cache:get', async (event, token) => {
+  try {
+    if (!token || token !== await readStoredAuthToken()) return null;
+    const settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8'));
+    return restoreOfflineLicenseCache(settings && settings.auth && settings.auth.licenseCache, token);
+  } catch (e) {
+    console.warn('offline-license-cache:get error:', e && e.message);
+    return null;
+  }
 });
 
 async function persistAiSettings(patch = {}) {

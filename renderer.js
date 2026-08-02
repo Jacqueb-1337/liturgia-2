@@ -4120,6 +4120,9 @@ async function createSetupModal() {
       const result = await validateTokenAndActivate(token, server);
       if (result && result.ok) {
         const saved = await saveToken(token);
+        // The first validation happens before a newly entered token is saved.
+        // Cache its confirmed subscription only after persistence succeeds.
+        if (saved && result.status) await cacheVerifiedLicenseStatus(token, result.status);
         // Persist the server we used so restarts keep it
         try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
         if (!saved) {
@@ -4190,11 +4193,38 @@ function decodeJwtPayload(token) {
   } catch (e) { return null; }
 }
 
+async function cacheVerifiedLicenseStatus(token, status) {
+  // Cache only an active status returned by the license server. The main
+  // process binds it to a token fingerprint rather than storing the token.
+  try {
+    if (status && status.source === 'server' && status.active) {
+      await ipcRenderer.invoke('offline-license-cache:save', token, status);
+    }
+  } catch (e) { console.warn('offline license cache save failed', e); }
+}
+
+async function restoreOfflineLicenseStatus(token, failedReason) {
+  try {
+    const status = await ipcRenderer.invoke('offline-license-cache:get', token);
+    if (!status) return null;
+    status.reason = failedReason;
+    ipcRenderer.send('license-status-update', status);
+    try { setFounderFixed(!!status.founder); } catch (e) {}
+    console.warn('Using saved offline license through ' + new Date(status.offlineUntil).toISOString() + ' after ' + failedReason);
+    return { ok: true, active: true, offline: true, status };
+  } catch (e) {
+    console.warn('offline license cache restore failed', e);
+    return null;
+  }
+}
+
 async function validateTokenAndActivate(token, serverUrl) {
   try {
     const settings = await ipcRenderer.invoke('load-settings') || {};
     const server = (serverUrl || settings.licenseServer || '').replace(/\/$/, '');
     if (!server) {
+      const offline = await restoreOfflineLicenseStatus(token, 'no-server');
+      if (offline) return offline;
       ipcRenderer.send('license-status-update', { active: false, reason: 'no-server' });
       return { ok: false, reason: 'no-server' };
     }
@@ -4232,6 +4262,7 @@ async function validateTokenAndActivate(token, serverUrl) {
       ipcRenderer.send('license-status-update', j);
       // Update fixed founder immediately in this renderer (avoid timing race)
       try { setFounderFixed(!!j.founder); } catch(e) { /* ignore */ }
+      await cacheVerifiedLicenseStatus(token, j);
       // Accept token if the server accepted it (200), even if not currently active.
       return { ok: true, active: !!j.active, status: j };
     }
@@ -4254,6 +4285,7 @@ async function validateTokenAndActivate(token, serverUrl) {
                   try { status.source = status.source || 'server'; } catch(e) {}
                   ipcRenderer.send('license-status-update', status);
                   try { setFounderFixed(!!status.founder); } catch(e) {}
+                  await cacheVerifiedLicenseStatus(token, status);
                   return { ok: true, active: !!aj.status.active, status };
                 }
               }
@@ -4282,10 +4314,15 @@ async function validateTokenAndActivate(token, serverUrl) {
       } catch(e) { /* ignore */ }
     }
 
-    ipcRenderer.send('license-status-update', { active: false, reason: 'http-' + res.status });
-    return { ok: false, reason: 'http-' + res.status };
+    const failedReason = 'http-' + (res && res.status ? res.status : 'unavailable');
+    const offline = await restoreOfflineLicenseStatus(token, failedReason);
+    if (offline) return offline;
+    ipcRenderer.send('license-status-update', { active: false, reason: failedReason });
+    return { ok: false, reason: failedReason };
   } catch (e) {
     console.error('validate error', e);
+    const offline = await restoreOfflineLicenseStatus(token, 'error');
+    if (offline) return offline;
     ipcRenderer.send('license-status-update', { active: false, reason: 'error', error: e.message });
     return { ok: false, reason: 'error', error: e.message };
   }

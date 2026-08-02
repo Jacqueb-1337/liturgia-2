@@ -38,6 +38,14 @@ async function getSavedToken() {
   }
 }
 
+function formatLicenseExpiry(status) {
+  const value = status && (status.offlineUntil || status.expires_at);
+  if (value === null || value === undefined || value === '') return 'n/a';
+  let milliseconds = typeof value === 'number' ? (value < 100000000000 ? value * 1000 : value) : Number(value);
+  if (!Number.isFinite(milliseconds)) milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toLocaleString() : 'n/a';
+}
+
 // Sidebar navigation logic
 document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.sidebar button');
@@ -212,7 +220,7 @@ window.addEventListener('DOMContentLoaded', () => {
               if (purchaseBtn) purchaseBtn.style.display = 'none';
             } else {
               if (license.active) {
-                si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${license.expires_at ? new Date(license.expires_at * 1000).toLocaleString() : 'n/a'}`;
+                si.textContent = `Plan: ${license.plan || (license.user_row ? license.user_row.plan : 'unknown')} — Expires: ${formatLicenseExpiry(license)}${license.offline ? ' (verified offline)' : ''}`;
               } else {
                 si.textContent = `Not active (${license.reason || 'inactive'}). Watermark may be shown.`;
               }
@@ -1666,6 +1674,7 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       if (signOutBtn) signOutBtn.style.display = 'none';
       if (viewSubBtn) viewSubBtn.style.display = 'none';
       if (purchaseBtn) { purchaseBtn.style.display = ''; purchaseBtn.disabled = false; purchaseBtn.title = ''; }
+      refreshAccountAccess();
     });
   }
 
@@ -1818,7 +1827,7 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       }
       ai.textContent = displayEmail || 'Signed in';
       if (status.active) {
-        si.textContent = `Plan: ${status.plan || (status.user_row ? status.user_row.plan : 'unknown')} — Expires: ${status.expires_at ? new Date(status.expires_at * 1000).toLocaleString() : 'n/a'}`;
+        si.textContent = `Plan: ${status.plan || (status.user_row ? status.user_row.plan : 'unknown')} — Expires: ${formatLicenseExpiry(status)}${status.offline ? ' (verified offline)' : ''}`;
       } else {
         si.textContent = `Not active (${status.reason || 'inactive'}).`;
       }
@@ -1847,6 +1856,194 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       if (purchaseBtn) { purchaseBtn.style.display = ''; purchaseBtn.disabled = false; purchaseBtn.title = ''; }
     }
   });
+
+// Account Access settings: require a saved token and keep network failures
+// readable. No account mutation is attempted while the service is unreachable.
+function setAccountAccessStatus(message, tone) {
+  const status = document.getElementById('account-access-status');
+  if (!status) return;
+  status.textContent = message;
+  status.style.color = tone === 'error' ? '#b42318' : (tone === 'success' ? '#157347' : 'var(--muted)');
+}
+
+function showAccountAccessContent(show) {
+  const content = document.getElementById('account-access-content');
+  if (content) content.style.display = show ? '' : 'none';
+}
+
+function accountAccessErrorMessage(error) {
+  if (error && error.code === 'no-token') return 'Sign in first to manage tokens and delegated email addresses.';
+  if (error && error.code === 'network') return 'Could not reach Liturgia. Your saved token remains unchanged, but account changes need a connection.';
+  if (error && error.code === 401) return 'Your saved token could not be authenticated right now. Account changes are disabled until it can be verified online.';
+  return (error && error.message) || 'Could not load account access. Please try again.';
+}
+
+async function getAccountAccessContext() {
+  const token = await getSavedToken();
+  if (!token) {
+    const error = new Error('Sign in first.'); error.code = 'no-token'; throw error;
+  }
+  const settings = await ipcRenderer.invoke('load-settings').catch(() => ({}));
+  const server = ((settings && settings.licenseServer) || 'https://jacqueb.me/liturgia').replace(/\/$/, '');
+  return { token, server };
+}
+
+async function accountApiRequest(path, options = {}) {
+  const { token, server } = await getAccountAccessContext();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const headers = { Authorization: 'Bearer ' + token };
+    const request = { method: options.method || 'GET', headers, signal: controller.signal };
+    if (options.form) {
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      request.body = new URLSearchParams(options.form).toString();
+    }
+    let response;
+    try {
+      response = await fetch(server + '/' + path, request);
+    } catch (cause) {
+      const error = new Error('Network request failed.'); error.code = 'network'; error.cause = cause; throw error;
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(body.error || ('Request failed (' + response.status + ').'));
+      error.code = response.status; error.body = body; throw error;
+    }
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function makeAccessRow(primaryText, secondaryText, actions) {
+  const row = document.createElement('div');
+  row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.alignItems = 'center'; row.style.gap = '8px'; row.style.padding = '7px 0';
+  const details = document.createElement('div');
+  const primary = document.createElement('div'); primary.style.fontWeight = '600'; primary.textContent = primaryText;
+  const secondary = document.createElement('div'); secondary.className = 'muted-text'; secondary.style.fontSize = '0.85em'; secondary.textContent = secondaryText || '';
+  details.appendChild(primary); details.appendChild(secondary);
+  const controls = document.createElement('div'); controls.style.display = 'flex'; controls.style.gap = '6px';
+  actions.forEach(action => {
+    const button = document.createElement('button'); button.className = 'btn'; button.textContent = action.label; button.onclick = action.onClick;
+    controls.appendChild(button);
+  });
+  row.appendChild(details); row.appendChild(controls);
+  return row;
+}
+
+function renderAccountTokens(tokens) {
+  const list = document.getElementById('account-token-list');
+  const count = document.getElementById('account-token-count');
+  if (!list) return;
+  if (count) count.textContent = '(' + tokens.length + ')';
+  list.textContent = '';
+  if (!tokens.length) { list.textContent = 'No active tokens.'; return; }
+  tokens.forEach(token => {
+    const created = token.created_at ? ('Created ' + new Date(token.created_at).toLocaleString()) : 'Created date unavailable';
+    list.appendChild(makeAccessRow(token.label || token.device || 'Unnamed device', created, [
+      { label: 'Copy', onClick: () => copyAccountToken(token.id) },
+      { label: 'Revoke', onClick: () => revokeAccountToken(token.id) }
+    ]));
+  });
+}
+
+function renderAccountDelegates(delegates, limit) {
+  const list = document.getElementById('account-delegate-list');
+  const count = document.getElementById('account-delegate-count');
+  if (!list) return;
+  if (count) count.textContent = '(' + delegates.length + '/' + (limit || 10) + ')';
+  list.textContent = '';
+  if (!delegates.length) { list.textContent = 'No delegated email addresses.'; return; }
+  delegates.forEach(delegate => {
+    const created = delegate.created_at ? ('Added ' + new Date(delegate.created_at).toLocaleString()) : '';
+    list.appendChild(makeAccessRow(delegate.delegate_email, created, [
+      { label: 'Remove', onClick: () => updateAccountDelegate('remove', delegate.delegate_email) }
+    ]));
+  });
+}
+
+async function refreshAccountAccess() {
+  setAccountAccessStatus('Checking account access…');
+  try {
+    const [tokenData, delegateData] = await Promise.all([
+      accountApiRequest('auth/list-tokens.php'),
+      accountApiRequest('auth/delegated-emails.php')
+    ]);
+    renderAccountTokens(tokenData.tokens || []);
+    renderAccountDelegates(delegateData.delegates || [], delegateData.limit || 10);
+    showAccountAccessContent(true);
+    setAccountAccessStatus('Account access is ready.', 'success');
+  } catch (error) {
+    showAccountAccessContent(false);
+    setAccountAccessStatus(accountAccessErrorMessage(error), 'error');
+  }
+}
+
+async function copyAccountToken(id) {
+  try {
+    const data = await accountApiRequest('auth/show-token.php?id=' + encodeURIComponent(id));
+    if (!data.token) throw new Error('The token could not be retrieved.');
+    await navigator.clipboard.writeText(data.token);
+    setAccountAccessStatus('Token copied to the clipboard.', 'success');
+  } catch (error) { setAccountAccessStatus(accountAccessErrorMessage(error), 'error'); }
+}
+
+async function revokeAccountToken(id) {
+  if (!confirm('Revoke this token? The device using it will need to sign in again.')) return;
+  try {
+    await accountApiRequest('auth/revoke-token.php', { method: 'POST', form: { id } });
+    setAccountAccessStatus('Token revoked.', 'success');
+    refreshAccountAccess();
+  } catch (error) { setAccountAccessStatus(accountAccessErrorMessage(error), 'error'); }
+}
+
+async function createAccountToken() {
+  const input = document.getElementById('account-token-label');
+  try {
+    const data = await accountApiRequest('auth/generate-token.php', { method: 'POST', form: { label: input ? input.value.trim() : '', device: 'Liturgia desktop settings' } });
+    if (!data.token) throw new Error('The server did not return a token.');
+    const output = document.getElementById('account-created-token');
+    const copy = document.getElementById('account-copy-created-token');
+    if (output) { output.value = data.token; output.style.display = ''; }
+    if (copy) copy.style.display = '';
+    if (input) input.value = '';
+    setAccountAccessStatus('New token created. Copy it before closing Settings.', 'success');
+    refreshAccountAccess();
+  } catch (error) { setAccountAccessStatus(accountAccessErrorMessage(error), 'error'); }
+}
+
+async function updateAccountDelegate(action, email) {
+  try {
+    const data = await accountApiRequest('auth/delegated-emails.php', { method: 'POST', form: { action, email } });
+    if (!data.ok) throw new Error(data.error || 'Delegated email update failed.');
+    const input = document.getElementById('account-delegate-email'); if (input) input.value = '';
+    setAccountAccessStatus(action === 'add' ? 'Delegated email added.' : 'Delegated email removed.', 'success');
+    refreshAccountAccess();
+  } catch (error) {
+    const messages = { invalid_email: 'Enter a valid email address.', owner_email: 'Your account email is already included.', already_delegated: 'That email belongs to another shared account.', email_has_own_account: 'That email already has its own account and cannot be merged.', delegate_limit: 'You can delegate access to up to 10 email addresses.' };
+    setAccountAccessStatus(messages[error && error.body && error.body.error] || accountAccessErrorMessage(error), 'error');
+  }
+}
+
+const accessRefreshButton = document.getElementById('account-refresh-access');
+if (accessRefreshButton) accessRefreshButton.addEventListener('click', refreshAccountAccess);
+const accessCreateTokenButton = document.getElementById('account-create-token');
+if (accessCreateTokenButton) accessCreateTokenButton.addEventListener('click', createAccountToken);
+const accessAddDelegateButton = document.getElementById('account-add-delegate');
+if (accessAddDelegateButton) accessAddDelegateButton.addEventListener('click', () => {
+  const input = document.getElementById('account-delegate-email');
+  updateAccountDelegate('add', input ? input.value.trim() : '');
+});
+const accessCopyCreatedButton = document.getElementById('account-copy-created-token');
+if (accessCopyCreatedButton) accessCopyCreatedButton.addEventListener('click', async () => {
+  const output = document.getElementById('account-created-token');
+  if (!output || !output.value) return;
+  try { await navigator.clipboard.writeText(output.value); setAccountAccessStatus('New token copied to the clipboard.', 'success'); }
+  catch (error) { setAccountAccessStatus('Could not copy the token. Select and copy it manually.', 'error'); }
+});
+refreshAccountAccess();
+
 // Load list of available local (imported) Bibles from userData
 async function loadLocalBibles() {
   const userData = await ipcRenderer.invoke('get-user-data-path');
