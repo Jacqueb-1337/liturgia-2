@@ -22,6 +22,8 @@ class RelayClient extends EventEmitter {
     this.lastMessageId = 0;
     this.heartbeatInterval = null;
     this.pendingState = null;
+    this.phpStateInFlight = null;
+    this.phpFallbackRetryTimer = null;
   }
 
   async register(deviceName = 'Liturgia Desktop') {
@@ -124,7 +126,9 @@ class RelayClient extends EventEmitter {
         
         if (code === 1008) {
           console.log('[RelayWS] Auth failed, falling back to PHP');
-          this.fallbackToPhp();
+          // Retrying the same rejected token only creates an endless reconnect
+          // loop. The HTTP relay remains a valid transport for this session.
+          this.fallbackToPhp({ retryWebSocket: false });
         } else {
           this.scheduleReconnect();
         }
@@ -155,7 +159,7 @@ class RelayClient extends EventEmitter {
     }, this.reconnectDelay);
   }
 
-  fallbackToPhp() {
+  fallbackToPhp({ retryWebSocket = true } = {}) {
     console.log('[RelayWS] Temporarily using PHP polling, will retry WebSocket');
     this.ws = null;
     if (this.reconnectTimer) {
@@ -164,13 +168,22 @@ class RelayClient extends EventEmitter {
     }
     this.startPhpPolling();
     
-    setTimeout(() => {
-      if (this.useWebSocket && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
-        console.log('[RelayWS] Retrying WebSocket connection...');
-        this.stopPhpPolling();
-        this.connectWebSocket();
-      }
-    }, 60000);
+    if (!retryWebSocket) {
+      this.useWebSocket = false;
+      console.warn('[RelayWS] WebSocket rejected this token; using PHP relay for this session');
+      return;
+    }
+
+    if (!this.phpFallbackRetryTimer) {
+      this.phpFallbackRetryTimer = setTimeout(() => {
+        this.phpFallbackRetryTimer = null;
+        if (this.useWebSocket && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+          console.log('[RelayWS] Retrying WebSocket connection...');
+          this.stopPhpPolling();
+          this.connectWebSocket();
+        }
+      }, 60000);
+    }
   }
 
   stopPhpPolling() {
@@ -276,10 +289,41 @@ class RelayClient extends EventEmitter {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(stateMessage));
       return true;
-    } else {
-      this.pendingState = stateMessage;
-      console.log('[RelayWS] WS not connected — state queued, will send on reconnect');
+    }
+
+    // poll.php serves relay_state, not relay_messages. Queueing state only for
+    // a future WebSocket reconnect left the phone controllable but empty.
+    this.pendingState = stateMessage;
+    console.log('[RelayWS] WS not connected; saving state through PHP fallback');
+    try {
+      await this.flushPendingStateViaPhp();
+      return true;
+    } catch (err) {
+      console.error('[RelayWS] PHP state update failed:', err.message);
       return false;
+    }
+  }
+
+  async flushPendingStateViaPhp() {
+    if (this.phpStateInFlight) return this.phpStateInFlight;
+
+    this.phpStateInFlight = (async () => {
+      while (this.pendingState && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+        const stateMessage = this.pendingState;
+        this.pendingState = null;
+        try {
+          await this.updateState(stateMessage.state);
+        } catch (err) {
+          if (!this.pendingState) this.pendingState = stateMessage;
+          throw err;
+        }
+      }
+    })();
+
+    try {
+      await this.phpStateInFlight;
+    } finally {
+      this.phpStateInFlight = null;
     }
   }
 
@@ -299,6 +343,11 @@ class RelayClient extends EventEmitter {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+
+    if (this.phpFallbackRetryTimer) {
+      clearTimeout(this.phpFallbackRetryTimer);
+      this.phpFallbackRetryTimer = null;
     }
     
     if (this.ws) {
@@ -396,7 +445,7 @@ class RelayClient extends EventEmitter {
   }
 
   updateState(state) {
-    return this.phpRequest('POST', '/state.php', {
+    return this.phpRequest('POST', '/update-state.php', {
       token: this.token,
       session_id: this.sessionId,
       state: state

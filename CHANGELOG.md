@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.7 - 2026-08-02
+
+- fix: keep cloud relay state and mobile sessions available after websocket fallback
+
+
 ## 6.1.6 - 2026-07-15
 
 - fix: restore website live output with 24 FPS output-only video fill and network display mirroring
