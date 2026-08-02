@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.9 - 2026-08-02
+
+- fix: load Settings after subscription controls
+
+
 ## 6.1.8 - 2026-08-02
 
 - feat: add offline license cache and desktop account access
