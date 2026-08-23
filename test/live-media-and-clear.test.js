@@ -19,6 +19,11 @@ describe('live clear and standalone media regressions', () => {
     expect(liveHtml).toContain('_isClearPresentation ? 0');
   });
 
+  test('Clear immediately erases the separate live text canvas', () => {
+    expect(liveHtml).toContain('if (_isClearPresentation) {');
+    expect(liveHtml).toContain('textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);');
+  });
+
   test('standalone media bypasses the old text/background crossfade and clears the text layer', () => {
     expect(liveHtml).toContain('if (!renderContent_content.isMedia && oldContent && !backgroundsEqual(oldContent, renderContent_content))');
     expect(liveHtml).toContain('textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);');

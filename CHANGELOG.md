@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.19 - 2026-08-23
+
+- fix: clear live text while retaining the unstyled background
+
+
 ## 6.1.18 - 2026-08-23
 
 - fix: make Clear render the unstyled configured background on preview and live outputs

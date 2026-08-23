@@ -969,6 +969,18 @@
       const _bgBlur         = _isClearPresentation ? 0 : (parseFloat(_rstGlobal.bgBlur) || 0);
       const _normScale      = height / 1080;
 
+      // Clear is delivered as a normal background-only presentation.  Text lives
+      // on its own canvas, so an empty payload must explicitly erase the last
+      // song/verse before the background-only render continues.
+      if (_isClearPresentation) {
+        if (currentAnimationFrameId) {
+          cancelAnimationFrame(currentAnimationFrameId);
+          currentAnimationFrameId = null;
+        }
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+        window.previousContent = null;
+      }
+
       // IMPORTANT: Store OLD content before updating currentRenderContent
       const oldContent = currentRenderContent ? { ...currentRenderContent } : null;
       
