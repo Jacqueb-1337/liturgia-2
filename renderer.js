@@ -10563,6 +10563,18 @@ async function displayMediaOnLive(media) {
     return;
   }
 
+  // A standalone media item replaces whatever was on screen.  Clear/black are
+  // output masks, not part of the media item, so remove either mask before
+  // sending the media payload.  Without this, live.html keeps the previous
+  // verse/song text layer while the new image is drawn underneath it.
+  const wasMasked = clearMode || blackMode;
+  _websiteIsLive = false;
+  clearMode = false;
+  blackMode = false;
+  if (window.clearButton) window.clearButton.classList.remove('active');
+  if (window.blackButton) window.blackButton.classList.remove('active');
+  if (wasMasked) ipcRenderer.send('set-live-mode', 'normal');
+
   // Stop animated background loops on both canvases before starting new media loops
   const _pc = document.getElementById('preview-canvas');
   const _lc = document.getElementById('live-canvas');

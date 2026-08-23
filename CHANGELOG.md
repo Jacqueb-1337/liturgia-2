@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.16 - 2026-08-23
+
+- fix: preserve the configured presentation background when Clear redraws the live output
+- fix: make standalone media replace the live text layer rather than render behind it
+
 ## 6.1.15 - 2026-08-23
 
 - feat: keep expandable live Preview and Live canvas thumbnails available on every compact Browser Remote tab

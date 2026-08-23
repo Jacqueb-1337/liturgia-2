@@ -377,12 +377,18 @@
       textCanvas.width = _newW;
       textCanvas.height = _newH;
       // Redraw based on current mode
-      if (isBlackMode || isClearMode) {
-        // Just fill with black on background and clear text layer
+      if (isBlackMode) {
+        // Black is the only mode that deliberately discards the background.
         bgCtx.fillStyle = '#000';
         bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
         drawLicenseWatermark();
         textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+      } else if (isClearMode) {
+        // Canvas resizing resets its pixels. Re-run Clear so its configured
+        // default background is restored instead of falling back to black.
+        // Temporarily clear the flag to bypass setLiveMode's repeat guard.
+        isClearMode = false;
+        setLiveMode('clear');
       } else if (window.currentContent) {
         // Re-render full composition so watermark sits under text
         refreshContentWithWatermark().catch(e => console.error('resize refresh failed', e));
@@ -981,7 +987,10 @@
       // If only the background changed, perform a background-only crossfade and keep text.
       // Exception: GIF backgrounds cannot be crossfaded through canvas drawImage (kills animation),
       // so skip the crossfade and let normal rendering call setGifBg instead.
-      if (oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
+      // Standalone media is a replacement, never a background transition for
+      // the previous verse/song.  In particular, do not draw the old text
+      // while an image is being made live.
+      if (!renderContent_content.isMedia && oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
         const newBgType = getBgMediaType(renderContent_content);
         const oldBgType = getBgMediaType(oldContent);
         if (newBgType === 'GIF') {
@@ -1029,6 +1038,11 @@
 
       // Handle media content
       if (renderContent_content.isMedia) {
+        // Verse/song text is painted on a separate canvas over the media
+        // canvas. Clear it before drawing media so double-clicking an image
+        // produces media-only output immediately.
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+        window.previousContent = renderContent_content;
         console.log('Rendering media - type:', renderContent_content.mediaType);
         const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(renderContent_content.mediaType);
         const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(renderContent_content.mediaType);
