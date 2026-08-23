@@ -3384,21 +3384,47 @@ ipcMain.handle('cancel-update-download', async (event, { file }) => {
   } catch (e) { return { ok:false, error: String(e) }; }
 });
 
-// Run the downloaded installer (spawn and quit app)
+// Run the downloaded installer after this Electron process has exited.  Starting
+// NSIS first races its "close Liturgia" check against our still-open windows and
+// leaves the installer waiting for a process the user then has to force-close.
+function launchInstallerAfterAppExit(file) {
+  const { spawn } = require('child_process');
+  const escapedFile = file.replace(/'/g, "''");
+  const waitScript = [
+    '$ErrorActionPreference = \'Stop\'',
+    `$parentPid = ${process.pid}`,
+    `$installer = '${escapedFile}'`,
+    'try { Wait-Process -Id $parentPid -ErrorAction Stop } catch {}',
+    'Start-Sleep -Milliseconds 300',
+    'Start-Process -FilePath $installer'
+  ].join('; ');
+  const encoded = Buffer.from(waitScript, 'utf16le').toString('base64');
+  const launcher = spawn('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded
+  ], { detached: true, stdio: 'ignore', windowsHide: true });
+  launcher.unref();
+}
+
+function quitForInstallerUpdate() {
+  app.quit();
+
+  // `before-quit` cleanup is asynchronous and Electron does not await its
+  // returned Promise.  Do give normal window shutdown a moment, then guarantee
+  // that the installer is not left blocked behind a lingering Liturgia process.
+  const forceExitTimer = setTimeout(() => {
+    console.warn('[update] Timed out waiting for Liturgia to exit; forcing exit for installer');
+    app.exit(0);
+  }, 3000);
+  forceExitTimer.unref();
+}
+
+// Run the downloaded installer (wait for Liturgia to exit, then launch it)
 ipcMain.handle('run-installer', async (event, file) => {
   try {
     if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
-    
-    const { spawn } = require('child_process');
-    spawn(file, [], {
-      detached: true,
-      stdio: 'ignore'
-    }).unref();
-    
-    setTimeout(() => {
-      app.quit();
-    }, 500);
-    
+
+    launchInstallerAfterAppExit(file);
+    quitForInstallerUpdate();
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
 });

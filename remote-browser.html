@@ -459,7 +459,36 @@
       }
 
       function enableResizers(doc) {
-        const bind = (id, onMove) => { const divider = doc.getElementById(id); if (!divider) return; divider.addEventListener('pointerdown', (event) => { event.preventDefault(); divider.setPointerCapture(event.pointerId); const move = (next) => onMove(next); const finish = () => { divider.removeEventListener('pointermove', move); divider.removeEventListener('pointerup', finish); divider.removeEventListener('pointercancel', finish); }; divider.addEventListener('pointermove', move); divider.addEventListener('pointerup', finish); divider.addEventListener('pointercancel', finish); }); };
+        const bind = (id, onMove) => {
+          const divider = doc.getElementById(id);
+          if (!divider) return;
+          // On touch screens the browser otherwise claims the gesture for page
+          // scrolling before pointermove reaches this very narrow divider.
+          divider.style.touchAction = 'none';
+          divider.addEventListener('pointerdown', (event) => {
+            if (event.button !== undefined && event.button !== 0) return;
+            event.preventDefault();
+            const pointerId = event.pointerId;
+            try { divider.setPointerCapture(pointerId); } catch (_) {}
+            const move = (next) => {
+              if (next.pointerId !== pointerId) return;
+              next.preventDefault();
+              onMove(next);
+            };
+            const finish = (next) => {
+              if (next.pointerId !== pointerId) return;
+              doc.removeEventListener('pointermove', move);
+              doc.removeEventListener('pointerup', finish, true);
+              doc.removeEventListener('pointercancel', finish, true);
+              try { divider.releasePointerCapture(pointerId); } catch (_) {}
+            };
+            // Listen on the document as well as capturing the pointer.  Mobile
+            // browsers can drop capture when a finger leaves the 16px handle.
+            doc.addEventListener('pointermove', move, { passive: false });
+            doc.addEventListener('pointerup', finish, true);
+            doc.addEventListener('pointercancel', finish, true);
+          });
+        };
         bind('schedule-resizer', (event) => { const pane = doc.getElementById('schedule-sidebar'); const top = doc.getElementById('top-section'); if (pane && top) pane.style.width = `${Math.max(180, Math.min(520, event.clientX - top.getBoundingClientRect().left))}px`; });
         bind('preview-resizer', (event) => { const preview = doc.getElementById('slide-preview'); const slides = doc.getElementById('slide-container'); if (preview && slides) preview.style.flex = `0 0 ${Math.max(25, Math.min(75, (event.clientX - slides.getBoundingClientRect().left) / slides.getBoundingClientRect().width * 100))}%`; });
         bind('verse-resizer', (event) => { const top = doc.getElementById('top-section'), panel = doc.getElementById('verse-panel'); if (!top || !panel) return; const bottomHeight = doc.defaultView.innerHeight - event.clientY; const topHeight = event.clientY - 8; if (bottomHeight > 30 && topHeight > 50) { top.style.flex = `0 0 ${topHeight}px`; panel.style.flex = `0 0 ${bottomHeight}px`; } });

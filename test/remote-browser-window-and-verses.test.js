@@ -68,4 +68,14 @@ describe('Browser Remote style window and verse state', () => {
     expect(css).toContain('.nav { position: sticky; top: 42px;');
     expect(css).toContain('.mobile-overflow-sheet { padding: 9px 14px');
   });
+
+  test('keeps the desktop bottom splitter responsive to touch drags', () => {
+    const html = fs.readFileSync(path.join(root, 'remote-browser.html'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+
+    expect(html).toContain("divider.style.touchAction = 'none';");
+    expect(html).toContain("doc.addEventListener('pointermove', move, { passive: false });");
+    expect(html).toContain("doc.removeEventListener('pointercancel', finish, true);");
+    expect(css).toContain('touch-action: none;');
+  });
 });

@@ -1686,6 +1686,10 @@ body.dark-theme .schedule-empty-hint {
 
 .resizer {
   background: transparent;
+  /* Keep touch drags on the divider instead of turning them into a page scroll. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .resizer-x {

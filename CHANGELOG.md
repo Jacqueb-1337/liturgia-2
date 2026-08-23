@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.13 - 2026-08-23
+
+- fix: wait for Liturgia to close before launching the Windows updater
+- fix: make browser-remote splitters track touch drags reliably
+
 ## 6.1.12 - 2026-08-23
 
 - fix: keep the compact browser remote visually consistent with the desktop workspace
