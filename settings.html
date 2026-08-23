@@ -4,21 +4,26 @@
   <meta charset="UTF-8">
   <title>Settings</title>
   <style>
+    html, body { height: 100%; overflow: hidden; }
     body { margin: 0; font-family: sans-serif; background: #f7f7f7; }
-    .settings-container { display: flex; height: 100vh; min-width: 400px; min-height: 300px; overflow: hidden; }
-    /* Sidebar stays visible and does not scroll with the right pane */
-    .sidebar { width: 140px; background: #222; color: #fff; display: flex; flex-direction: column; padding-top: 16px; box-sizing: border-box; position: sticky; top: 0; height: 100vh; }
-    .sidebar button { background: none; border: none; color: inherit; text-align: left; padding: 12px 20px; font-size: 1em; cursor: pointer; outline: none; transition: background 0.2s; }
+    /* Both panes have an explicit shrink boundary.  Without min-width/min-height
+       of zero, a wide settings panel forces the flex row past the window. */
+    .settings-container { display: flex; width: 100vw; max-width: 100%; height: 100vh; height: 100dvh; min-width: 0; min-height: 0; overflow: hidden; }
+    /* The navigation rail scrolls independently when the window is short. */
+    .sidebar { flex: 0 0 176px; min-width: 0; min-height: 0; height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: #222; color: #fff; display: flex; flex-direction: column; padding: 8px 0; box-sizing: border-box; }
+    .sidebar button { flex: 0 0 auto; background: none; border: none; color: inherit; text-align: left; padding: 12px 20px; font-size: 1em; cursor: pointer; outline: none; transition: background 0.2s; }
     .sidebar button.active, .sidebar button:hover { background: #444; }
     /* Right pane scrolls independently */
-    .settings-content { flex: 1; background: #fff; padding: 24px; box-sizing: border-box; min-width: 200px; overflow: auto; height: 100vh; }
-    /* Ensure long lists inside panels don't push the sidebar out of view */
-    .settings-panel { max-width: 100%; }
+    .settings-content { flex: 1 1 0; min-width: 0; min-height: 0; background: #fff; padding: 24px; box-sizing: border-box; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+    /* Keep long forms, grids, URLs, and QR content inside the independently
+       scrollable right pane instead of widening the settings window. */
+    .settings-panel { width: 100%; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
 
     .settings-panel { display: none; }
     .settings-panel.active { display: block; }
     .form-row { margin-bottom: 1em; }
     label { display: block; margin-bottom: 0.25em; }
+    input[type="text"], input[type="number"], input[type="password"], input[type="email"], select, textarea { max-width: 100%; box-sizing: border-box; }
     input[type="text"] { width: 100%; padding: 4px; }
 
     /* Bible management styles */
@@ -1296,20 +1301,20 @@
     body.dark-theme .subscribe-modal-status { color: #f88; }
     /* Browser remote and role-style permission editor */
     .remote-address { padding: 10px 12px; border: 1px solid #b9d6fb; border-radius: 6px; background: #eef6ff; color: #144f8d; font-family: ui-monospace, Consolas, monospace; word-break: break-all; margin: 10px 0; }
-    .remote-qr-wrap { display: flex; align-items: center; gap: 14px; margin: 10px 0; padding: 10px; border: 1px solid #d9dce1; border-radius: 8px; background: #fff; }
-    .remote-qr-wrap canvas { width: 140px; height: 140px; background: #fff; image-rendering: pixelated; }
+    .remote-qr-wrap { display: flex; align-items: center; gap: 14px; margin: 10px 0; padding: 10px; min-width: 0; overflow: hidden; border: 1px solid #d9dce1; border-radius: 8px; background: #fff; }
+    .remote-qr-wrap canvas { flex: 0 0 auto; width: min(140px, 42vw); height: min(140px, 42vw); max-width: 100%; background: #fff; image-rendering: pixelated; }
     .remote-note { color: #666; font-size: .9em; line-height: 1.45; }
     .remote-user-list { display: grid; gap: 8px; margin: 12px 0; }
     .roles-directory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin: 16px 0 22px; }
     .roles-directory-grid section { min-width: 0; }
     .roles-directory-grid h3 { margin: 0 0 8px; }
-    .remote-user-card { border: 1px solid #d9dce1; border-radius: 8px; padding: 10px 12px; background: #fafbfc; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+    .remote-user-card { min-width: 0; border: 1px solid #d9dce1; border-radius: 8px; padding: 10px 12px; background: #fafbfc; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
     .remote-user-title { font-weight: 700; color: #1f2328; }
     .remote-user-summary { color: #667085; font-size: .85em; margin-top: 2px; }
     .remote-role-presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px; }
     .remote-role-preset { border: 1px solid #c8ced8; border-radius: 999px; background: #fff; padding: 5px 10px; cursor: pointer; font-weight: 600; }
     .remote-role-preset:hover { background: #eef3ff; border-color: #6b8cff; }
-    .permission-grid { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(130px, 1fr); gap: 8px 12px; align-items: center; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    .permission-grid { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); gap: 8px 12px; align-items: center; border-top: 1px solid #e5e7eb; padding-top: 12px; }
     .permission-feature { font-weight: 600; color: #30343b; }
     .permission-group { grid-column: 1 / -1; color: #5865f2; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; font-size: .76em; padding-top: 7px; }
     .permission-select { width: 100%; padding: 6px 8px; border: 1px solid #c8ced8; border-radius: 5px; background: #fff; }
@@ -1327,6 +1332,15 @@
     body.dark-theme .permission-select option[value="inherit"] { color: #9aa4b2; }
     body.dark-theme .permission-select option[value="allow"] { color: #44c77a; }
     body.dark-theme .permission-select option[value="deny"] { color: #ff6b6b; }
+    @media (max-width: 560px) {
+      .sidebar { flex-basis: 132px; }
+      .sidebar button { padding: 10px 12px; font-size: .9em; }
+      .settings-content { padding: 16px; }
+      .remote-qr-wrap { align-items: flex-start; flex-direction: column; }
+      .remote-user-card { align-items: flex-start; flex-direction: column; }
+      .permission-grid { grid-template-columns: minmax(0, 1fr); }
+      .permission-group { grid-column: 1; }
+    }
   </style>
   <script src="settings.js"></script>
 </body>

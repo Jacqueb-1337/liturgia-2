@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.11 - 2026-08-23
+
+- fix: keep settings navigation and long panels scrollable within the window
+
 ## 6.1.10 - 2026-08-23
 
 - feat: add remote desktop styling and service worker for offline support
