@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.15 - 2026-08-23
+
+- feat: keep expandable live Preview and Live canvas thumbnails available on every compact Browser Remote tab
+
 ## 6.1.14 - 2026-08-23
 
 - fix: stop repeated Browser Remote firewall elevation when Windows cannot verify an existing rule

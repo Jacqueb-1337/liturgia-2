@@ -46,4 +46,16 @@ describe('browser remote parity safeguards', () => {
     expect(browser).toContain("more.textContent = '⋯'");
     expect(browser).toContain('function openDesktopSongEditor(doc, song = null)');
   });
+
+  test('keeps live Preview and Live canvas thumbnails available in compact mode', () => {
+    const browser = fs.readFileSync(path.join(root, 'remote-browser.html'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'remote-desktop.css'), 'utf8');
+
+    expect(browser).toContain('id="mobile-canvas-dock"');
+    expect(browser).toContain('function renderMobileCanvasDock()');
+    expect(browser).toContain('function toggleMobileCanvas(kind)');
+    expect(browser).toContain('state.remoteCanvases');
+    expect(css).toContain('.mobile-canvas-dock');
+    expect(css).toContain('.mobile-canvas-thumb.expanded');
+  });
 });
