@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.14 - 2026-08-23
+
+- fix: stop repeated Browser Remote firewall elevation when Windows cannot verify an existing rule
+- fix: keep Browser Remote preview, live snapshots, touch drag-and-drop, song actions, and saved splitters in sync with the desktop workspace
+
 ## 6.1.13 - 2026-08-23
 
 - fix: wait for Liturgia to close before launching the Windows updater

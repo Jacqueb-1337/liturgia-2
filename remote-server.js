@@ -332,11 +332,20 @@ class RemoteServer {
 
   static firewallRulesActive(wsPort, httpPort) {
     if (process.platform !== 'win32') return Promise.resolve({ active: null, managed: false, message: `Firewall status is managed by ${process.platform === 'darwin' ? 'macOS' : 'Linux'}. If its firewall is enabled, allow inbound TCP ports ${wsPort} and ${httpPort}.` });
-    const script = "$names = @('Liturgia Remote WebSocket','Liturgia Remote Discovery'); $ports = @('" + wsPort + "','" + httpPort + "'); $ok = $true; for ($i=0; $i -lt $names.Count; $i++) { $rule = Get-NetFirewallRule -DisplayName $names[$i] -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' } | Select-Object -First 1; if (-not $rule) { $ok = $false; continue }; $filter = $rule | Get-NetFirewallPortFilter; if (-not ($filter | Where-Object { $_.Protocol -eq 'TCP' -and $_.LocalPort -eq $ports[$i] })) { $ok = $false } }; if ($ok) { 'active' } else { 'missing' }";
+    // Return structured output and distinguish a confirmed missing rule from a
+    // failed status check.  The old string comparison treated a PowerShell
+    // access/module error as "missing", causing a UAC prompt on every launch.
+    const script = "$ErrorActionPreference = 'Stop'; try { $names = @('Liturgia Remote WebSocket','Liturgia Remote Discovery'); $ports = @('" + wsPort + "','" + httpPort + "'); $ok = $true; for ($i = 0; $i -lt $names.Count; $i++) { $rule = @(Get-NetFirewallRule -DisplayName $names[$i] -ErrorAction Stop | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and ('' + $_.Enabled) -eq 'True' } | Select-Object -First 1); if (-not $rule) { $ok = $false; continue }; $filter = @($rule | Get-NetFirewallPortFilter -ErrorAction Stop | Where-Object { ('' + $_.Protocol) -in @('TCP','6') -and ('' + $_.LocalPort) -eq $ports[$i] }); if (-not $filter) { $ok = $false } }; [PSCustomObject]@{ checked = $true; active = $ok } | ConvertTo-Json -Compress } catch { [PSCustomObject]@{ checked = $false; active = $null; error = $_.Exception.Message } | ConvertTo-Json -Compress }";
     return new Promise((resolve) => {
       execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8000 }, (error, stdout) => {
-        const active = !error && String(stdout || '').trim() === 'active';
-        resolve({ active, message: active ? 'Windows Firewall rules are active.' : 'Windows Firewall does not yet allow the browser remote ports.' });
+        let result = null;
+        try { result = JSON.parse(String(stdout || '').trim()); } catch (_) {}
+        if (error || !result || result.checked !== true) {
+          resolve({ active: null, checked: false, message: 'Liturgia could not verify the Windows Firewall rules. Use “Allow through Windows Firewall” if devices cannot connect.' });
+          return;
+        }
+        const active = result.active === true;
+        resolve({ active, checked: true, message: active ? 'Windows Firewall rules are active.' : 'Windows Firewall does not yet allow the browser remote ports.' });
       });
     });
   }
@@ -459,6 +468,11 @@ class RemoteServer {
       const existing = await RemoteServer.firewallRulesActive(this.port, this.httpPort);
       if (existing.managed === false) return { success: true, active: null, managed: false, message: existing.message };
       if (existing.active) return { success: true, active: true, message: existing.message };
+      if (existing.active === null) {
+        // Do not show UAC merely because Windows could not answer the read-only
+        // status query. The user can still request an explicit repair in Settings.
+        return { success: false, active: null, managed: true, message: existing.message };
+      }
       // Rules are checked against the active ports every time. This is vital
       // when the user changes the customizable Browser Remote port.
       const result = await RemoteServer.addFirewallRules(this.port, this.httpPort);
@@ -1287,8 +1301,10 @@ window.addEventListener('pagehide', () => _postToRemoteOwner({ type: 'LITURGIA_R
     const permissions = {
       SELECT_VERSE: 'verses.select',
       LOOKUP_VERSES: 'verses.view',
-      SELECT_SONG: 'songs.edit',
-      SELECT_SONG_VERSE: 'songs.edit',
+      // Selection/preview is read-only.  Editing a song remains separately
+      // protected by songs.edit, and sending it live by presentation.goLiveSongs.
+      SELECT_SONG: 'songs.view',
+      SELECT_SONG_VERSE: 'songs.view',
       DISPLAY_SONG_VERSE: 'presentation.goLiveSongs',
       UPSERT_SONG: 'songs.edit',
       DELETE_SONG: 'songs.edit',
@@ -1326,10 +1342,12 @@ window.addEventListener('pagehide', () => _postToRemoteOwner({ type: 'LITURGIA_R
       state.bible = [];
       state.verseRefs = [];
       state.verseResults = [];
+      if (state.preview) state.preview.bible = [];
     }
     if (!this.hasPermission(client, 'songs.view')) {
       state.songs = [];
       state.allSongs = [];
+      if (state.preview) state.preview.songs = [];
     }
     if (!this.hasPermission(client, 'schedule.view')) {
       state.schedule = [];

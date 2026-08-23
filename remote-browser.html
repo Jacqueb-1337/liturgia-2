@@ -144,19 +144,22 @@
     function lyricsForEditor(song){return(song.lyrics||[]).map((section)=>`[${section.section||'Verse'}]\n${section.text||''}`).join('\n\n')}
     function showSongEditor(song=null){if(!canGrant('songs.edit'))return;el('song-editor').classList.remove('hidden');el('song-editor-heading').textContent=song?'Edit song':'New song';el('song-editor').dataset.index=song?String(song.index):'';el('song-editor-title').value=song?song.title||'':'';el('song-editor-author').value=song?song.author||'':'';el('song-editor-hymnal').value=song?song.hymnal||'':'';el('song-editor-page').value=song?song.page||'':'';el('song-editor-lyrics').value=song?lyricsForEditor(song):'';el('song-editor-delete').classList.toggle('hidden',!song);el('song-editor-status').textContent='';el('song-editor-title').focus()}
     function hideSongEditor(){el('song-editor').classList.add('hidden');el('song-editor-status').textContent=''}
-    function renderSongs() { const all=state.allSongs||[],query=el('song-search').value.trim().toLowerCase();const songs=all.filter((song)=>!query||`${song.title||''} ${song.author||''}`.toLowerCase().includes(query)).slice(0,150);el('song-count').textContent=`${all.length} songs`;const list=el('song-list');list.replaceChildren();if(!songs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=all.length?'No matching songs.':'Song access is unavailable.';list.appendChild(empty);return}songs.forEach((song)=>{const row=document.createElement('div');row.className='list-item'+(selectedSong===song.index?' selected':'');const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=song.title||'Untitled';const author=document.createElement('div');author.className='item-meta';author.textContent=song.author||'';details.append(title,author);const button=document.createElement('button');button.className='button small';button.textContent='View';button.disabled=!canGrant('songs.view');button.onclick=()=>{selectedSong=song.index;if(canGrant('songs.edit'))command('SELECT_SONG',{songIndex:song.index});renderSongs();renderSongDetail(song)};row.append(details,button);list.appendChild(row)});const current=all.find((song)=>song.index===selectedSong);if(current)renderSongDetail(current); }
+    function showSongActions(song){const existing=document.getElementById('remote-song-actions-menu');if(existing)existing.remove();const menu=document.createElement('div');menu.id='remote-song-actions-menu';menu.className='remote-song-actions-menu';[['Edit song',()=>showSongEditor(song)],['Add to schedule',()=>command('ADD_SONG_TO_SCHEDULE',{songIndex:song.index})],['Delete song',()=>{if(confirm(`Delete ${song.title||'this song'}?`))command('DELETE_SONG',{songIndex:song.index})}]].forEach(([label,action])=>{const button=document.createElement('button');button.className='button ghost';button.textContent=label;button.disabled=label==='Add to schedule'?!canGrant('schedule.edit'):!canGrant('songs.edit');button.onclick=()=>{action();menu.remove()};menu.appendChild(button)});document.body.appendChild(menu);setTimeout(()=>document.addEventListener('pointerdown',(event)=>{if(!menu.contains(event.target))menu.remove()},{once:true}),0)}
+    function renderSongs() { const all=state.allSongs||[],query=el('song-search').value.trim().toLowerCase();const songs=all.filter((song)=>!query||`${song.title||''} ${song.author||''}`.toLowerCase().includes(query)).slice(0,150);el('song-count').textContent=`${all.length} songs`;const list=el('song-list');list.replaceChildren();if(!songs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=all.length?'No matching songs.':'Song access is unavailable.';list.appendChild(empty);return}songs.forEach((song)=>{const row=document.createElement('div');row.className='list-item'+(selectedSong===song.index?' selected':'');const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=song.title||'Untitled';const author=document.createElement('div');author.className='item-meta';author.textContent=song.author||'';details.append(title,author);const button=document.createElement('button');button.className='button small';button.textContent='View';button.disabled=!canGrant('songs.view');button.onclick=()=>{selectedSong=song.index;if(canGrant('songs.view'))command('SELECT_SONG',{songIndex:song.index});renderSongs();renderSongDetail(song)};const more=document.createElement('button');more.className='button small ghost';more.textContent='⋯';more.title='Song actions';more.disabled=!canGrant('songs.edit');more.onclick=(event)=>{event.stopPropagation();showSongActions(song)};row.append(details,button,more);list.appendChild(row)});const current=all.find((song)=>song.index===selectedSong);if(current)renderSongDetail(current); }
     function renderSongDetail(song){
       el('song-detail').classList.remove('hidden');
       el('song-title').textContent=song.title||'Untitled';
       el('song-author').textContent=song.author||'';
       const pills=el('song-sections'), actions=el('song-actions');
       pills.replaceChildren(); actions.replaceChildren(); el('song-lyrics').textContent='';
-      (song.lyrics||[]).forEach((section,index)=>{
+      let lyricIndex=0;(song.lyrics||[]).forEach((section,index)=>{
         const pill=document.createElement('button');
         pill.className='pill'; pill.textContent=section.section||`Section ${index+1}`;
         pill.disabled=!canGrant('presentation.goLiveSongs');
-        pill.onclick=()=>{command('DISPLAY_SONG_VERSE',{songIndex:song.index,verseIndex:index});el('song-lyrics').textContent=section.text||''};
+        const firstLyricIndex=lyricIndex;
+        pill.onclick=()=>command('DISPLAY_SONG_VERSE',{songIndex:song.index,verseIndex:firstLyricIndex});
         pills.appendChild(pill);
+        String(section.text||'').split(/\n\n+/).forEach((verse)=>{const currentLyricIndex=lyricIndex++;const content=document.createElement('button');content.className='song-verse';content.textContent=verse;content.disabled=!canGrant('songs.view');content.onclick=()=>command('SELECT_SONG_VERSE',{songIndex:song.index,verseIndex:currentLyricIndex});content.ondblclick=()=>{if(canGrant('presentation.goLiveSongs'))command('DISPLAY_SONG_VERSE',{songIndex:song.index,verseIndex:currentLyricIndex})};el('song-lyrics').appendChild(content)});
       });
       const live=document.createElement('button');
       live.className='button good'; live.textContent='Send selected song live';
@@ -207,6 +210,96 @@
       const selectedScheduleSubItems = new Map();
       let draggedScheduleIndex = null;
       let selectedDesktopReference = null;
+      let selectedDesktopSongIndex = null;
+      let desktopSongVerseViewMode = 'full';
+      const desktopLayoutStorageKey = 'liturgia-remote-desktop-layout-v2';
+
+      function saveDesktopLayout(doc) {
+        const schedule = doc.getElementById('schedule-sidebar');
+        const preview = doc.getElementById('slide-preview');
+        const slides = doc.getElementById('slide-container');
+        const panel = doc.getElementById('verse-panel');
+        if (!schedule || !preview || !slides || !panel) return;
+        const slideWidth = slides.getBoundingClientRect().width;
+        const layout = {
+          scheduleWidth: schedule.getBoundingClientRect().width,
+          previewPercent: slideWidth ? (preview.getBoundingClientRect().width / slideWidth) * 100 : 50,
+          versePanelHeight: panel.getBoundingClientRect().height
+        };
+        try { localStorage.setItem(desktopLayoutStorageKey, JSON.stringify(layout)); } catch (_) {}
+      }
+
+      function restoreDesktopLayout(doc) {
+        let layout = null;
+        try { layout = JSON.parse(localStorage.getItem(desktopLayoutStorageKey) || 'null'); } catch (_) {}
+        if (!layout || typeof layout !== 'object') return;
+        const schedule = doc.getElementById('schedule-sidebar');
+        const preview = doc.getElementById('slide-preview');
+        const top = doc.getElementById('top-section');
+        const panel = doc.getElementById('verse-panel');
+        if (schedule && Number.isFinite(layout.scheduleWidth)) schedule.style.width = `${Math.max(180, Math.min(520, layout.scheduleWidth))}px`;
+        if (preview && Number.isFinite(layout.previewPercent)) preview.style.flex = `0 0 ${Math.max(25, Math.min(75, layout.previewPercent))}%`;
+        if (top && panel && Number.isFinite(layout.versePanelHeight)) {
+          const panelHeight = Math.max(80, Math.min(doc.defaultView.innerHeight - 66, layout.versePanelHeight));
+          top.style.flex = `0 0 ${Math.max(50, doc.defaultView.innerHeight - panelHeight - 16)}px`;
+          panel.style.flex = `0 0 ${panelHeight}px`;
+        }
+      }
+
+      function installPointerDrag(doc, node, payload) {
+        if (!node || node.dataset.remotePointerDrag) return;
+        node.dataset.remotePointerDrag = 'true';
+        node.style.touchAction = 'none';
+        node.addEventListener('click', (event) => {
+          if (node.dataset.remoteSuppressClick !== 'true') return;
+          delete node.dataset.remoteSuppressClick;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }, true);
+        node.addEventListener('pointerdown', (event) => {
+          const interactive = event.target.closest('button, input, select, textarea, a');
+          if (!canGrant('schedule.edit') || (event.button !== undefined && event.button !== 0) || (interactive && interactive !== node)) return;
+          const pointerId = event.pointerId;
+          let active = false;
+          let target = null;
+          const start = { x: event.clientX, y: event.clientY };
+          const hold = setTimeout(() => {
+            active = true;
+            node.classList.add('remote-touch-dragging');
+            try { node.setPointerCapture(pointerId); } catch (_) {}
+          }, 260);
+          const move = (next) => {
+            if (next.pointerId !== pointerId) return;
+            if (!active && Math.hypot(next.clientX - start.x, next.clientY - start.y) > 10) clearTimeout(hold);
+            if (!active) return;
+            next.preventDefault();
+            const nextTarget = doc.elementFromPoint(next.clientX, next.clientY)?.closest('[data-remote-schedule-index], [data-remote-schedule-drop]');
+            if (target && target !== nextTarget) target.classList.remove('remote-drop-target');
+            target = nextTarget;
+            if (target) target.classList.add('remote-drop-target');
+          };
+          const finish = (next) => {
+            if (next.pointerId !== pointerId) return;
+            clearTimeout(hold);
+            doc.removeEventListener('pointermove', move);
+            doc.removeEventListener('pointerup', finish, true);
+            doc.removeEventListener('pointercancel', finish, true);
+            node.classList.remove('remote-touch-dragging');
+            if (target) target.classList.remove('remote-drop-target');
+            if (active) {
+              node.dataset.remoteSuppressClick = 'true';
+              const destination = target ? Number(target.dataset.remoteScheduleIndex) : null;
+              if (payload.type === 'schedule' && Number.isInteger(destination) && destination !== payload.index) command('REORDER_SCHEDULE', { from: payload.index, to: destination });
+              if (payload.type === 'song' && target) command('ADD_SONG_TO_SCHEDULE', { songIndex: payload.songIndex });
+              if (payload.type === 'verse' && target) command('ADD_TO_SCHEDULE', payload.reference);
+            }
+            try { node.releasePointerCapture(pointerId); } catch (_) {}
+          };
+          doc.addEventListener('pointermove', move, { passive: false });
+          doc.addEventListener('pointerup', finish, true);
+          doc.addEventListener('pointercancel', finish, true);
+        });
+      }
 
       function drawSlide(canvas, kicker, title, body, canvasSnapshot) {
         if (!canvas) return;
@@ -261,8 +354,53 @@
         return { book, chapter: Number(match[2]), verse: Number(match[3]), verseEnd: match[4] ? Number(match[4]) : undefined };
       }
 
+      function openDesktopSongEditor(doc, song = null) {
+        if (!canGrant('songs.edit')) return;
+        let modal = doc.getElementById('remote-song-editor-modal');
+        if (!modal) {
+          modal = doc.createElement('div');
+          modal.id = 'remote-song-editor-modal'; modal.className = 'remote-song-editor-modal';
+          modal.innerHTML = `<div class="remote-song-editor-panel"><div class="remote-song-editor-heading"><h2></h2><button type="button" data-close>×</button></div><label>Title<input data-title></label><label>Author<input data-author></label><div class="remote-song-editor-pair"><label>Hymnal<input data-hymnal></label><label>Page<input data-page type="number" min="1"></label></div><label>Lyrics<textarea data-lyrics rows="16"></textarea></label><p>Use a blank line between sections; begin a section with [Verse], [Chorus], {Bridge}, or (Tag).</p><div class="remote-song-editor-actions"><button type="button" class="remote-desktop-action" data-cancel>Cancel</button><button type="button" class="remote-desktop-action" data-delete>Delete</button><button type="button" class="remote-desktop-action" data-save>Save song</button></div></div>`;
+          doc.body.appendChild(modal);
+          const close = () => modal.classList.remove('open');
+          modal.querySelector('[data-close]').onclick = close;
+          modal.querySelector('[data-cancel]').onclick = close;
+          modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+          modal.querySelector('[data-save]').onclick = () => {
+            const index = modal.dataset.songIndex;
+            const title = modal.querySelector('[data-title]').value.trim();
+            const lyrics = modal.querySelector('[data-lyrics]').value.trim();
+            if (!title || !lyrics) { alert('A title and lyrics are required.'); return; }
+            command('UPSERT_SONG', { songIndex: index === '' ? undefined : Number(index), title, author: modal.querySelector('[data-author]').value, hymnal: modal.querySelector('[data-hymnal]').value, page: modal.querySelector('[data-page]').value, lyrics });
+            close(); setTimeout(() => command('REQUEST_STATE'), 300);
+          };
+          modal.querySelector('[data-delete]').onclick = () => {
+            const index = Number(modal.dataset.songIndex);
+            if (!Number.isInteger(index) || !confirm('Delete this song?')) return;
+            command('DELETE_SONG', { songIndex: index }); close(); setTimeout(() => command('REQUEST_STATE'), 300);
+          };
+        }
+        modal.dataset.songIndex = song ? String(song.index) : '';
+        modal.querySelector('h2').textContent = song ? 'Edit song' : 'New song';
+        modal.querySelector('[data-title]').value = song?.title || '';
+        modal.querySelector('[data-author]').value = song?.author || '';
+        modal.querySelector('[data-hymnal]').value = song?.hymnal || '';
+        modal.querySelector('[data-page]').value = song?.page || '';
+        modal.querySelector('[data-lyrics]').value = song ? lyricsForEditor(song) : '';
+        modal.querySelector('[data-delete]').style.display = song ? '' : 'none';
+        modal.classList.add('open'); modal.querySelector('[data-title]').focus();
+      }
+
+      function showDesktopSongMenu(doc, anchor, song) {
+        doc.querySelector('#remote-song-menu')?.remove();
+        const menu = doc.createElement('div'); menu.id = 'remote-song-menu'; menu.className = 'remote-song-menu';
+        [['Edit song', () => openDesktopSongEditor(doc, song)], ['Add to schedule', () => command('ADD_SONG_TO_SCHEDULE', { songIndex: song.index })], ['Delete song', () => { if (confirm(`Delete ${song.title || 'this song'}?`)) command('DELETE_SONG', { songIndex: song.index }); }]].forEach(([label, action]) => { const button = doc.createElement('button'); button.textContent = label; button.disabled = label === 'Add to schedule' ? !canGrant('schedule.edit') : !canGrant('songs.edit'); button.onclick = () => { action(); menu.remove(); }; menu.appendChild(button); });
+        const box = anchor.getBoundingClientRect(); menu.style.left = `${Math.max(8, box.right - 160)}px`; menu.style.top = `${box.bottom + 4}px`; doc.body.appendChild(menu);
+        setTimeout(() => doc.addEventListener('pointerdown', (event) => { if (!menu.contains(event.target) && event.target !== anchor) menu.remove(); }, { once: true }), 0);
+      }
+
       function ensureDesktopControls(doc) {
-        if (!doc.getElementById('remote-controls-style')) { const style = doc.createElement('style'); style.id = 'remote-controls-style'; style.textContent = '.remote-desktop-action,.remote-schedule-actions button,.remote-song-row,.remote-song-section{background:#f5f5f5;border:1px solid #ccc;border-radius:4px;color:#333;cursor:pointer}.remote-desktop-action,.remote-schedule-actions button{height:32px;padding:0 10px}.remote-schedule-actions{display:flex;gap:4px;margin-left:6px}.remote-song-row{display:block;width:100%;padding:8px 10px;border-width:0 0 1px;text-align:left}.remote-song-row:hover{background:#eaf4fc}.remote-song-section{margin:10px 6px 0 0;padding:6px 9px}body.dark-theme .remote-desktop-action,body.dark-theme .remote-schedule-actions button,body.dark-theme .remote-song-row,body.dark-theme .remote-song-section{background:#2a2a2a;border-color:#444;color:#eee}body.dark-theme .remote-song-row:hover{background:#333}'; doc.head.appendChild(style); }
+        if (!doc.getElementById('remote-controls-style')) { const style = doc.createElement('style'); style.id = 'remote-controls-style'; style.textContent = '.remote-desktop-action,.remote-schedule-actions button,.remote-song-row,.remote-song-section,.remote-song-more{background:#f5f5f5;border:1px solid #ccc;border-radius:4px;color:#333;cursor:pointer}.remote-desktop-action,.remote-schedule-actions button{height:32px;padding:0 10px}.remote-schedule-actions{display:flex;gap:4px;margin-left:6px}.remote-song-line{display:flex;border-bottom:1px solid #ccc}.remote-song-row{display:block;flex:1;min-width:0;padding:8px 10px;border-width:0;text-align:left}.remote-song-more{width:34px;border-width:0 0 0 1px;font-size:19px}.remote-song-row:hover,.remote-song-line:hover{background:#eaf4fc}.remote-song-section{display:block;width:100%;margin:10px 0 0;padding:8px 10px;text-align:left;white-space:pre-wrap}.remote-song-section.selected{border-color:#0078d4;background:#eaf4fc}.remote-song-menu{position:fixed;z-index:9999;display:grid;min-width:160px;padding:4px;background:#fff;border:1px solid #aaa;box-shadow:0 4px 16px #0003}.remote-song-menu button{text-align:left;padding:8px;border:0;background:transparent;cursor:pointer}.remote-song-menu button:hover{background:#eaf4fc}.remote-touch-dragging{opacity:.55!important;outline:2px solid #0078d4!important}.remote-drop-target{box-shadow:inset 0 -3px #0078d4}.remote-song-editor-modal{position:fixed;z-index:10000;inset:0;display:none;align-items:center;justify-content:center;background:#0008}.remote-song-editor-modal.open{display:flex}.remote-song-editor-panel{width:min(760px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;padding:18px;background:#fff;color:#222;box-shadow:0 16px 48px #0008}.remote-song-editor-heading,.remote-song-editor-actions,.remote-song-editor-pair{display:flex;gap:10px;align-items:center}.remote-song-editor-heading{justify-content:space-between}.remote-song-editor-heading h2{margin:0}.remote-song-editor-panel label{display:grid;gap:5px;margin-top:10px}.remote-song-editor-panel input,.remote-song-editor-panel textarea{box-sizing:border-box;width:100%;padding:8px}.remote-song-editor-pair>label{flex:1}.remote-song-editor-actions{justify-content:flex-end;margin-top:14px}.remote-song-editor-actions [data-delete]{color:#fff;background:#c42b1c}body.dark-theme .remote-desktop-action,body.dark-theme .remote-schedule-actions button,body.dark-theme .remote-song-row,body.dark-theme .remote-song-section,body.dark-theme .remote-song-more{background:#2a2a2a;border-color:#444;color:#eee}body.dark-theme .remote-song-row:hover{background:#333}body.dark-theme .remote-song-menu,body.dark-theme .remote-song-editor-panel{background:#222;color:#eee}body.dark-theme .remote-song-menu button{color:#eee}'; doc.head.appendChild(style); }
         const shellWindow = doc.defaultView;
         const books = (state.verseMeta && state.verseMeta.bookNames) || [];
         if (shellWindow && typeof shellWindow.updateSearchBox === 'function') {
@@ -304,8 +442,19 @@
         }
         const songInput = doc.getElementById('song-search-input');
         if (songInput && !songInput.dataset.remoteBound) { songInput.dataset.remoteBound = 'true'; songInput.addEventListener('input', renderDesktop); }
+        const songAdd = doc.getElementById('song-add-btn');
+        if (songAdd && !songAdd.dataset.remoteBound) { songAdd.dataset.remoteBound = 'true'; songAdd.disabled = !canGrant('songs.edit'); songAdd.addEventListener('click', () => openDesktopSongEditor(doc)); }
+        const songViewToggle = doc.getElementById('song-view-toggle');
+        if (songViewToggle && !songViewToggle.dataset.remoteBound) { songViewToggle.dataset.remoteBound = 'true'; songViewToggle.addEventListener('click', () => { desktopSongVerseViewMode = desktopSongVerseViewMode === 'full' ? 'blocks' : 'full'; songViewToggle.textContent = desktopSongVerseViewMode === 'full' ? 'Verse Blocks' : 'Full Song'; renderDesktopSongs(doc); }); }
         const clearSchedule = doc.getElementById('schedule-clear-btn');
         if (clearSchedule && !clearSchedule.dataset.remoteBound) { clearSchedule.dataset.remoteBound = 'true'; clearSchedule.disabled = !canGrant('schedule.edit'); clearSchedule.addEventListener('click', () => { if (confirm('Remove all items from the schedule?')) command('CLEAR_SCHEDULE'); }); }
+        const scheduleList = doc.getElementById('schedule-list');
+        if (scheduleList && !scheduleList.dataset.remoteBound) {
+          scheduleList.dataset.remoteBound = 'true';
+          scheduleList.dataset.remoteScheduleDrop = 'true';
+          scheduleList.addEventListener('dragover', (event) => { if (canGrant('schedule.edit')) event.preventDefault(); });
+          scheduleList.addEventListener('drop', (event) => { event.preventDefault(); let payload = null; try { payload = JSON.parse(event.dataTransfer.getData('text/plain')); } catch (_) {} if (!payload) return; if (payload.type === 'song') command('ADD_SONG_TO_SCHEDULE', { songIndex: payload.songIndex }); if (payload.type === 'verse') command('ADD_TO_SCHEDULE', payload.reference); });
+        }
       }
 
       function renderDesktopSchedule(doc) {
@@ -314,11 +463,12 @@
         if (!items.length) { const empty = doc.createElement('div'); empty.className = 'schedule-empty-hint'; empty.textContent = 'No schedule items'; list.appendChild(empty); return; }
         items.forEach((item, index) => {
           const subItems = Array.isArray(item.subItems) ? item.subItems : [], expandable = subItems.length > 1, expanded = expandedScheduleItems.has(item.index);
-          const row = doc.createElement('div'); row.className = 'schedule-item'; row.draggable = canGrant('schedule.edit');
-          row.addEventListener('dragstart', (event) => { if (!canGrant('schedule.edit')) { event.preventDefault(); return; } draggedScheduleIndex = index; event.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
+          const row = doc.createElement('div'); row.className = 'schedule-item'; row.dataset.remoteScheduleIndex = String(index); row.draggable = canGrant('schedule.edit');
+          row.addEventListener('dragstart', (event) => { if (!canGrant('schedule.edit')) { event.preventDefault(); return; } draggedScheduleIndex = index; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'schedule', index })); row.classList.add('dragging'); });
           row.addEventListener('dragend', () => { draggedScheduleIndex = null; row.classList.remove('dragging'); });
-          row.addEventListener('dragover', (event) => { if (draggedScheduleIndex === null || draggedScheduleIndex === index) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; });
-          row.addEventListener('drop', (event) => { event.preventDefault(); if (draggedScheduleIndex !== null && draggedScheduleIndex !== index) command('REORDER_SCHEDULE', { from: draggedScheduleIndex, to: index }); });
+          row.addEventListener('dragover', (event) => { event.preventDefault(); event.dataTransfer.dropEffect = draggedScheduleIndex === null ? 'copy' : 'move'; });
+          row.addEventListener('drop', (event) => { event.preventDefault(); let payload = null; try { payload = JSON.parse(event.dataTransfer.getData('text/plain')); } catch (_) {} if (!payload) return; if (payload.type === 'schedule' && payload.index !== index) command('REORDER_SCHEDULE', { from: payload.index, to: index }); if (payload.type === 'song') command('ADD_SONG_TO_SCHEDULE', { songIndex: payload.songIndex }); if (payload.type === 'verse') command('ADD_TO_SCHEDULE', payload.reference); });
+          installPointerDrag(doc, row, { type: 'schedule', index });
           const header = doc.createElement('div'); header.className = 'schedule-item-header' + (schedule.currentItem === item.index ? ' selected' : '');
           if (expandable) { const arrow = doc.createElement('button'); arrow.className = 'expand-arrow' + (expanded ? ' expanded' : ''); arrow.textContent = '▶'; arrow.title = expanded ? 'Collapse nested items' : 'Expand nested items'; arrow.onclick = (event) => { event.stopPropagation(); if (expanded) expandedScheduleItems.delete(item.index); else expandedScheduleItems.add(item.index); renderDesktopSchedule(doc); }; header.appendChild(arrow); }
           const text = doc.createElement('span'); text.className = 'schedule-item-text'; text.textContent = item.label || `Schedule item ${index + 1}`; header.appendChild(text);
@@ -333,7 +483,36 @@
       function renderDesktopSongs(doc) {
         const all = state.allSongs || [], query = (doc.getElementById('song-search-input')?.value || '').trim().toLowerCase();
         const list = doc.getElementById('song-virtual-list'), display = doc.getElementById('song-display'); if (!list || !display) return;
-        list.replaceChildren(); all.filter((song) => !query || `${song.title || ''} ${song.author || ''} ${(song.lyrics || []).map((section) => section.text || '').join(' ')}`.toLowerCase().includes(query)).slice(0, 150).forEach((song) => { const button = doc.createElement('button'); button.className = 'remote-song-row'; button.textContent = song.title || 'Untitled'; button.onclick = () => { command('SELECT_SONG', { songIndex: song.index }); display.replaceChildren(); const heading = doc.createElement('h2'); heading.textContent = song.title || 'Untitled'; const author = doc.createElement('div'); author.textContent = song.author || ''; display.append(heading, author); let verseIndex = 0; (song.lyrics || []).forEach((section) => { String(section.text || '').split(/\n\n+/).forEach((verse, sectionVerseIndex) => { const part = doc.createElement('button'); part.className = 'remote-song-section'; part.textContent = `${section.section || 'Verse'}${sectionVerseIndex ? ` ${sectionVerseIndex + 1}` : ''}: ${verse.split('\n')[0].slice(0, 70)}`; const currentVerseIndex = verseIndex++; part.onclick = () => command('SELECT_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); part.ondblclick = () => command('DISPLAY_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); display.appendChild(part); }); }); }; list.appendChild(button); });
+        const renderSong = (song) => {
+          display.replaceChildren();
+          const heading = doc.createElement('h2'); heading.textContent = song.title || 'Untitled'; display.appendChild(heading);
+          if (song.author) { const author = doc.createElement('div'); author.className = 'song-author'; author.textContent = song.author; display.appendChild(author); }
+          let verseIndex = 0;
+          (song.lyrics || []).forEach((section) => {
+            const sectionHeading = doc.createElement('h3'); sectionHeading.textContent = section.section || 'Verse'; display.appendChild(sectionHeading);
+            String(section.text || '').split(/\n\n+/).forEach((verse, sectionVerseIndex, verses) => {
+              const currentVerseIndex = verseIndex++;
+              const part = doc.createElement('button'); part.className = 'remote-song-section';
+              part.textContent = desktopSongVerseViewMode === 'blocks' ? `${section.section || 'Verse'}${verses.length > 1 ? ` ${sectionVerseIndex + 1}` : ''}: ${verse.split('\n')[0].slice(0, 70)}` : verse;
+              part.onclick = () => command('SELECT_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex });
+              part.ondblclick = () => command('DISPLAY_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex });
+              display.appendChild(part);
+            });
+          });
+        };
+        list.replaceChildren();
+        all.filter((song) => !query || `${song.title || ''} ${song.author || ''} ${(song.lyrics || []).map((section) => section.text || '').join(' ')}`.toLowerCase().includes(query)).slice(0, 150).forEach((song) => {
+          const line = doc.createElement('div'); line.className = 'remote-song-line';
+          const button = doc.createElement('button'); button.className = 'remote-song-row'; button.textContent = song.title || 'Untitled'; button.draggable = canGrant('schedule.edit');
+          button.addEventListener('dragstart', (event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'song', songIndex: song.index })); });
+          installPointerDrag(doc, button, { type: 'song', songIndex: song.index });
+          button.onclick = () => { selectedDesktopSongIndex = song.index; command('SELECT_SONG', { songIndex: song.index }); renderSong(song); };
+          const more = doc.createElement('button'); more.className = 'remote-song-more'; more.textContent = '⋯'; more.title = 'Song actions'; more.disabled = !canGrant('songs.edit'); more.onclick = (event) => { event.stopPropagation(); showDesktopSongMenu(doc, more, song); };
+          line.append(button, more); list.appendChild(line);
+        });
+        const selectedSong = all.find((song) => song.index === selectedDesktopSongIndex);
+        if (selectedSong) renderSong(selectedSong);
+        else if (selectedDesktopSongIndex !== null) display.replaceChildren();
       }
 
       function renderDesktopVerses(doc) {
@@ -354,8 +533,11 @@
             row.tabIndex = 0;
             row.dataset.index = String(index);
             row.dataset.key = reference.key;
-            row.draggable = true;
+            row.draggable = canGrant('schedule.edit');
             row.style.cssText = `position:absolute;top:${index * 24}px;left:0;right:0;width:100%;height:24px;`;
+            const parsedReference = parseReference(reference.key);
+            row.addEventListener('dragstart', (event) => { if (!parsedReference) { event.preventDefault(); return; } event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'verse', reference: parsedReference })); });
+            if (parsedReference) installPointerDrag(doc, row, { type: 'verse', reference: parsedReference });
             row.onclick = () => {
               const parsed = parseReference(reference.key);
               if (!parsed) return;
@@ -439,17 +621,17 @@
       function renderDesktop() {
         const doc = shellDocument(); if (!ready || !doc) return;
         ensureDesktopControls(doc); queueMicrotask(() => { renderDesktopSchedule(doc); renderDesktopSongs(doc); renderDesktopVerses(doc); });
-        const bible = (state.bible || [])[0], song = (state.songs || [])[0];
-        const kicker = song ? (song.section || 'Song') : bible ? `${bible.book || ''} ${bible.chapter || ''}:${bible.startVerse || ''}` : 'Live display';
-        const title = song ? (song.title || 'Song') : bible ? (bible.text || 'Bible verse') : 'Nothing is live';
-        const body = song ? (song.text || '') : '';
+        const describe = (fields, emptyLabel) => {
+          const bible = (fields?.bible || [])[0], song = (fields?.songs || [])[0];
+          if (song) return { kicker: song.section || 'Song', title: song.title || 'Song', body: song.text || '' };
+          if (bible) return { kicker: `${bible.book || ''} ${bible.chapter || ''}:${bible.startVerse || ''}`, title: bible.text || 'Bible verse', body: '' };
+          return { kicker: emptyLabel, title: emptyLabel === 'Preview' ? 'Nothing selected' : 'Nothing is live', body: emptyLabel === 'Preview' ? 'Select a verse, song, or schedule item.' : '' };
+        };
+        const preview = describe(state.preview, 'Preview');
+        const live = describe(state, 'Live display');
         const canvases = state.remoteCanvases || {};
-        drawSlide(doc.getElementById('preview-canvas'), kicker, title, body, canvases.preview);
-        drawSlide(doc.getElementById('live-canvas'), kicker, title, body, canvases.live);
-        const list = doc.getElementById('schedule-list');
-        if (list) { list.replaceChildren(); (state.allScheduleItems || []).forEach((item, index) => { const row = doc.createElement('div'); row.className = 'schedule-item'; const button = doc.createElement('button'); button.className = 'schedule-item-header' + ((state.scheduling || {}).currentItem === item.index ? ' selected' : ''); button.textContent = item.label || `Schedule item ${index + 1}`; button.disabled = !can('schedule', 'change'); button.onclick = () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index }); row.appendChild(button); list.appendChild(row); }); }
-        const songs = doc.getElementById('song-virtual-list');
-        if (songs) { songs.replaceChildren(); (state.allSongs || []).slice(0, 150).forEach((song) => { const button = doc.createElement('button'); button.className = 'song-item'; button.textContent = song.title || 'Untitled'; button.onclick = () => command('SELECT_SONG', { songIndex: song.index }); songs.appendChild(button); }); }
+        drawSlide(doc.getElementById('preview-canvas'), preview.kicker, preview.title, preview.body, canvases.preview);
+        drawSlide(doc.getElementById('live-canvas'), live.kicker, live.title, live.body, canvases.live);
       }
 
       function activateTab(tab) {
@@ -481,6 +663,7 @@
               doc.removeEventListener('pointerup', finish, true);
               doc.removeEventListener('pointercancel', finish, true);
               try { divider.releasePointerCapture(pointerId); } catch (_) {}
+              saveDesktopLayout(doc);
             };
             // Listen on the document as well as capturing the pointer.  Mobile
             // browsers can drop capture when a finger leaves the 16px handle.
@@ -494,7 +677,7 @@
         bind('verse-resizer', (event) => { const top = doc.getElementById('top-section'), panel = doc.getElementById('verse-panel'); if (!top || !panel) return; const bottomHeight = doc.defaultView.innerHeight - event.clientY; const topHeight = event.clientY - 8; if (bottomHeight > 30 && topHeight > 50) { top.style.flex = `0 0 ${topHeight}px`; panel.style.flex = `0 0 ${bottomHeight}px`; } });
       }
 
-      shell.addEventListener('load', () => { const doc = shellDocument(); if (!doc) return; ready = true; doc.querySelectorAll('.bottom-tab').forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab))); const styleOverlay = doc.getElementById('preview-edit-overlay'); if (styleOverlay) styleOverlay.addEventListener('click', openRemoteStyleEditor); enableResizers(doc); activateTab('verses'); renderDesktop(); });
+      shell.addEventListener('load', () => { const doc = shellDocument(); if (!doc) return; ready = true; restoreDesktopLayout(doc); doc.querySelectorAll('.bottom-tab').forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab))); const styleOverlay = doc.getElementById('preview-edit-overlay'); if (styleOverlay) styleOverlay.addEventListener('click', openRemoteStyleEditor); enableResizers(doc); activateTab('verses'); renderDesktop(); });
       window.addEventListener('message', (event) => {
         if (event.origin !== location.origin || !event.data) return;
         if ((event.data.type === 'LITURGIA_REMOTE_STYLE_CLOSE' || event.data.type === 'LITURGIA_REMOTE_STYLES_SAVE') && event.source !== remoteStyleEditorWindow) return;

@@ -219,6 +219,22 @@ button, input, select, textarea { font-family: inherit; }
 .button.danger { color: #fff; background: #c42b1c; border-color: #c42b1c; }
 .button.ghost { color: #333; background: #f5f5f5; border-color: #ccc; }
 
+.remote-song-actions-menu {
+  position: fixed;
+  z-index: 1000;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #aaa;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, .24);
+}
+
+.remote-song-actions-menu .button { text-align: left; }
+
 .state-row { margin-left: 10px; padding-left: 10px; border-left: 1px solid #ccc; color: #666; }
 .state-row strong { color: #333; }
 

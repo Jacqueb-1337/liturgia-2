@@ -723,6 +723,57 @@ function getCurrentLiveFields() {
   };
 }
 
+// The browser remote has two canvases.  Keep the selected preview separate
+// from the currently-live content so the left pane never falls back to a copy
+// of the right pane while a new verse or song is being prepared.
+function getCurrentPreviewFields() {
+  if (currentTab === 'verses' && selectedIndices.length) {
+    const indices = selectedIndices.filter((index) => allVerses[index]);
+    if (!indices.length) return { bible: [], songs: [] };
+    const bible = parseVerseReferenceWithRange(indices.map((index) => allVerses[index].key));
+    if (bible.length) {
+      bible[0].text = indices.map((index) => {
+        const verse = allVerses[index];
+        return `${verse.key.split(':')[1]}  ${(verse.text || '').replace(/(\.\d+[\s\S]*)$/, '')}`;
+      }).join('\n\n');
+    }
+    return { bible, songs: [] };
+  }
+  if (currentTab === 'songs' && selectedSongIndices.length && selectedSongVerseIndex !== null) {
+    const song = allSongs[selectedSongIndices[0]];
+    const verse = getSongVerseText(selectedSongVerseIndex);
+    if (song && verse) return { bible: [], songs: [{ title: song.title, author: song.author || '', section: verse.section || '', text: verse.text || '', lyricIndex: selectedSongVerseIndex }] };
+  }
+  return { bible: [], songs: [] };
+}
+
+function buildBrowserRemoteState() {
+  const state = {
+    ...(lastRelayState || {}),
+    ...getCurrentLiveFields(),
+    preview: getCurrentPreviewFields(),
+    scheduling: {
+      totalItems: scheduleItems.length,
+      currentItem: currentLiveScheduleIndex,
+      hasSchedule: scheduleItems.length > 0
+    },
+    allScheduleItems: buildRelayAllScheduleItems(),
+    allSongs: allSongs.map((song, index) => ({ index, title: song.title, author: song.author || '', lyrics: song.lyrics || [] })),
+    verseMeta: { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames },
+    verseRefs: allVerses.map((verse, index) => ({ index, key: verse.key })),
+    previewStyles: { ...previewStyles },
+    lastUpdated: Date.now()
+  };
+  state.remoteCanvases = getRemoteCanvasSnapshots();
+  return state;
+}
+
+async function pushBrowserRemoteState() {
+  const state = buildBrowserRemoteState();
+  lastRelayState = state;
+  await ipcRenderer.invoke('relay-push-state', state);
+}
+
 // The LAN Browser Remote uses compact snapshots of the actual desktop canvases
 // for its wide-screen Preview and Live panes. This keeps backgrounds, fonts,
 // safe areas, and media rendering visually identical without sending full-size
@@ -10860,39 +10911,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Remote Control Command Handler
 ipcRenderer.on('relay-push-state-request', async () => {
   try {
-    const liveFields = getCurrentLiveFields();
-    const verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
-    const verseRefs = allVerses.map((verse, index) => ({ index, key: verse.key }));
-    const state = lastRelayState ? {
-      ...lastRelayState,
-      ...liveFields,
-      verseMeta,
-      verseRefs,
-      previewStyles: { ...previewStyles },
-      lastUpdated: Date.now()
-    } : {
-      ...liveFields,
-      schedule: [],
-      scheduling: {
-        totalItems: scheduleItems.length,
-        currentItem: currentLiveScheduleIndex,
-        hasSchedule: scheduleItems.length > 0
-      },
-      allScheduleItems: buildRelayAllScheduleItems(),
-      allSongs: allSongs.map((song, idx) => ({
-        index: idx,
-        title: song.title,
-        author: song.author || '',
-        lyrics: song.lyrics || []
-      })),
-      verseMeta,
-      verseRefs,
-      previewStyles: { ...previewStyles },
-      lastUpdated: Date.now()
-    };
-    state.remoteCanvases = getRemoteCanvasSnapshots();
-    lastRelayState = state;
-    await ipcRenderer.invoke('relay-push-state', state);
+    await pushBrowserRemoteState();
   } catch (err) {
     console.error('[relay] Failed to push initial state:', err);
   }
@@ -10905,30 +10924,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
     switch (command) {
       case 'REQUEST_STATE':
         try {
-          const reqState = lastRelayState ? { ...lastRelayState, lastUpdated: Date.now() } : {
-            bible: [],
-            songs: [],
-            schedule: [],
-            scheduling: {
-              totalItems: scheduleItems.length,
-              currentItem: currentLiveScheduleIndex,
-              hasSchedule: scheduleItems.length > 0
-            },
-            allScheduleItems: buildRelayAllScheduleItems(),
-            allSongs: allSongs.map((song, idx) => ({
-              index: idx,
-              title: song.title,
-              author: song.author || '',
-              lyrics: song.lyrics || []
-            })),
-            lastUpdated: Date.now()
-          };
-          reqState.verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
-          reqState.verseRefs = allVerses.map((verse, index) => ({ index, key: verse.key }));
-          reqState.previewStyles = { ...previewStyles };
-          reqState.remoteCanvases = getRemoteCanvasSnapshots();
-          lastRelayState = reqState;
-          await ipcRenderer.invoke('relay-push-state', reqState);
+          await pushBrowserRemoteState();
         } catch (err) {
           console.error('[relay] Failed to push state on REQUEST_STATE:', err);
         }
@@ -10979,6 +10975,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
                 await handleVerseDoubleClick(startIndex);
               }
             }
+            await pushBrowserRemoteState();
           } else {
             console.error('[remote] Verse not found:', startVerseKey);
           }
@@ -10999,7 +10996,10 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
         const lookup = [{ book: data.book, chapter: Number(data.chapter), startVerse: Number(data.verse), endVerse, length: selected.length, text: selected.map((verse) => `${verse.verseNumber}  ${verse.text}`).join('\n') }];
         const nextState = {
           ...(lastRelayState || {}),
-          bible: lookup,
+          // A lookup fills the browser's verse list; it must not overwrite the
+          // currently-live canvas with the searched reference.
+          bible: (lastRelayState && lastRelayState.bible) || [],
+          preview: { ...getCurrentPreviewFields(), lookup },
           verseResults: selected.map((verse) => ({ key: `${data.book} ${data.chapter}:${verse.verseNumber}`, text: verse.text })),
           songs: (lastRelayState && lastRelayState.songs) || [],
           scheduling: (lastRelayState && lastRelayState.scheduling) || { totalItems: scheduleItems.length, currentItem: currentLiveScheduleIndex, hasSchedule: scheduleItems.length > 0 },
@@ -11009,6 +11009,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           verseRefs: allVerses.map((verse, index) => ({ index, key: verse.key })),
           lastUpdated: Date.now()
         };
+        nextState.remoteCanvases = getRemoteCanvasSnapshots();
         lastRelayState = nextState;
         await ipcRenderer.invoke('relay-push-state', nextState);
         break;
@@ -11024,11 +11025,13 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           }
           // Select the song
           selectedSongIndices = [data.songIndex];
-          selectedSongVerseIndex = null;
+          selectedSongVerseIndex = 0;
           // Display the song
           displaySelectedSong();
+          await updatePreviewFromSongVerse(0);
           // Re-render song list to show selection
           renderSongList(filteredSongs.length > 0 ? filteredSongs : allSongs);
+          await pushBrowserRemoteState();
         } else {
           console.warn('[remote] SELECT_SONG missing songIndex:', data);
         }
@@ -11043,7 +11046,8 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           console.log('[remote] Selecting song verse index:', data.verseIndex);
           selectedSongVerseIndex = data.verseIndex;
           displaySelectedSong();
-          updatePreviewFromSongVerse(data.verseIndex);
+          await updatePreviewFromSongVerse(data.verseIndex);
+          await pushBrowserRemoteState();
         } else {
           console.warn('[remote] SELECT_SONG_VERSE missing verseIndex or no song selected:', data);
         }
