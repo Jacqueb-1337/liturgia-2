@@ -1284,15 +1284,17 @@ function rerenderPreviewForStyles() {
         lctx.fillStyle = '#000';
         lctx.fillRect(0, 0, liveCanvas.width, liveCanvas.height);
       } else if (clearMode) {
-        const noText = { ...updatedLive, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
-        renderToCanvas(liveCanvas, noText, noText.width || 1920, noText.height || 1080);
+        const clearPresentation = createClearPresentation(updatedLive);
+        renderToCanvas(liveCanvas, clearPresentation, clearPresentation.width || 1920, clearPresentation.height || 1080);
       } else {
         renderToCanvas(liveCanvas, updatedLive, updatedLive.width || 1920, updatedLive.height || 1080);
       }
     }
     // Push updated styles to the live window if it is open
     if (liveMode) {
-      ipcRenderer.send('update-live-window', updatedLive);
+      const livePayload = clearMode ? createClearPresentation(updatedLive) : updatedLive;
+      ipcRenderer.send('update-live-window', livePayload);
+      if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
     }
   }
 }
@@ -1483,6 +1485,50 @@ function validateCSS(css) {
   }
 }
 
+function createClearPresentation(content) {
+  if (!content) return null;
+  return {
+    ...content,
+    number: '',
+    text: '',
+    reference: '',
+    secondaryText: '',
+    secondaryRef: '',
+    // Clear is the raw background, not a song/verse with its styles hidden.
+    styles: {},
+    transitionIn: null,
+    transitionOut: null,
+    clearPresentation: true
+  };
+}
+
+function renderAndSendClearPresentation() {
+  const clearPresentation = createClearPresentation(window.currentContent);
+  if (clearPresentation) {
+    const liveCanvas = document.getElementById('live-canvas');
+    if (liveCanvas) {
+      renderToCanvas(liveCanvas, clearPresentation, clearPresentation.width || 1920, clearPresentation.height || 1080);
+    }
+    // Give the live window the actual background before changing modes so it
+    // cannot derive Clear from stale content and fall back to black.
+    ipcRenderer.send('update-live-window', clearPresentation);
+  }
+  ipcRenderer.send('set-live-mode', 'clear');
+}
+
+function restoreLivePresentationAfterClear() {
+  if (window.currentContent) {
+    const liveCanvas = document.getElementById('live-canvas');
+    if (liveCanvas) {
+      renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width || 1920, window.currentContent.height || 1080);
+    }
+    // Clear replaces the live-window payload, so restore the real content
+    // before returning the output to normal mode.
+    ipcRenderer.send('update-live-window', window.currentContent);
+  }
+  ipcRenderer.send('set-live-mode', 'normal');
+}
+
 function toggleClear() {
   if (_websiteIsLive) {
     if (clearMode) {
@@ -1514,19 +1560,7 @@ function toggleClear() {
     if (window.blackButton) window.blackButton.classList.remove('active');
     if (window.clearButton) window.clearButton.classList.add('active');
 
-    // Update preview to show background without text
-    if (window.currentContent) {
-      const liveCanvas = document.getElementById('live-canvas');
-      if (liveCanvas) {
-        const width = window.currentContent.width;
-        const height = window.currentContent.height;
-        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
-        renderToCanvas(liveCanvas, contentWithoutText, width, height);
-      }
-    }
-
-    // Directly instruct live window to enter clear mode
-    ipcRenderer.send('set-live-mode', 'clear');
+    renderAndSendClearPresentation();
     return;
   }
 
@@ -1542,25 +1576,9 @@ function toggleClear() {
   }
 
   if (clearMode) {
-    // Update preview to show background without text
-    if (window.currentContent) {
-      const liveCanvas = document.getElementById('live-canvas');
-      if (liveCanvas) {
-        const width = window.currentContent.width;
-        const height = window.currentContent.height;
-        const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
-        renderToCanvas(liveCanvas, contentWithoutText, width, height);
-      }
-    }
-    // Tell live window to enter clear mode
-    ipcRenderer.send('set-live-mode', 'clear');
+    renderAndSendClearPresentation();
   } else {
-    // Turn off clear: restore preview and tell live window to return to normal
-    if (window.currentContent) {
-      const liveCanvas = document.getElementById('live-canvas');
-      if (liveCanvas) renderToCanvas(liveCanvas, window.currentContent, window.currentContent.width, window.currentContent.height);
-    }
-    ipcRenderer.send('set-live-mode', 'normal');
+    restoreLivePresentationAfterClear();
   }
 }
 
@@ -2744,8 +2762,9 @@ function renderToCanvas(canvas, content, displayWidth = 1920, displayHeight = 10
   const referenceStyle = styles && styles.reference ? styles.reference : null;
   const subscriptStyle = styles && styles.subscript ? styles.subscript : null;
   const globalStyle = styles && styles.global ? styles.global : {};
-  const _overlayOpacity = globalStyle.overlayOpacity !== undefined ? globalStyle.overlayOpacity : 0.4;
-  const _bgBlur    = parseFloat(globalStyle.bgBlur) || 0;
+  const _isClearPresentation = !!(content && content.clearPresentation);
+  const _overlayOpacity = _isClearPresentation ? 0 : (globalStyle.overlayOpacity !== undefined ? globalStyle.overlayOpacity : 0.4);
+  const _bgBlur    = _isClearPresentation ? 0 : (parseFloat(globalStyle.bgBlur) || 0);
   const _normScale = displayHeight / 1080; // normalise to 1080p for spatial values
 
   // Cache for <img> elements used as animated GIF backgrounds.
@@ -3534,16 +3553,7 @@ async function updateLive(verseOrIndices) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
     } else if (clearMode) {
-      // Render background without text in preview
-      const contentWithoutText = {
-        ...window.currentContent,
-        number: '',
-        text: '',
-        reference: '',
-        secondaryText: '',
-        secondaryRef: ''
-      };
-      renderToCanvas(liveCanvas, contentWithoutText, width, height);
+      renderToCanvas(liveCanvas, createClearPresentation(window.currentContent), width, height);
     } else {
       renderToCanvas(liveCanvas, window.currentContent, width, height);
     }
@@ -3555,7 +3565,7 @@ async function updateLive(verseOrIndices) {
   // Send update to the external live window with plain text (canvas needs plain text, not HTML)
   const backgroundMedia = getBackgroundMedia(defaultBackgrounds.verses);
   console.log('[DEBUG] Sending backgroundMedia to live window:', backgroundMedia);
-  ipcRenderer.send('update-live-window', {
+  const livePayload = {
     number: numberText,
     text: textContent,  // Send plain text with double-space format for canvas rendering
     reference: refText,
@@ -3567,7 +3577,9 @@ async function updateLive(verseOrIndices) {
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out'],
     ..._liveSec
-  });
+  };
+  ipcRenderer.send('update-live-window', clearMode ? createClearPresentation(livePayload) : livePayload);
+  if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
   
   // Push state to relay for mobile to display
   try {
@@ -6188,15 +6200,14 @@ async function updateLiveFromSongVerse(verseIndex) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, width, height);
     } else if (clearMode) {
-      const contentWithoutText = { ...window.currentContent, number: '', text: '', reference: '', secondaryText: '', secondaryRef: '' };
-      renderToCanvas(liveCanvas, contentWithoutText, width, height);
+      renderToCanvas(liveCanvas, createClearPresentation(window.currentContent), width, height);
     } else {
       renderToCanvas(liveCanvas, window.currentContent, width, height);
     }
   }
   
   const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
-  ipcRenderer.send('update-live-window', {
+  const livePayload = {
     number: '',
     text: verseData.text,
     reference: `${verseData.title} - ${verseData.section}`,
@@ -6207,7 +6218,9 @@ async function updateLiveFromSongVerse(verseIndex) {
     _displayStyleOverrides: getPerDisplayStyleOverrides('song') || undefined,
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
-  });
+  };
+  ipcRenderer.send('update-live-window', clearMode ? createClearPresentation(livePayload) : livePayload);
+  if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
   
   // Push song state to relay for mobile to display
   try {

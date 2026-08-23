@@ -964,8 +964,9 @@
       const height = canvas.height;
       // Extract per-call style globals so closures (video loop, callbacks) inherit them
       const _rstGlobal      = (renderContent_content.styles && renderContent_content.styles.global) || {};
-      const _overlayOpacity = _rstGlobal.overlayOpacity !== undefined ? _rstGlobal.overlayOpacity : 0.4;
-      const _bgBlur         = parseFloat(_rstGlobal.bgBlur) || 0;
+      const _isClearPresentation = !!renderContent_content.clearPresentation;
+      const _overlayOpacity = _isClearPresentation ? 0 : (_rstGlobal.overlayOpacity !== undefined ? _rstGlobal.overlayOpacity : 0.4);
+      const _bgBlur         = _isClearPresentation ? 0 : (parseFloat(_rstGlobal.bgBlur) || 0);
       const _normScale      = height / 1080;
 
       // IMPORTANT: Store OLD content before updating currentRenderContent
@@ -2126,6 +2127,17 @@
         } else {
           hideMirrorVideo();
         }
+        return;
+      }
+
+      // Renderer sends a neutral background-only payload before this mode
+      // change. Render that same payload instead of maintaining a divergent
+      // hand-built Clear renderer that can lose media or keep its blur.
+      if (mode === 'clear' && window.currentContent && window.currentContent.clearPresentation) {
+        isClearMode = true;
+        isBlackMode = false;
+        hideMirrorVideo();
+        renderContent(window.currentContent);
         return;
       }
 

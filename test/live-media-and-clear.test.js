@@ -10,6 +10,15 @@ describe('live clear and standalone media regressions', () => {
     expect(liveHtml).toContain("setLiveMode('clear');");
   });
 
+  test('Clear sends a neutral background payload rather than retaining song styles', () => {
+    expect(renderer).toContain('function createClearPresentation(content)');
+    expect(renderer).toContain('styles: {}');
+    expect(renderer).toContain('clearPresentation: true');
+    expect(renderer).toContain("ipcRenderer.send('update-live-window', clearPresentation);");
+    expect(liveHtml).toContain('const _isClearPresentation = !!renderContent_content.clearPresentation;');
+    expect(liveHtml).toContain('_isClearPresentation ? 0');
+  });
+
   test('standalone media bypasses the old text/background crossfade and clears the text layer', () => {
     expect(liveHtml).toContain('if (!renderContent_content.isMedia && oldContent && !backgroundsEqual(oldContent, renderContent_content))');
     expect(liveHtml).toContain('textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);');

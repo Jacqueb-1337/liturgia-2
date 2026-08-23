@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.18 - 2026-08-23
+
+- fix: make Clear render the unstyled configured background on preview and live outputs
+- fix: wait for the downloaded Windows installer to finish writing before closing Liturgia
+
 ## 6.1.17 - 2026-08-23
 
 - fix: keep Songs and Bible search fields focused and prevent presentation shortcuts from consuming typed keys

@@ -12,4 +12,12 @@ describe('in-app installer shutdown', () => {
     expect(main).toContain('app.exit(0);');
     expect(main).toMatch(/launchInstallerAfterAppExit\(file\);\s+quitForInstallerUpdate\(\);/);
   });
+
+  test('does not offer the installer until its download stream has finished writing', () => {
+    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+
+    expect(main).toContain("destStream.on('finish'");
+    expect(main).toContain('Downloaded installer is incomplete');
+    expect(main).toContain('Downloaded installer is empty');
+  });
 });

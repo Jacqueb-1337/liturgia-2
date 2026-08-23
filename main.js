@@ -3351,6 +3351,14 @@ ipcMain.handle('download-update', async (event, { url }) => {
     downloads[dest] = { res: r };
 
     return await new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        try { destStream.close(); fs.unlinkSync(dest); } catch (e) {}
+        delete downloads[dest];
+        reject({ ok:false, error: String(err) });
+      };
       r.body.on('data', (chunk) => {
         downloaded += chunk.length;
         destStream.write(chunk);
@@ -3359,15 +3367,21 @@ ipcMain.handle('download-update', async (event, { url }) => {
       });
       r.body.on('end', () => {
         destStream.end();
+      });
+      destStream.on('finish', () => {
+        if (settled) return;
+        const size = fs.statSync(dest).size;
+        if (!size || (total && size !== total)) {
+          fail(`Downloaded installer is incomplete (${size} of ${total || 'unknown'} bytes)`);
+          return;
+        }
+        settled = true;
         try { event.sender.send('update-download-complete', { file: dest }); } catch (e) {}
         delete downloads[dest];
         resolve({ ok:true, file: dest });
       });
-      r.body.on('error', (err) => {
-        try { destStream.close(); fs.unlinkSync(dest); } catch (e) {}
-        delete downloads[dest];
-        reject({ ok:false, error: String(err) });
-      });
+      r.body.on('error', fail);
+      destStream.on('error', fail);
     });
   } catch (e) { return { ok:false, error: String(e) }; }
 });
@@ -3422,6 +3436,8 @@ function quitForInstallerUpdate() {
 ipcMain.handle('run-installer', async (event, file) => {
   try {
     if (!fs.existsSync(file)) return { ok:false, error:'File not found' };
+    const installerSize = fs.statSync(file).size;
+    if (!installerSize) return { ok:false, error:'Downloaded installer is empty' };
 
     launchInstallerAfterAppExit(file);
     quitForInstallerUpdate();
