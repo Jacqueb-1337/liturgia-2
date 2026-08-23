@@ -58,4 +58,14 @@ describe('Browser Remote style window and verse state', () => {
     expect(renderer).toContain("case 'ADD_SONG_TO_SCHEDULE':");
     expect(server).toContain("ADD_SONG_TO_SCHEDULE: 'schedule.edit'");
   });
+
+  test('keeps the narrow workspace visually consistent with the desktop remote', () => {
+    const css = fs.readFileSync(path.join(root, 'remote-desktop.css'), 'utf8');
+
+    expect(css).toContain('A narrow display is a compact continuation of the desktop workspace');
+    expect(css).toContain(':root { color-scheme: light; }');
+    expect(css).toContain('.shell > header { height: 42px;');
+    expect(css).toContain('.nav { position: sticky; top: 42px;');
+    expect(css).toContain('.mobile-overflow-sheet { padding: 9px 14px');
+  });
 });

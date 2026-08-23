@@ -351,3 +351,73 @@ main {
 @media (min-width: 920px) {
   .mobile-more-button, .mobile-overflow, .mobile-reference, .mobile-verse-results { display: none !important; }
 }
+
+/* A narrow display is a compact continuation of the desktop workspace, not a
+   separate visual product.  Keep the desktop colors, controls, and tab-strip;
+   only move infrequent destinations into the existing More sheet. */
+@media (max-width: 919px) {
+  :root { color-scheme: light; }
+  html, body { background: #f3f3f3; color: #222; }
+  body { font-family: sans-serif; }
+  .shell { min-height: 100dvh; padding: 0; background: #f3f3f3; }
+  .shell > header { height: 42px; min-height: 42px; padding: 6px 12px; color: #fff; background: #333; border-bottom: 0; box-shadow: none; backdrop-filter: none; }
+  .brand { font-size: 1rem; }
+  .brand-mark { width: 26px; height: 26px; border-radius: 3px; background: #0078d4; box-shadow: none; }
+  .connection { color: #ddd; }
+  #remote-app { padding: 0; }
+  main { background: #f3f3f3; }
+  .page:not(#page-live) { padding: 12px; }
+  .page:not(#page-live) .panel { padding: 12px; color: #222; background: #fff; border: 1px solid #ccc; border-radius: 0; }
+  .page-title { margin: 0 0 10px; padding: 10px 12px; color: #222; background: #e0e0e0; border-bottom: 1px solid #ccc; }
+
+  .nav { position: sticky; top: 42px; z-index: 40; display: flex; align-items: center; min-height: 40px; height: 40px; margin: 0; padding: 0 8px; overflow: hidden; background: #fafafa; border: 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; box-shadow: none; backdrop-filter: none; }
+  .nav button { flex: 0 1 auto; min-width: 0; margin: 0; padding: 10px 12px; color: #333; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font-size: .88rem; font-weight: 500; line-height: 18px; text-align: center; white-space: nowrap; }
+  .nav button.active, .nav button:hover { color: #0078d4; background: transparent; border-bottom-color: #0078d4; }
+  .nav button[data-page="bible"], .nav button[data-page="settings"], .nav button[data-page="accounts"] { display: none; }
+  .mobile-more-button { display: block; margin-left: auto !important; }
+
+  .desktop-stage { display: block; height: auto; background: #f3f3f3; }
+  .desktop-stage > .schedule-pane, .desktop-splitter, .preview-pane { display: none; }
+  .slide-panes, .slide-pane { display: block; }
+  .live-pane { border: 0; border-radius: 0; background: #fff; }
+  .slide-pane-label { display: block; padding: 7px 10px; color: #333; background: #e0e0e0; border-bottom: 1px solid #ccc; font-size: .85rem; font-weight: 700; }
+  .slide-canvas { min-height: min(48svh, 330px); padding: 18px; background: #000; }
+  .live-title { font-size: clamp(1.2rem, 6vw, 2rem); }
+  .live-text { color: #fff; }
+  .remote-control-strip { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 8px; color: #333; background: #fafafa; border: 0; border-top: 1px solid #ccc; border-radius: 0; }
+  .remote-control-strip .controls { display: flex; gap: 6px; }
+  .remote-control-strip .button, .button { min-height: 32px; padding: 6px 10px; color: #222; background: #f5f5f5; border: 1px solid #aaa; border-radius: 3px; font-weight: 600; }
+  .button.primary, .button.good { color: #fff; background: #0078d4; border-color: #0078d4; }
+  .button.danger { color: #fff; background: #c42b1c; border-color: #c42b1c; }
+  .button.ghost { color: #333; background: #f5f5f5; border-color: #aaa; }
+  .remote-control-strip .state-row { display: flex; margin-left: 10px; padding: 0 0 0 10px; color: #666; border: 0; border-left: 1px solid #ccc; }
+  .state-row strong { color: #333; }
+
+  input, select, textarea { color: #222; background: #fff; border-color: #aaa; border-radius: 3px; }
+  .toolbar { position: static; margin: 0 0 12px; padding: 10px; background: #f5f5f5; border-bottom: 1px solid #ccc; backdrop-filter: none; }
+  .toolbar input { flex: 1 1 170px; }
+  .list-item { color: #222; background: #fff; border-color: #ccc; border-radius: 0; }
+  .list-item.selected { color: #222; background: #eaf4fc; border-color: #0078d4; }
+  .item-meta, .muted { color: #666; }
+  .song-detail, .song-editor { color: #222; background: #fff; border-color: #ccc; border-radius: 0; }
+  .song-lyrics { color: #333; }
+  .pill { color: #333; background: #f5f5f5; border-color: #aaa; border-radius: 3px; }
+
+  .mobile-reference { margin-bottom: 12px; }
+  .mobile-verse-results { margin-top: 14px; }
+  .mobile-results-heading { color: #666; }
+  .mobile-verse-result { color: #222; background: #fff; border-color: #ccc; border-radius: 0; }
+  .mobile-verse-result:active { background: #eaf4fc; border-color: #0078d4; }
+  .mobile-verse-result strong { color: #0078d4; }
+
+  .mobile-overflow { background: rgba(0, 0, 0, .28); }
+  .mobile-overflow-sheet { padding: 9px 14px calc(18px + env(safe-area-inset-bottom)); color: #222; background: #fff; border: 1px solid #ccc; border-radius: 5px 5px 0 0; box-shadow: 0 -8px 24px rgba(0, 0, 0, .22); }
+  .mobile-overflow-handle { background: #aaa; }
+  .mobile-overflow-actions button { color: #222; background: #f5f5f5; border: 1px solid #ccc; border-radius: 3px; font-weight: 600; }
+}
+
+@media (max-width: 420px) {
+  .nav button { padding-right: 8px; padding-left: 8px; font-size: .8rem; }
+  .remote-control-strip { flex-wrap: wrap; }
+  .remote-control-strip .state-row { margin-left: 0; }
+}

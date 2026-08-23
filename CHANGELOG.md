@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.12 - 2026-08-23
+
+- fix: keep the compact browser remote visually consistent with the desktop workspace
+
 ## 6.1.11 - 2026-08-23
 
 - fix: keep settings navigation and long panels scrollable within the window
