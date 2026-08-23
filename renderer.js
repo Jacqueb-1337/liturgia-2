@@ -891,6 +891,9 @@ let cachedDisplaySettings = {}; // Cache of settings.displaySettings for per-dis
 let liveMode = false;
 let clearMode = false;
 let blackMode = false;
+function isTextEntryElement(element) {
+  return !!(element && (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT' || element.isContentEditable));
+}
 let _websiteIsLive = false; // true while a website is the active live source
 let _rememberedWidget = null;
 window.__activeObsWidget = window.__activeObsWidget || {
@@ -2121,7 +2124,22 @@ ipcRenderer.on('prepare-renderer-report', async () => {
     // This also fixes Enter (go-live) firing inside the song editor textarea.
     if (isAnyModalOpen()) return;
 
-    // Check for go-live keybind first, before text input check (should work globally)
+    // Never let presentation keybinds consume a character intended for an
+    // editable field.  This includes the Songs and Bible search boxes, which
+    // otherwise can look focused but refuse to accept the bound key.
+    const isTextInput = isTextEntryElement(e.target) || isTextEntryElement(document.activeElement);
+    if (isTextInput) {
+      if (matchesKeybind(keybinds['focus-search'], e)) {
+        e.preventDefault();
+        const searchEl = currentTab === 'songs'
+          ? document.getElementById('song-search-input')
+          : document.getElementById('search-autocomplete-input');
+        if (searchEl) { searchEl.focus(); searchEl.select(); }
+      }
+      return;
+    }
+
+    // Check for go-live keybind when not entering text.
     if (matchesKeybind(keybinds['go-live'], e)) {
       e.preventDefault();
       handleVerseDoubleClick(); // Calls the same logic as "Go Live" button
@@ -2145,10 +2163,6 @@ ipcRenderer.on('prepare-renderer-report', async () => {
     const songDisplay = document.getElementById('song-display');
     const isSongDisplayOpen = selectedSongIndices.length > 0 && songDisplay && songDisplay.style.display !== 'none';
     const active = document.activeElement;
-    
-    // Don't intercept other keybinds when text editing (must be after go-live check)
-    const isTextInput = active && (active.tagName === 'TEXTAREA' || active.tagName === 'INPUT' || active.isContentEditable);
-    if (isTextInput) return;
     
     // Check if we're on a schedule song verse (these have their own focus)
     const isSongScheduleVerse = active && active.classList.contains('schedule-verse-item') && 
@@ -3892,6 +3906,9 @@ function updateSearchBoxForVerse(verseIndex) {
 }
 
 function selectNextVerse(extendSelection = false) {
+  // Search-box arrow navigation should move the selected verse without taking
+  // the caret away from the search input.
+  const preserveTextFocus = isTextEntryElement(document.activeElement);
   if (!selectedIndices.length) {
     selectedIndices = [0];
     anchorIndex = 0;
@@ -3931,8 +3948,8 @@ function selectNextVerse(extendSelection = false) {
   // Re-render after scroll to ensure the item is visible
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
   
-  // Blur any focused element to ensure global keyboard handler works properly
-  if (document.activeElement) {
+  // List navigation owns focus; text-entry navigation does not.
+  if (!preserveTextFocus && document.activeElement) {
     document.activeElement.blur();
   }
   
@@ -3941,6 +3958,9 @@ function selectNextVerse(extendSelection = false) {
 }
 
 function selectPrevVerse(extendSelection = false) {
+  // Search-box arrow navigation should move the selected verse without taking
+  // the caret away from the search input.
+  const preserveTextFocus = isTextEntryElement(document.activeElement);
   if (!selectedIndices.length) {
     selectedIndices = [0];
     anchorIndex = 0;
@@ -3980,11 +4000,13 @@ function selectPrevVerse(extendSelection = false) {
   // Re-render after scroll to ensure the item is visible
   renderWindow(allVerses, listContainer.scrollTop, selectedIndices, handleVerseClick);
   
-  // Blur any focused element to ensure global keyboard handler works properly
-  setTimeout(() => {
-    const el = document.querySelector(`.verse-item[data-index="${targetIndex}"]`);
-    if (el) el.focus();
-  }, 5);
+  // Only a list-originated navigation should move focus onto a verse row.
+  if (!preserveTextFocus) {
+    setTimeout(() => {
+      const el = document.querySelector(`.verse-item[data-index="${targetIndex}"]`);
+      if (el) el.focus();
+    }, 5);
+  }
   
   // Update search box with new verse reference
   updateSearchBoxForVerse(targetIndex);
@@ -6416,6 +6438,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const songSearchInput = document.getElementById('song-search-input');
   if (songSearchInput) {
     songSearchInput.addEventListener('input', applyFiltersAndRender);
+    // A queued list-focus operation can otherwise win immediately after the
+    // user clicks this input. Reassert it on the next frame, and keep keyboard
+    // events inside the search field instead of bubbling to presentation
+    // keybinds.
+    songSearchInput.addEventListener('pointerdown', () => {
+      requestAnimationFrame(() => {
+        if (songSearchInput.isConnected && !songSearchInput.disabled) songSearchInput.focus();
+      });
+    });
+    songSearchInput.addEventListener('keydown', (event) => event.stopPropagation());
   }
   const hymnalSelect = document.getElementById('song-hymnal-filter');
   if (hymnalSelect) {

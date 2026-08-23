@@ -69,6 +69,14 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   input.spellcheck = false;
   input.style.width = '14em';
 
+  // Search is text entry, not a presentation command. Keep a just-clicked
+  // input focused if a queued verse-list focus runs in the same event turn.
+  input.addEventListener('pointerdown', () => {
+    requestAnimationFrame(() => {
+      if (input.isConnected && !input.disabled) input.focus();
+    });
+  });
+
   // Closest match display
   const matchBox = document.createElement('div');
   matchBox.style.marginTop = '0.25em';
@@ -223,6 +231,9 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
 
   // Also handle navigation and enter
   input.addEventListener('keydown', (e) => {
+    // Global presentation hotkeys live on window. Let the search own its keys
+    // so a configured shortcut cannot make a focused field appear frozen.
+    e.stopPropagation();
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
       if (onNavigate) onNavigate('prev');

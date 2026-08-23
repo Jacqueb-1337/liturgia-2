@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.17 - 2026-08-23
+
+- fix: keep Songs and Bible search fields focused and prevent presentation shortcuts from consuming typed keys
+
 ## 6.1.16 - 2026-08-23
 
 - fix: preserve the configured presentation background when Clear redraws the live output
