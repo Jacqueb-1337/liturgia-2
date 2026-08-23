@@ -1,5 +1,9 @@
 # Changelog
 
+## 6.1.10 - 2026-08-23
+
+- feat: add remote desktop styling and service worker for offline support
+
 ## 6.1.9 - 2026-08-02
 
 - fix: load Settings after subscription controls
