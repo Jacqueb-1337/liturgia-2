@@ -723,6 +723,30 @@ function getCurrentLiveFields() {
   };
 }
 
+// The LAN Browser Remote uses compact snapshots of the actual desktop canvases
+// for its wide-screen Preview and Live panes. This keeps backgrounds, fonts,
+// safe areas, and media rendering visually identical without sending full-size
+// display frames to the cloud relay.
+function getRemoteCanvasSnapshots() {
+  const snapshot = (id) => {
+    const source = document.getElementById(id);
+    if (!source || !source.width || !source.height) return null;
+    try {
+      const maximumWidth = 1280;
+      const scale = Math.min(1, maximumWidth / source.width);
+      const target = document.createElement('canvas');
+      target.width = Math.max(1, Math.round(source.width * scale));
+      target.height = Math.max(1, Math.round(source.height * scale));
+      target.getContext('2d').drawImage(source, 0, 0, target.width, target.height);
+      return target.toDataURL('image/jpeg', 0.86);
+    } catch (error) {
+      console.warn('[remote] Could not snapshot', id, error.message || error);
+      return null;
+    }
+  };
+  return { preview: snapshot('preview-canvas'), live: snapshot('live-canvas') };
+}
+
 function buildRelayAllScheduleItems() {
   return scheduleItems.map((item, idx) => {
     if (item.type === 'verses') {
@@ -778,6 +802,7 @@ async function pushScheduleUpdate() {
       })),
       lastUpdated: Date.now()
     };
+    state.remoteCanvases = getRemoteCanvasSnapshots();
     lastRelayState = state;
     await ipcRenderer.invoke('relay-push-state', state);
   } catch (err) {
@@ -3542,6 +3567,7 @@ async function updateLive(verseOrIndices) {
       lastUpdated: Date.now()
     };
     console.log('[relay] Pushing state:', JSON.stringify(state));
+    state.remoteCanvases = getRemoteCanvasSnapshots();
     lastRelayState = state;
     await ipcRenderer.invoke('relay-push-state', state);
   } catch (err) {
@@ -6141,6 +6167,7 @@ async function updateLiveFromSongVerse(verseIndex) {
           lastUpdated: Date.now()
         };
         console.log('[relay] Pushing song state:', JSON.stringify(state));
+        state.remoteCanvases = getRemoteCanvasSnapshots();
         lastRelayState = state;
         await ipcRenderer.invoke('relay-push-state', state);
       }
@@ -8509,6 +8536,100 @@ function initLowerThird() {
   })();
 }
 
+function parseSongEditorLyrics(lyricsText) {
+  const sectionTexts = String(lyricsText || '').split(/\n\n+/).filter(v => v.trim());
+  return sectionTexts.map((text) => {
+    let sectionContent = text.trim();
+    const lines = sectionContent.split('\n');
+    const firstLine = lines[0] ? lines[0].trim() : '';
+    const tagLineMatch = firstLine.match(/^[\[\{\(](.+?)[\]\}\)]$/);
+    let section = 'Verse';
+    if (tagLineMatch) {
+      section = tagLineMatch[1].trim();
+      lines.shift();
+      sectionContent = lines.join('\n').trim();
+    }
+    return { section, text: sectionContent };
+  }).filter((section) => section.text);
+}
+
+async function saveRemoteSong(data) {
+  const title = String(data && data.title || '').trim();
+  const lyricsText = String(data && data.lyrics || '').trim();
+  if (!title) throw new Error('A song title is required.');
+  if (!lyricsText) throw new Error('Song lyrics are required.');
+  if (title.length > 240 || lyricsText.length > 200000) throw new Error('This song is too large.');
+  const lyrics = parseSongEditorLyrics(lyricsText);
+  if (!lyrics.length) throw new Error('Add at least one lyric section.');
+
+  const songData = { title, author: String(data.author || '').trim(), lyrics };
+  const hymnal = String(data.hymnal || '').trim();
+  const page = Number.parseInt(data.page, 10);
+  if (hymnal) songData.hymnal = hymnal;
+  if (Number.isInteger(page) && page > 0) songData.page = page;
+
+  const requestedIndex = Number.isInteger(data.songIndex) ? data.songIndex : null;
+  let songIndex;
+  if (requestedIndex !== null && requestedIndex >= 0 && requestedIndex < allSongs.length) {
+    allSongs[requestedIndex] = songData;
+    songIndex = requestedIndex;
+  } else {
+    allSongs.push(songData);
+    songIndex = allSongs.length - 1;
+  }
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  fs.writeFileSync(path.join(userData, 'songs.json'), JSON.stringify(allSongs, null, 2), 'utf8');
+  selectedSongIndices = [songIndex];
+  selectedSongVerseIndex = null;
+  filteredSongs = [];
+  renderSongList(allSongs);
+  populateHymnalFilter();
+  displaySelectedSong();
+  await pushScheduleUpdate();
+  return songIndex;
+}
+
+async function deleteRemoteSong(songIndex) {
+  if (!Number.isInteger(songIndex) || songIndex < 0 || songIndex >= allSongs.length) throw new Error('Song not found.');
+  allSongs.splice(songIndex, 1);
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  fs.writeFileSync(path.join(userData, 'songs.json'), JSON.stringify(allSongs, null, 2), 'utf8');
+  selectedSongIndices = [];
+  selectedSongVerseIndex = null;
+  filteredSongs = [];
+  renderSongList(allSongs);
+  populateHymnalFilter();
+  displaySelectedSong();
+  await pushScheduleUpdate();
+}
+
+async function importRemoteSongs(songs) {
+  if (!Array.isArray(songs) || songs.length === 0) throw new Error('No songs were found in that file.');
+  if (songs.length > 1000) throw new Error('Import up to 1,000 songs at a time.');
+  let added = 0;
+  for (const rawSong of songs) {
+    const title = String(rawSong && rawSong.title || '').trim();
+    const lyrics = Array.isArray(rawSong && rawSong.lyrics) ? rawSong.lyrics
+      .map((section) => ({ section: String(section && section.section || 'Verse').trim(), text: String(section && section.text || '').trim() }))
+      .filter((section) => section.text) : [];
+    if (!title || !lyrics.length) continue;
+    const duplicate = allSongs.some((song) => String(song.title || '').trim().toLowerCase() === title.toLowerCase() && String(song.author || '').trim().toLowerCase() === String(rawSong.author || '').trim().toLowerCase());
+    if (duplicate) continue;
+    const song = { title, author: String(rawSong.author || '').trim(), lyrics };
+    if (rawSong.hymnal) song.hymnal = String(rawSong.hymnal).trim();
+    if (Number.isInteger(Number(rawSong.page)) && Number(rawSong.page) > 0) song.page = Number(rawSong.page);
+    allSongs.push(song);
+    added++;
+  }
+  if (!added) throw new Error('No new valid songs were found.');
+  const userData = await ipcRenderer.invoke('get-user-data-path');
+  fs.writeFileSync(path.join(userData, 'songs.json'), JSON.stringify(allSongs, null, 2), 'utf8');
+  renderSongList(allSongs);
+  populateHymnalFilter();
+  await pushScheduleUpdate();
+  return added;
+}
+
 function openColorEditor(mediaIndex = null) {
   editingMediaIndex = mediaIndex;
   const modal = document.getElementById('color-editor-modal');
@@ -10741,10 +10862,13 @@ ipcRenderer.on('relay-push-state-request', async () => {
   try {
     const liveFields = getCurrentLiveFields();
     const verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
+    const verseRefs = allVerses.map((verse, index) => ({ index, key: verse.key }));
     const state = lastRelayState ? {
       ...lastRelayState,
       ...liveFields,
       verseMeta,
+      verseRefs,
+      previewStyles: { ...previewStyles },
       lastUpdated: Date.now()
     } : {
       ...liveFields,
@@ -10762,8 +10886,12 @@ ipcRenderer.on('relay-push-state-request', async () => {
         lyrics: song.lyrics || []
       })),
       verseMeta,
+      verseRefs,
+      previewStyles: { ...previewStyles },
       lastUpdated: Date.now()
     };
+    state.remoteCanvases = getRemoteCanvasSnapshots();
+    lastRelayState = state;
     await ipcRenderer.invoke('relay-push-state', state);
   } catch (err) {
     console.error('[relay] Failed to push initial state:', err);
@@ -10796,6 +10924,10 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
             lastUpdated: Date.now()
           };
           reqState.verseMeta = { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames };
+          reqState.verseRefs = allVerses.map((verse, index) => ({ index, key: verse.key }));
+          reqState.previewStyles = { ...previewStyles };
+          reqState.remoteCanvases = getRemoteCanvasSnapshots();
+          lastRelayState = reqState;
           await ipcRenderer.invoke('relay-push-state', reqState);
         } catch (err) {
           console.error('[relay] Failed to push state on REQUEST_STATE:', err);
@@ -10852,7 +10984,36 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           }
         }
         break;
-        
+
+      case 'LOOKUP_VERSES': {
+        if (!data.book || !data.chapter || !data.verse) break;
+        const startKey = `${data.book} ${data.chapter}:${data.verse}`;
+        const startIndex = allVerses.findIndex((verse) => verse.key === startKey);
+        if (startIndex < 0) break;
+        const endVerse = Number(data.verseEnd) >= Number(data.verse) ? Number(data.verseEnd) : Number(data.verse);
+        const selected = [];
+        for (let verseNumber = Number(data.verse); verseNumber <= endVerse; verseNumber++) {
+          const verse = allVerses.find((entry) => entry.key === `${data.book} ${data.chapter}:${verseNumber}`);
+          if (verse) selected.push({ verseNumber, text: verse.text || '' });
+        }
+        const lookup = [{ book: data.book, chapter: Number(data.chapter), startVerse: Number(data.verse), endVerse, length: selected.length, text: selected.map((verse) => `${verse.verseNumber}  ${verse.text}`).join('\n') }];
+        const nextState = {
+          ...(lastRelayState || {}),
+          bible: lookup,
+          verseResults: selected.map((verse) => ({ key: `${data.book} ${data.chapter}:${verse.verseNumber}`, text: verse.text })),
+          songs: (lastRelayState && lastRelayState.songs) || [],
+          scheduling: (lastRelayState && lastRelayState.scheduling) || { totalItems: scheduleItems.length, currentItem: currentLiveScheduleIndex, hasSchedule: scheduleItems.length > 0 },
+          allScheduleItems: (lastRelayState && lastRelayState.allScheduleItems) || buildRelayAllScheduleItems(),
+          allSongs: (lastRelayState && lastRelayState.allSongs) || allSongs.map((song, idx) => ({ index: idx, title: song.title, author: song.author || '', lyrics: song.lyrics || [] })),
+          verseMeta: { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames },
+          verseRefs: allVerses.map((verse, index) => ({ index, key: verse.key })),
+          lastUpdated: Date.now()
+        };
+        lastRelayState = nextState;
+        await ipcRenderer.invoke('relay-push-state', nextState);
+        break;
+      }
+
       case 'SELECT_SONG':
         // Select a song by index and display it
         if (typeof data.songIndex === 'number') {
@@ -10875,6 +11036,9 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
         
       case 'SELECT_SONG_VERSE':
         // Select a specific verse within the currently selected song
+        if (typeof data.songIndex === 'number' && allSongs[data.songIndex]) {
+          selectedSongIndices = [data.songIndex];
+        }
         if (typeof data.verseIndex === 'number' && selectedSongIndices.length > 0) {
           console.log('[remote] Selecting song verse index:', data.verseIndex);
           selectedSongVerseIndex = data.verseIndex;
@@ -10970,7 +11134,19 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           console.warn('[remote] DISPLAY_SONG_VERSE missing songIndex or verseIndex:', data);
         }
         break;
-        
+
+      case 'UPSERT_SONG':
+        await saveRemoteSong(data || {});
+        break;
+
+      case 'DELETE_SONG':
+        await deleteRemoteSong(data && data.songIndex);
+        break;
+
+      case 'IMPORT_SONGS':
+        await importRemoteSongs(data && data.songs);
+        break;
+
       case 'GO_LIVE':
         // Make current selection go live
         if (currentTab === 'verses' && selectedIndices.length > 0) {
@@ -11032,7 +11208,15 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           console.warn('[remote] ADD_TO_SCHEDULE missing data:', data);
         }
         break;
-        
+
+      case 'ADD_SONG_TO_SCHEDULE':
+        if (typeof data.songIndex === 'number' && allSongs[data.songIndex]) {
+          addSongToSchedule(data.songIndex);
+        } else {
+          console.warn('[remote] ADD_SONG_TO_SCHEDULE missing or invalid songIndex:', data);
+        }
+        break;
+
       case 'GO_LIVE_SCHEDULE_ITEM':
         if (typeof data.scheduleIndex === 'number') {
           const schedItem = scheduleItems[data.scheduleIndex];
@@ -11067,6 +11251,51 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           renderSchedule();
           saveScheduleToSettings();
         }
+        break;
+
+      case 'DELETE_SCHEDULE_ITEM':
+        if (typeof data.scheduleIndex === 'number' && data.scheduleIndex >= 0 && data.scheduleIndex < scheduleItems.length) {
+          deleteScheduleItem(data.scheduleIndex);
+        }
+        break;
+
+      case 'CLEAR_SCHEDULE':
+        if (scheduleItems.length) {
+          scheduleItems = [];
+          currentLiveScheduleIndex = null;
+          selectedScheduleItems = [];
+          renderSchedule();
+          saveScheduleToSettings();
+        }
+        break;
+
+      case 'SET_BIBLE_TRANSLATION':
+        if (data && typeof data.bible === 'string' && data.bible.trim()) {
+          ipcRenderer.send('set-default-bible', data.bible.trim());
+        }
+        break;
+
+      case 'OPEN_SETTINGS':
+        ipcRenderer.send('remote-open-settings');
+        break;
+
+      case 'TOGGLE_WIDGET':
+        if (typeof window.onToggleLowerThird === 'function') window.onToggleLowerThird();
+        break;
+
+      case 'UPDATE_STYLES':
+        if (data && data.previewStyles && typeof data.previewStyles === 'object') {
+          previewStyles = { ...data.previewStyles };
+          await ipcRenderer.invoke('update-settings', { previewStyles });
+          applyPreviewStyles();
+          rerenderPreviewForStyles();
+          lastRelayState = { ...(lastRelayState || {}), previewStyles: { ...previewStyles }, remoteCanvases: getRemoteCanvasSnapshots(), lastUpdated: Date.now() };
+          await ipcRenderer.invoke('relay-push-state', lastRelayState);
+        }
+        break;
+
+      case 'OPEN_STYLE_EDITOR':
+        openTextStyleModal();
         break;
 
     }

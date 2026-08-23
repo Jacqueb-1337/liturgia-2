@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161b2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/remote-web-manifest.json">
+  <link rel="apple-touch-icon" href="/remote-icon.png">
+  <title>Liturgia Remote</title>
+  <style>
+    :root { color-scheme: dark; --bg:#111527; --panel:#1a2036; --panel-2:#222a45; --line:#303b60; --text:#f5f7ff; --muted:#aab5d1; --accent:#7c9cff; --good:#51d49a; --warn:#f6c75d; --danger:#ff718b; }
+    * { box-sizing:border-box } body { margin:0; background:linear-gradient(135deg,#101426,#171e36); color:var(--text); font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; min-height:100vh }
+    button,input,select,textarea { font:inherit } button { cursor:pointer } button:disabled { cursor:not-allowed; opacity:.45 }
+    .shell { max-width:1180px; margin:auto; padding:18px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0 18px; }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:-.02em; font-size:1.2rem }.brand-mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#8c6cff,#5da7ff);box-shadow:0 8px 28px #6d7eff55}
+    .connection { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:.88rem }.dot{width:9px;height:9px;border-radius:99px;background:var(--danger)}.dot.on{background:var(--good);box-shadow:0 0 0 4px #51d49a22}
+    .card { background:rgba(26,32,54,.94); border:1px solid var(--line); border-radius:16px; box-shadow:0 16px 45px #06091c44; }
+    .auth { max-width:460px; margin:7vh auto; padding:24px; }.auth h1{margin:0 0 7px;font-size:1.5rem}.muted{color:var(--muted);line-height:1.45}.notice{border:1px solid #53608a;background:#202a48;color:#ced8ff;padding:10px 12px;border-radius:9px;margin:14px 0;font-size:.9rem}.error{color:#ffd3da;border-color:#7c4253;background:#3a202b}.hidden{display:none!important}
+    label { display:block; color:#d9e0f5; font-weight:650; font-size:.88rem; margin:13px 0 6px } input,select,textarea { width:100%; color:var(--text); background:#10162a; border:1px solid #3a476d; padding:10px 11px; border-radius:9px; outline:none } input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px #7c9cff2c}
+    .button { border:0; border-radius:9px; padding:10px 13px; font-weight:750; color:white; background:#3e4d7b; }.button.primary{background:linear-gradient(135deg,#6d78ed,#729dff)}.button.good{background:#278862}.button.danger{background:#923d52}.button.ghost{border:1px solid #3a476d;background:transparent;color:#d9e1ff}.button.small{padding:7px 9px;font-size:.82rem}.button-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+    .app { display:grid; grid-template-columns:210px minmax(0,1fr); gap:14px }.nav { padding:10px; height:max-content; position:sticky;top:14px }.nav button { width:100%; color:#c9d4ef; background:transparent; border:0; border-radius:9px; padding:11px 10px; text-align:left; font-weight:700; margin:2px 0 }.nav button.active,.nav button:hover { background:#2b3557; color:white }.nav-note{font-size:.78rem;color:var(--muted);padding:12px 10px 2px;line-height:1.35}
+    main { min-width:0 }.page { display:none }.page.active{display:block}.page-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 13px}.page-title h1{font-size:1.25rem;margin:0}.live-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:14px}.panel{padding:16px}.panel h2{font-size:1rem;margin:0 0 12px}.live-preview{min-height:245px;display:flex;flex-direction:column;justify-content:center;text-align:center;background:radial-gradient(circle at top,#2f3d6b,#14192d 68%);overflow:hidden}.live-kicker{font-weight:800;text-transform:uppercase;letter-spacing:.12em;font-size:.72rem;color:#aebfff}.live-title{font-size:clamp(1.3rem,3vw,2.3rem);font-weight:850;line-height:1.13;margin:12px auto;max-width:800px}.live-text{white-space:pre-wrap;line-height:1.6;color:#dbe3fb;max-width:850px;margin:auto}.empty{color:var(--muted);text-align:center;padding:24px}.controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.controls .button:first-child{grid-column:span 2}.state-row{display:flex;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid #2d3658;font-size:.9rem}.state-row:last-child{border:0}
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px }.toolbar input{flex:1;min-width:180px}.two-col {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.three-col {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.list{display:grid;gap:7px;max-height:60vh;overflow:auto;padding-right:3px}.list-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:11px;border:1px solid #303a5e;border-radius:10px;background:#171d32}.list-item.selected{border-color:#819aff;background:#242e51}.item-title{font-weight:750}.item-meta{font-size:.83rem;color:var(--muted);margin-top:2px}.item-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.song-detail{margin-top:14px}.song-lyrics{white-space:pre-wrap;color:#d5ddf4;line-height:1.5;max-height:30vh;overflow:auto;border-top:1px solid #303a5e;padding-top:12px}.section-pills{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.pill{border:1px solid #45547d;border-radius:99px;background:#202941;color:#dfe7ff;padding:6px 9px;font-size:.82rem}.song-editor{margin-top:14px;border-top:1px solid #303a5e;padding-top:14px}.song-editor h2{margin:0}.song-editor textarea{resize:vertical;min-height:240px;line-height:1.5}.permission-note{font-size:.85rem;color:var(--muted);padding:12px;border:1px dashed #43517a;border-radius:10px}.schedule-index{color:#9cb1f5;font-weight:800;font-size:.85rem;min-width:30px}.schedule-head{display:flex;align-items:center;gap:8px;min-width:0}.schedule-head>div{min-width:0}.settings-grid{display:grid;gap:12px}.status-pill{padding:5px 8px;border-radius:999px;background:#27375d;color:#cbd8ff;font-size:.78rem;font-weight:700}.account-role{margin-top:14px}.account-permissions{display:grid;grid-template-columns:minmax(170px,1fr) 150px;gap:8px 12px;align-items:center}.account-permissions h3{grid-column:1/-1;color:#aebfff;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;margin:9px 0 0}.account-permissions option[value="inherit"]{color:#aab5d1}.account-permissions option[value="allow"]{color:#51d49a}.account-permissions option[value="deny"]{color:#ff718b}.desktop-only{display:none}
+    @media(min-width:920px){.app{display:block}.nav{position:static;display:flex;align-items:center;padding:6px;margin-bottom:14px}.nav button{width:auto;white-space:nowrap;margin:0}.nav-note{margin-left:auto;padding:0 10px;max-width:35%;text-align:right}.live-grid{grid-template-columns:250px minmax(420px,1fr) 275px;align-items:stretch}.live-preview{min-height:430px}.desktop-only{display:block}.desktop-schedule-list{display:grid;gap:6px;max-height:395px;overflow:auto}.desktop-schedule-item{width:100%;border:1px solid #334062;border-radius:8px;background:#172038;color:#e2e9ff;text-align:left;padding:9px;font-weight:650}.desktop-schedule-item.active{border-color:#819aff;background:#27345a}.desktop-schedule-item:hover{background:#26325a}.songs-workspace{display:grid;grid-template-columns:minmax(230px,34%) minmax(0,1fr);gap:14px}.songs-workspace #song-list{max-height:65vh}.songs-workspace .song-detail{margin-top:0}.songs-workspace .song-editor{margin-top:0}}
+    @media(max-width:760px){.shell{padding:12px}.app{display:block}.nav{position:static;display:flex;overflow:auto;padding:6px;margin-bottom:12px}.nav button{width:auto;white-space:nowrap;margin:0}.nav-note{display:none}.live-grid{grid-template-columns:1fr}.two-col,.three-col{grid-template-columns:1fr}.panel{padding:13px}.auth{margin:3vh auto}.controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    /* Browser Remote deliberately follows the desktop workspace: light, flat
+       panes on wide screens, with the existing touch-first view below 920px. */
+    @media(min-width:920px){
+      :root{color-scheme:light;--bg:#f3f3f3;--panel:#fff;--panel-2:#f5f5f5;--line:#ccc;--text:#222;--muted:#666;--accent:#0078d4;--good:#107c10;--danger:#c42b1c}
+      body{background:#f3f3f3;color:#222;overflow:hidden}.shell{max-width:none;height:100vh;padding:0;display:flex;flex-direction:column}.shell>header{height:42px;padding:6px 12px;background:#333;color:#fff;flex:none}.brand{font-size:1rem}.brand-mark{width:26px;height:26px;border-radius:3px;background:#0078d4;box-shadow:none}.connection{color:#ddd}.connection .dot{width:8px;height:8px}.card{border:0;border-radius:0;box-shadow:none;background:transparent}.app{display:flex;flex-direction:column;min-height:0;flex:1;gap:0}.nav{display:flex;order:2;position:static;flex:none;height:40px;padding:0 8px;margin:0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;background:#fafafa;overflow:hidden}.nav button{color:#333;border:0;border-radius:0;margin:0;padding:10px 16px;background:transparent;font-weight:500;line-height:18px}.nav button.active,.nav button:hover{background:transparent;color:#0078d4;border-bottom:2px solid #0078d4}.nav button.hidden{display:none!important}main{order:1;min-height:0;flex:1;overflow:auto;background:#f3f3f3}.page{height:100%}.page-title{margin:0;padding:10px 12px;background:#e0e0e0;border-bottom:1px solid #ccc}.page-title h1{font-size:1rem}.remote-compact-title{display:none}.desktop-stage{height:calc(100vh - 130px);min-height:320px;display:flex;background:#f3f3f3;overflow:hidden}.schedule-pane{width:250px;flex:0 0 250px;background:#f5f5f5;display:flex;flex-direction:column;overflow:hidden}.schedule-pane-header{padding:10px;background:#e0e0e0;color:#333;border-bottom:1px solid #ccc}.desktop-schedule-list{padding:5px;display:grid;gap:5px;overflow:auto;max-height:none;flex:1}.desktop-schedule-item{border:0;border-radius:0;background:#3a3a3a;color:#fff;padding:9px 10px;text-align:left;font-weight:500}.desktop-schedule-item:hover{background:#4a4a4a}.desktop-schedule-item.active{background:#0078d4;border:0}.desktop-splitter{width:16px;flex:0 0 16px;background:linear-gradient(to right,transparent 6px,#ccc 6px,#ccc 10px,transparent 10px)}.slide-panes{display:flex;min-width:0;flex:1;background:#ddd}.slide-pane{display:flex;flex:1 1 0;min-width:0;flex-direction:column;background:#f7f7f7}.slide-pane-label{padding:7px 10px;background:#e0e0e0;color:#333;font-size:.85rem;font-weight:700;border-bottom:1px solid #ccc}.slide-canvas{min-height:0;flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#000;color:#fff;padding:22px;overflow:auto}.preview-pane .slide-canvas{background:#202020}.live-pane .slide-canvas{background:#000}.live-kicker{color:#a8d5ff;font-size:.76rem}.live-title{font-size:clamp(1.2rem,2.6vw,2.25rem);max-width:92%;margin:12px auto}.live-text{color:#fff;max-width:92%;font-size:clamp(.85rem,1.4vw,1.05rem)}.status-pill{background:transparent;color:#555;border:1px solid #aaa;border-radius:3px;font-size:.72rem;font-weight:500;padding:3px 6px}.slide-pane-label .status-pill{float:right;margin-top:-2px}.remote-control-strip{display:flex;align-items:center;gap:0;border-top:1px solid #ccc;background:#fafafa;min-height:48px;padding:6px 8px}.remote-control-strip .controls{display:flex;gap:6px;grid-template-columns:none}.remote-control-strip .button{padding:6px 10px;border-radius:3px;font-weight:600}.button{border:1px solid #aaa;border-radius:3px;color:#222;background:#f5f5f5;padding:8px 11px;box-shadow:none}.button.primary{background:#0078d4;border-color:#0078d4}.button.good{background:#107c10;border-color:#107c10}.button.danger{background:#c42b1c;border-color:#c42b1c}.button.ghost{color:#333;background:#f5f5f5;border-color:#aaa}.state-row{border:0;padding:0 0 0 16px;margin-left:16px;border-left:1px solid #ccc;color:#555;gap:8px}.state-row strong{color:#222}.panel{background:#fff;border:1px solid #ccc;border-radius:0;padding:12px;box-shadow:none}.toolbar{padding:10px;background:#f5f5f5;border-bottom:1px solid #ccc;margin:0}.list-item{background:#fff;border:1px solid #ccc;border-radius:0;padding:9px}.list-item.selected{border-color:#0078d4;background:#eaf4fc}.song-editor{border-top:1px solid #ccc}.song-lyrics{border-top:1px solid #ccc}.pill{border-color:#aaa;border-radius:3px;background:#f5f5f5;color:#333}.account-permissions h3{color:#0078d4}.auth{background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 16px #0002}.auth .button{color:#fff}.auth .button.ghost{color:#333}.page:not(#page-live){padding:12px;height:auto}.page:not(#page-live) .page-title{margin:-12px -12px 12px}.settings-grid,.song-editor{background:#fff}
+    }
+    @media(max-width:919px){.desktop-stage{display:block;height:auto;min-height:0;background:transparent;overflow:visible}.desktop-stage>.schedule-pane,.desktop-splitter,.preview-pane{display:none}.slide-panes{display:block}.slide-pane{display:block}.live-pane{display:block;border:1px solid #2d3658;border-radius:10px;overflow:hidden;background:#111a31}.slide-pane-label{padding:9px 12px;background:#182443;border-bottom:1px solid #2d3658;color:#dce6ff;font-size:.85rem;font-weight:700}.slide-canvas{min-height:270px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;background:#06090f;color:#fff;padding:22px}.live-kicker{color:#a8d5ff;font-size:.76rem}.live-title{font-size:clamp(1.25rem,6vw,2rem);max-width:92%;margin:12px auto}.live-text{max-width:92%;color:#eef3ff}.remote-control-strip{display:grid;gap:10px}.remote-compact-title{display:flex}.remote-control-strip .state-row{padding:9px 0;border-bottom:1px solid #2d3658}.remote-control-strip .state-row:last-child{border:0}.remote-control-strip .controls{display:grid}.remote-control-strip{margin-top:12px}.remote-compact-title + .desktop-stage + .remote-control-strip{display:grid}.remote-compact-title{margin-bottom:0}}
+  </style>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/remote-desktop.css">
+</head>
+<body>
+  <div class="shell">
+    <header><div class="brand"><div class="brand-mark">L</div>Liturgia Remote</div><div style="display:flex;align-items:center;gap:10px"><button id="install-pwa" class="button small ghost hidden" type="button">Install app</button><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">Connecting…</span></div></div></header>
+    <section id="auth-card" class="auth card hidden">
+      <h1 id="auth-title">Sign in to control Liturgia</h1><p id="auth-copy" class="muted">This browser connects directly to Liturgia on your local network.</p>
+      <div id="auth-message" class="notice hidden"></div>
+      <div id="credential-fields" class="hidden"><label for="login-user">Username</label><input id="login-user" autocomplete="username"><label for="login-password">Password</label><input id="login-password" type="password" autocomplete="current-password"></div>
+      <div id="liturgia-fields" class="hidden"><label for="login-token">Liturgia sign-in token</label><textarea id="login-token" rows="3" autocomplete="off" placeholder="Paste your Liturgia device token"></textarea><div class="button-row"><button id="send-magic-link" class="button ghost" type="button">Email me a sign-in link</button></div><p class="muted" style="font-size:.84rem">The email contains a persistent device token. Paste it here once; this browser will remember its signed-in session.</p></div>
+      <div class="button-row"><button id="login-submit" class="button primary">Sign in</button></div>
+    </section>
+    <div id="remote-app" class="app hidden">
+      <nav class="nav card" id="nav"><button data-page="live" class="active" data-feature="live">Live</button><button data-page="verses" data-feature="verses">Verses</button><button data-page="songs" data-feature="songs">Songs</button><button data-page="schedule" data-feature="schedule">Schedule</button><button class="mobile-more-button" data-mobile-menu type="button">More</button><button data-page="bible" data-feature="bible">Bible</button><button data-page="settings" data-feature="settings">Settings</button><button data-page="accounts" data-feature="accounts">Account</button></nav>
+      <main>
+        <section id="page-live" class="page active"><div class="page-title remote-compact-title"><h1>Live display</h1><span class="status-pill">Live workspace</span></div><div class="desktop-stage"><aside class="schedule-pane"><div class="schedule-pane-header"><strong>Schedule</strong></div><div id="wide-schedule-list" class="desktop-schedule-list"></div></aside><div class="desktop-splitter" aria-hidden="true"></div><div class="slide-panes"><section class="slide-pane preview-pane"><div class="slide-pane-label">Preview</div><div class="slide-canvas"><div id="preview-kicker" class="live-kicker">Preview</div><div id="preview-title" class="live-title">Nothing selected</div><div id="preview-text" class="live-text">Choose a verse, song, or schedule item.</div></div></section><div class="desktop-splitter" aria-hidden="true"></div><section class="slide-pane live-pane"><div class="slide-pane-label">Live <span id="live-status" class="status-pill">Waiting for state</span></div><div class="slide-canvas"><div id="live-kicker" class="live-kicker">Live display</div><div id="live-title" class="live-title">Nothing is live</div><div id="live-text" class="live-text">Select a verse, song, or schedule item to send it live.</div></div></section></div></div><div class="remote-control-strip"><div id="live-controls" class="controls"><button class="button good" data-command="GO_LIVE">Go live</button><button class="button" data-command="CLEAR_LIVE">Clear</button><button class="button danger" data-command="BLACK_SCREEN">Black screen</button></div><div class="state-row"><span>Schedule</span><strong id="live-schedule">—</strong></div><div class="state-row"><span>Connected as</span><strong id="live-user">—</strong></div></div></section>
+        <section id="page-verses" class="page"><div class="page-title"><h1>Verses</h1></div><div class="panel card"><div class="mobile-reference"><input id="mobile-verse-reference" autocomplete="off" placeholder="Find a verse, e.g. John 3:16"><button id="mobile-verse-find" class="button primary" type="button">Find</button></div><div class="three-col"><div><label for="verse-book">Book</label><select id="verse-book"></select></div><div><label for="verse-chapter">Chapter</label><input id="verse-chapter" type="number" min="1" value="1"></div><div><label for="verse-start">Verse / end</label><div style="display:flex;gap:6px"><input id="verse-start" type="number" min="1" value="1"><input id="verse-end" type="number" min="1" placeholder="End"></div></div></div><div class="button-row" id="verse-actions"><button class="button" id="verse-select">Preview selection</button><button class="button good" id="verse-live">Send live</button><button class="button ghost" id="verse-add-schedule">Add to schedule</button><button class="button ghost" data-command="PREV_VERSE">Previous</button><button class="button ghost" data-command="NEXT_VERSE">Next</button></div><div id="mobile-verse-results" class="mobile-verse-results" aria-live="polite"></div></div></section>
+        <section id="page-songs" class="page"><div class="page-title"><h1>Songs</h1><span id="song-count" class="status-pill">0 songs</span></div><div class="panel card"><div class="toolbar"><input id="song-search" placeholder="Search songs or authors"><button id="song-refresh" class="button ghost">Refresh</button><button id="song-import" class="button ghost">Import</button><input id="song-import-file" class="hidden" type="file" accept=".json,.litsong,application/json"><button id="song-add" class="button primary">Add song</button></div><div class="songs-workspace"><div id="song-list" class="list"></div><div><div id="song-detail" class="song-detail hidden"><h2 id="song-title"></h2><div id="song-author" class="muted"></div><div id="song-sections" class="section-pills"></div><div id="song-actions" class="button-row"></div><div id="song-lyrics" class="song-lyrics"></div></div><div id="song-editor" class="song-editor hidden"><div class="page-title"><h2 id="song-editor-heading">New song</h2><button id="song-editor-close" class="button small ghost">Close</button></div><div class="two-col"><div><label for="song-editor-title">Title</label><input id="song-editor-title" maxlength="240" placeholder="Song title"></div><div><label for="song-editor-author">Author</label><input id="song-editor-author" maxlength="240" placeholder="Author (optional)"></div></div><div class="two-col"><div><label for="song-editor-hymnal">Hymnal</label><input id="song-editor-hymnal" maxlength="160" placeholder="Hymnal (optional)"></div><div><label for="song-editor-page">Page</label><input id="song-editor-page" type="number" min="1" placeholder="#"></div></div><label for="song-editor-lyrics">Lyrics and sections</label><textarea id="song-editor-lyrics" rows="16" placeholder="[Verse 1]\nLyrics…\n\n[Chorus]\nLyrics…"></textarea><p class="muted" style="font-size:.84rem">Use a blank line between sections. Put [Chorus], {Bridge}, or (Tag) alone on the first line to name a section. **bold** and *italics* are preserved.</p><div id="song-editor-actions" class="button-row"><button id="song-editor-save" class="button primary">Save song</button><button id="song-editor-delete" class="button danger">Delete song</button></div><div id="song-editor-status" class="muted" style="margin-top:8px"></div></div></div></div></div></section>
+        <section id="page-schedule" class="page"><div class="page-title"><h1>Schedule</h1><span id="schedule-count" class="status-pill">0 items</span></div><div class="panel card"><div id="schedule-actions" class="button-row"><button class="button ghost" data-command="PREV_SCHEDULE_ITEM">Previous item</button><button class="button ghost" data-command="NEXT_SCHEDULE_ITEM">Next item</button></div><div style="height:10px"></div><div id="schedule-list" class="list"></div></div></section>
+        <section id="page-bible" class="page"><div class="page-title"><h1>Bible translation</h1></div><div class="panel card"><p class="muted">Choose among the Bible translations already installed on this Liturgia computer.</p><label for="bible-version">Installed translation</label><select id="bible-version"></select><div id="bible-actions" class="button-row"><button class="button primary" id="bible-apply">Use this translation</button></div></div></section>
+        <section id="page-settings" class="page"><div class="page-title"><h1>Liturgia settings</h1></div><div class="panel card"><p class="muted">Settings open on the Liturgia computer so changes remain visible to the operator at the display.</p><div id="settings-actions" class="button-row"><button class="button primary" data-command="OPEN_SETTINGS">Open settings on PC</button></div></div></section>
+        <section id="page-accounts" class="page"><div class="page-title"><h1>Account access</h1></div><div class="panel card"><p id="account-remote-status" class="muted">Loading account access…</p><div id="account-delegate-actions" class="toolbar"><input id="account-delegate-email-remote" type="email" placeholder="delegate@example.com"><button id="account-add-delegate-remote" class="button primary">Add delegated email</button></div><div id="account-remote-list" class="list"></div><div id="account-role-editor" class="account-role hidden"><h2 id="account-role-editor-title">Edit role</h2><label for="account-role-select">Role</label><select id="account-role-select"><option value="admin">Admin</option><option value="moderator">Moderator</option><option value="operator">Operator</option><option value="guest">Guest</option></select><div id="account-permissions" class="account-permissions"></div><div class="button-row"><button id="account-role-save" class="button primary">Save role</button><button id="account-role-cancel" class="button ghost">Cancel</button></div></div></div></section>
+      </main>
+    </div>
+    <div id="mobile-overflow" class="mobile-overflow hidden" role="dialog" aria-modal="true" aria-label="More Liturgia controls"><div class="mobile-overflow-sheet"><div class="mobile-overflow-handle" aria-hidden="true"></div><div class="mobile-overflow-title"><strong>More controls</strong><button id="mobile-overflow-close" class="button small ghost" type="button">Close</button></div><div class="mobile-overflow-actions"><button data-page="bible" data-feature="bible" type="button">Bible translation</button><button data-page="settings" data-feature="settings" type="button">Liturgia settings</button><button data-page="accounts" data-feature="accounts" type="button">Account access</button></div></div></div>
+  </div>
+  <script>
+    const STORE = { deviceId: 'liturgia-remote-device-id', session: 'liturgia-remote-session', displayName: 'liturgia-remote-device-name' };
+    const FEATURES = ['live','verses','songs','bible','schedule','settings','accounts'];
+    const ACCOUNT_PERMISSIONS = [['Songs',['songs.view','View song list'],['songs.edit','Manage songs']],['Verses',['verses.view','View verses'],['verses.select','Select and preview verses']],['Presentation',['presentation.view','View live presentation'],['presentation.goLiveSongs','Go live with songs'],['presentation.goLiveVerses','Go live with verses'],['presentation.clear','Clear presentation'],['presentation.black','Black screen']],['Bible, schedule, and settings',['bible.view','View Bible translations'],['bible.changeTranslation','Change Bible translation'],['schedule.view','View schedule'],['schedule.edit','Edit and reorder schedule'],['schedule.goLive','Go live with schedule items'],['settings.view','View settings access'],['settings.open','Open settings on PC']],['Account access',['accounts.view','View account access'],['accounts.manageDelegates','Manage delegated emails'],['accounts.manageRoles','Manage roles and permissions']]];
+    let socket = null, remoteInfo = null, state = {}, permissions = {}, grants = {}, selectedSong = null, reconnectTimer = null, accountRoster = null, editingAccount = null, deferredInstallPrompt = null;
+    let deviceId = localStorage.getItem(STORE.deviceId) || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+    localStorage.setItem(STORE.deviceId, deviceId);
+    const el = (id) => document.getElementById(id);
+    const can = (feature, level = 'view') => permissions[feature] === 'change' || (level === 'view' && permissions[feature] === 'view');
+    const canGrant = (permission) => !!grants[permission];
+    const setConnection = (connected, message) => { el('connection-dot').classList.toggle('on', connected); el('connection-text').textContent = message; };
+    const message = (text, error = false) => { const box = el('auth-message'); box.textContent = text; box.className = 'notice' + (error ? ' error' : ''); box.classList.remove('hidden'); };
+    const deviceName = () => localStorage.getItem(STORE.displayName) || (navigator.userAgent.includes('Mobile') ? 'Mobile browser' : 'Browser remote');
+    function send(payload) { if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload)); }
+    function command(command, data = {}) { send({ type:'COMMAND', command, data, commandId: Date.now() }); }
+    function showAuth(mode) { el('remote-app').classList.add('hidden'); el('auth-card').classList.remove('hidden'); el('credential-fields').classList.toggle('hidden', mode !== 'credentials'); el('liturgia-fields').classList.toggle('hidden', mode !== 'liturgia'); el('auth-title').textContent = mode === 'credentials' ? 'Sign in with your local role' : 'Sign in with Liturgia'; el('auth-copy').textContent = mode === 'credentials' ? 'Use the username and password created in Liturgia’s Browser Remote settings.' : 'Use a persistent Liturgia device token for the same account as this computer.'; }
+    function applyPermissions(next) { permissions = next || {}; FEATURES.forEach((feature) => { document.querySelectorAll(`[data-feature="${feature}"]`).forEach((button) => button.classList.toggle('hidden', !can(feature))); }); document.querySelectorAll('[data-command]').forEach((button) => { const map={GO_LIVE:canGrant('presentation.goLiveVerses')||canGrant('presentation.goLiveSongs'),CLEAR_LIVE:canGrant('presentation.clear'),BLACK_SCREEN:canGrant('presentation.black'),PREV_VERSE:canGrant('verses.select'),NEXT_VERSE:canGrant('verses.select'),PREV_SCHEDULE_ITEM:canGrant('schedule.goLive'),NEXT_SCHEDULE_ITEM:canGrant('schedule.goLive'),OPEN_SETTINGS:canGrant('settings.open')}; if (button.dataset.command in map) button.disabled=!map[button.dataset.command]; }); el('verse-select').disabled=!canGrant('verses.select');el('verse-live').disabled=!canGrant('presentation.goLiveVerses');el('verse-add-schedule').disabled=!canGrant('schedule.edit'); el('song-search').disabled = !canGrant('songs.view'); el('song-add').disabled = !canGrant('songs.edit'); el('song-import').disabled = !canGrant('songs.edit'); el('song-editor-save').disabled = !canGrant('songs.edit'); el('song-editor-delete').disabled = !canGrant('songs.edit'); el('account-delegate-email-remote').disabled=!canGrant('accounts.manageDelegates');el('account-add-delegate-remote').disabled=!canGrant('accounts.manageDelegates'); if(!canGrant('songs.edit'))hideSongEditor(); el('bible-version').disabled = !canGrant('bible.view'); el('bible-apply').disabled = !canGrant('bible.changeTranslation'); const first = FEATURES.find((feature) => can(feature)); if (first && !can(document.querySelector('.nav button.active')?.dataset.feature || 'live')) openPage(first); }
+    function openPage(page) { if (!can(page)) return; el('mobile-overflow').classList.add('hidden'); document.querySelectorAll('.page').forEach((node)=>node.classList.remove('active')); document.querySelectorAll('.nav button').forEach((node)=>node.classList.toggle('active',node.dataset.page===page)); el('page-'+page).classList.add('active'); if(page==='accounts')command('ACCOUNT_GET'); }
+    async function boot() { if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/remote-service-worker.js').catch(()=>{}); try { remoteInfo = await fetch('/discover',{cache:'no-store'}).then((response)=>response.json()); } catch (_) { showAuth('liturgia'); setConnection(false,'Server unavailable'); return; } connect(); }
+    function connect() { clearTimeout(reconnectTimer); const scheme = location.protocol === 'https:' ? 'wss' : 'ws'; socket = new WebSocket(`${scheme}://${location.hostname}:${remoteInfo.wsPort}`); setConnection(false,'Connecting…'); socket.onopen = () => { setConnection(true,'Connected'); send({ type:'PAIR_REQUEST', clientType:'browser', deviceId, deviceName: deviceName(), sessionToken: localStorage.getItem(STORE.session) || null }); }; socket.onmessage = (event) => { try { handle(JSON.parse(event.data)); } catch (_) {} }; socket.onclose = () => { setConnection(false,'Reconnecting…'); reconnectTimer = setTimeout(connect, 1800); }; socket.onerror = () => setConnection(false,'Connection problem'); }
+    function authenticate() { const mode = remoteInfo && remoteInfo.browserAccess || 'liturgia'; const payload = { type:'AUTHENTICATE', clientType:'browser', deviceId, deviceName:deviceName(), sessionToken:localStorage.getItem(STORE.session)||null }; if (mode === 'credentials') { payload.username=el('login-user').value.trim(); payload.password=el('login-password').value; } else { payload.token=el('login-token').value.trim(); } send(payload); }
+    async function sendMagicLink() { const email = prompt('Email address for the Liturgia sign-in link:'); if (!email) return; message('Sending sign-in link…'); try { const body=new URLSearchParams({email,source:'web'}); const response=await fetch('https://jacqueb.me/liturgia/auth/magic-link.php',{method:'POST',body}); const result=await response.json(); message(result && result.ok ? 'Sign-in email sent. Copy the persistent device token from the email and paste it above.' : 'Could not send the sign-in email.', !(result&&result.ok)); } catch (_) { message('Could not reach Liturgia sign-in.',true); } }
+    function handle(msg) {
+      if (msg.type === 'AUTH_REQUIRED') {
+        showAuth(msg.method || (remoteInfo && remoteInfo.browserAccess) || 'liturgia');
+        return;
+      }
+      if (msg.type === 'AUTH_FAILED') {
+        showAuth((remoteInfo && remoteInfo.browserAccess) || 'liturgia');
+        message(msg.error || 'Sign-in failed.', true);
+        return;
+      }
+      if (msg.type === 'AUTHENTICATED') {
+        if (msg.sessionToken) localStorage.setItem(STORE.session, msg.sessionToken);
+        state = {};
+        grants = msg.grants || {};
+        permissions = msg.permissions || {};
+        applyPermissions(permissions);
+        el('auth-card').classList.add('hidden');
+        el('remote-app').classList.remove('hidden');
+        el('live-user').textContent = msg.username || msg.email || 'Browser session';
+        send({ type: 'SUBSCRIBE', events: ['state'] });
+        command('REQUEST_STATE');
+        if (can('accounts')) command('ACCOUNT_GET');
+        return;
+      }
+      if (msg.type === 'ACCOUNT_ACCESS') {
+        accountRoster = msg;
+        renderAccountAccess();
+        return;
+      }
+      if (msg.type === 'ACCOUNT_ERROR') {
+        el('account-remote-status').textContent = msg.error || 'Account action failed.';
+        return;
+      }
+      if (msg.type === 'STATE_UPDATE' && msg.event === 'state') {
+        // Most desktop updates are intentionally incremental. Preserve the
+        // Bible catalog and lookup result when a later live/schedule update
+        // omits those fields instead of erasing the virtual verse list.
+        state = { ...state, ...(msg.data || {}) };
+        render();
+        return;
+      }
+      if (msg.type === 'FORBIDDEN') {
+        alert('Your role does not allow ' + msg.feature + '.');
+        return;
+      }
+      if (msg.type === 'REVOKED') {
+        localStorage.removeItem(STORE.session);
+        state = {};
+        showAuth((remoteInfo && remoteInfo.browserAccess) || 'liturgia');
+        message('This device was revoked.', true);
+      }
+    }
+    function render() { renderLive(); renderBooks(); renderVerseResults(); renderSongs(); renderSchedule(); renderBible(); }
+    function renderLive() { const bible=(state.bible||[])[0],song=(state.songs||[])[0]; const schedule=state.scheduling||{}; let kicker='Live display',title='Nothing is live',body='Select a verse, song, or schedule item to send it live.'; if (song) { kicker=song.section||'Song';title=song.title||'Song';body=song.text||''; } else if (bible) { kicker=`${bible.book||''} ${bible.chapter||''}:${bible.startVerse||''}`;title=bible.text||'Bible verse';body=''; } ['preview','live'].forEach((pane) => { el(`${pane}-kicker`).textContent=kicker; el(`${pane}-title`).textContent=title; el(`${pane}-text`).textContent=body; }); el('live-status').textContent=state.lastUpdated?'Live state synced':'Waiting for state';el('live-schedule').textContent=schedule.hasSchedule?`${schedule.currentItem===null?'—':schedule.currentItem+1} / ${schedule.totalItems}`:'No schedule'; }
+    function renderBooks() { const select=el('verse-book'),books=(state.verseMeta&&state.verseMeta.bookNames)||[]; const names=Array.isArray(books)?books:Object.values(books||{}); if (!names.length||select.dataset.ready===String(names.length))return;select.replaceChildren();names.forEach((name)=>{const option=document.createElement('option');option.value=name;option.textContent=name;select.appendChild(option)});select.dataset.ready=String(names.length); }
+    function parseMobileReference(value) { const match=String(value||'').trim().replace(/\s+/g,' ').match(/^(.+?)\s+(\d+)\s*:\s*(\d+)(?:\s*[-â€“]\s*(\d+))?$/); if(!match)return null;const normalize=(text)=>String(text).replace(/[^a-z0-9]/gi,'').toLowerCase();const requested=normalize(match[1]);const books=(state.verseMeta&&state.verseMeta.bookNames)||[];const names=Array.isArray(books)?books:Object.values(books||{});const book=names.find((name)=>normalize(name)===requested)||names.find((name)=>normalize(name).startsWith(requested));if(!book)return null;return{book,chapter:Number(match[2]),verse:Number(match[3]),verseEnd:match[4]?Number(match[4]):undefined}; }
+    function lookupMobileVerse() { const reference=parseMobileReference(el('mobile-verse-reference').value); if(!reference){message('Use a reference such as John 3:16.',true);return;}el('verse-book').value=reference.book;el('verse-chapter').value=String(reference.chapter);el('verse-start').value=String(reference.verse);el('verse-end').value=reference.verseEnd?String(reference.verseEnd):'';command('LOOKUP_VERSES',reference); }
+    function renderVerseResults() { const results=state.verseResults||[],list=el('mobile-verse-results');list.replaceChildren();if(!results.length)return;const heading=document.createElement('div');heading.className='mobile-results-heading';heading.textContent=`${results.length} verse${results.length===1?'':'s'} found`;list.appendChild(heading);results.forEach((verse)=>{const row=document.createElement('button');row.type='button';row.className='mobile-verse-result';row.innerHTML=`<strong></strong><span></span>`;row.querySelector('strong').textContent=verse.key||'Verse';row.querySelector('span').textContent=verse.text||'';const reference=parseMobileReference(verse.key);row.onclick=()=>{if(reference)command('SELECT_VERSE',reference)};row.ondblclick=()=>{if(reference)command('SELECT_VERSE',{...reference,goLive:true})};list.appendChild(row)}); }
+    function lyricsForEditor(song){return(song.lyrics||[]).map((section)=>`[${section.section||'Verse'}]\n${section.text||''}`).join('\n\n')}
+    function showSongEditor(song=null){if(!canGrant('songs.edit'))return;el('song-editor').classList.remove('hidden');el('song-editor-heading').textContent=song?'Edit song':'New song';el('song-editor').dataset.index=song?String(song.index):'';el('song-editor-title').value=song?song.title||'':'';el('song-editor-author').value=song?song.author||'':'';el('song-editor-hymnal').value=song?song.hymnal||'':'';el('song-editor-page').value=song?song.page||'':'';el('song-editor-lyrics').value=song?lyricsForEditor(song):'';el('song-editor-delete').classList.toggle('hidden',!song);el('song-editor-status').textContent='';el('song-editor-title').focus()}
+    function hideSongEditor(){el('song-editor').classList.add('hidden');el('song-editor-status').textContent=''}
+    function renderSongs() { const all=state.allSongs||[],query=el('song-search').value.trim().toLowerCase();const songs=all.filter((song)=>!query||`${song.title||''} ${song.author||''}`.toLowerCase().includes(query)).slice(0,150);el('song-count').textContent=`${all.length} songs`;const list=el('song-list');list.replaceChildren();if(!songs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=all.length?'No matching songs.':'Song access is unavailable.';list.appendChild(empty);return}songs.forEach((song)=>{const row=document.createElement('div');row.className='list-item'+(selectedSong===song.index?' selected':'');const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=song.title||'Untitled';const author=document.createElement('div');author.className='item-meta';author.textContent=song.author||'';details.append(title,author);const button=document.createElement('button');button.className='button small';button.textContent='View';button.disabled=!canGrant('songs.view');button.onclick=()=>{selectedSong=song.index;if(canGrant('songs.edit'))command('SELECT_SONG',{songIndex:song.index});renderSongs();renderSongDetail(song)};row.append(details,button);list.appendChild(row)});const current=all.find((song)=>song.index===selectedSong);if(current)renderSongDetail(current); }
+    function renderSongDetail(song){
+      el('song-detail').classList.remove('hidden');
+      el('song-title').textContent=song.title||'Untitled';
+      el('song-author').textContent=song.author||'';
+      const pills=el('song-sections'), actions=el('song-actions');
+      pills.replaceChildren(); actions.replaceChildren(); el('song-lyrics').textContent='';
+      (song.lyrics||[]).forEach((section,index)=>{
+        const pill=document.createElement('button');
+        pill.className='pill'; pill.textContent=section.section||`Section ${index+1}`;
+        pill.disabled=!canGrant('presentation.goLiveSongs');
+        pill.onclick=()=>{command('DISPLAY_SONG_VERSE',{songIndex:song.index,verseIndex:index});el('song-lyrics').textContent=section.text||''};
+        pills.appendChild(pill);
+      });
+      const live=document.createElement('button');
+      live.className='button good'; live.textContent='Send selected song live';
+      live.disabled=!canGrant('presentation.goLiveSongs'); live.onclick=()=>command('GO_LIVE',{contentType:'song'}); actions.appendChild(live);
+      const schedule=document.createElement('button');
+      schedule.className='button ghost'; schedule.textContent='Add to schedule';
+      schedule.disabled=!canGrant('schedule.edit'); schedule.onclick=()=>command('ADD_SONG_TO_SCHEDULE',{songIndex:song.index}); actions.appendChild(schedule);
+      const edit=document.createElement('button');
+      edit.className='button ghost'; edit.textContent='Edit song'; edit.disabled=!canGrant('songs.edit'); edit.onclick=()=>showSongEditor(song); actions.appendChild(edit);
+    }
+    function renderSchedule(){const items=state.allScheduleItems||[],list=el('schedule-list'),wide=el('wide-schedule-list');el('schedule-count').textContent=`${items.length} items`;list.replaceChildren();wide.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No schedule items available.';list.appendChild(empty);wide.appendChild(empty.cloneNode(true));return}items.forEach((item,index)=>{const row=document.createElement('div');row.className='list-item';const head=document.createElement('div');head.className='schedule-head';const number=document.createElement('span');number.className='schedule-index';number.textContent=String(index+1);const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=item.label||'Schedule item';const meta=document.createElement('div');meta.className='item-meta';meta.textContent=item.type||'';details.append(title,meta);head.append(number,details);const actions=document.createElement('div');actions.className='item-actions';const live=document.createElement('button');live.className='button small good';live.textContent='Live';live.disabled=!can('schedule','change');live.onclick=()=>command('GO_LIVE_SCHEDULE_ITEM',{scheduleIndex:item.index});actions.appendChild(live);if(can('schedule','change')){[['↑',index-1],['↓',index+1]].forEach(([label,to])=>{const move=document.createElement('button');move.className='button small ghost';move.textContent=label;move.disabled=to<0||to>=items.length;move.onclick=()=>command('REORDER_SCHEDULE',{from:index,to});actions.appendChild(move)})}row.append(head,actions);list.appendChild(row);const wideItem=document.createElement('button');wideItem.className='desktop-schedule-item'+((state.scheduling||{}).currentItem===item.index?' active':'');wideItem.textContent=`${index+1}. ${item.label||'Schedule item'}`;wideItem.disabled=!can('schedule','change');wideItem.onclick=()=>command('GO_LIVE_SCHEDULE_ITEM',{scheduleIndex:item.index});wide.appendChild(wideItem)})}
+    function renderBible(){const info=state.bibleInfo||{},select=el('bible-version'),available=info.available||[];if(select.dataset.values===JSON.stringify(available))return;select.replaceChildren();available.forEach((value)=>{const option=document.createElement('option');option.value=value;option.textContent=value;option.selected=value===info.current;select.appendChild(option)});select.dataset.values=JSON.stringify(available);}
+    function showAccountRole(user){if(!canGrant('accounts.manageRoles')||user.isOwner)return;editingAccount=user;el('account-role-editor').classList.remove('hidden');el('account-role-editor-title').textContent=`Edit ${user.email}`;el('account-role-select').value=user.role||'guest';const box=el('account-permissions');box.replaceChildren();ACCOUNT_PERMISSIONS.forEach(([group,...entries])=>{const heading=document.createElement('h3');heading.textContent=group;box.appendChild(heading);entries.forEach(([key,label])=>{const name=document.createElement('label');name.textContent=label;name.htmlFor=`account-permission-${key}`;const select=document.createElement('select');select.id=`account-permission-${key}`;[['inherit','/ Unchanged (use role)'],['allow','✓ Allow'],['deny','× Deny']].forEach(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;select.appendChild(option)});select.value=(user.overrides&&user.overrides[key])||'inherit';box.append(name,select)})});}
+    function hideAccountRole(){editingAccount=null;el('account-role-editor').classList.add('hidden');}
+    function renderAccountAccess(){const list=el('account-remote-list');list.replaceChildren();const users=(accountRoster&&accountRoster.users)||[];el('account-remote-status').textContent=users.length?`Root account: ${accountRoster.ownerEmail}. Delegated addresses use the roles below.`:'No account access is available.';users.forEach((user)=>{const row=document.createElement('div');row.className='list-item';const info=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=user.email;const meta=document.createElement('div');meta.className='item-meta';meta.textContent=user.isOwner?'Force-op — full access':`${user.role||'guest'} role`;info.append(title,meta);const actions=document.createElement('div');actions.className='item-actions';if(!user.isOwner&&canGrant('accounts.manageRoles')){const edit=document.createElement('button');edit.className='button small';edit.textContent='Edit role';edit.onclick=()=>showAccountRole(user);const reset=document.createElement('button');reset.className='button small ghost';reset.textContent='Reset';reset.disabled=!user.id;reset.onclick=()=>command('ACCOUNT_RESET_ROLE',{id:user.id});actions.append(edit,reset)}if(!user.isOwner&&canGrant('accounts.manageDelegates')){const remove=document.createElement('button');remove.className='button small danger';remove.textContent='Remove email';remove.onclick=()=>{if(confirm(`Remove ${user.email} from this Liturgia account?`))command('ACCOUNT_UPDATE_DELEGATE',{action:'remove',email:user.email})};actions.appendChild(remove)}row.append(info,actions);list.appendChild(row)});}
+    window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();deferredInstallPrompt=event;el('install-pwa').classList.remove('hidden')});el('install-pwa').addEventListener('click',async()=>{if(!deferredInstallPrompt)return;deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;el('install-pwa').classList.add('hidden')});document.querySelectorAll('.nav button[data-page]').forEach((button)=>button.addEventListener('click',()=>openPage(button.dataset.page)));document.querySelectorAll('[data-command]').forEach((button)=>button.addEventListener('click',()=>command(button.dataset.command)));el('login-submit').addEventListener('click',authenticate);el('login-password').addEventListener('keydown',(event)=>{if(event.key==='Enter')authenticate()});el('send-magic-link').addEventListener('click',sendMagicLink);el('verse-select').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined}));el('verse-live').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined,goLive:true}));el('verse-add-schedule').addEventListener('click',()=>command('ADD_TO_SCHEDULE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value)}));el('song-search').addEventListener('input',renderSongs);el('song-refresh').addEventListener('click',()=>command('REQUEST_STATE'));el('song-add').addEventListener('click',()=>showSongEditor());el('song-import').addEventListener('click',()=>el('song-import-file').click());el('song-import-file').addEventListener('change',async()=>{const file=el('song-import-file').files[0];if(!file)return;try{const parsed=JSON.parse(await file.text());const songs=Array.isArray(parsed)?parsed:(Array.isArray(parsed.songs)?parsed.songs:[]);if(!songs.length)throw new Error('No Liturgia songs found in this file.');command('IMPORT_SONGS',{songs});setTimeout(()=>command('REQUEST_STATE'),500)}catch(error){alert(error.message||'Could not import that song file.')}finally{el('song-import-file').value=''}});el('song-editor-close').addEventListener('click',hideSongEditor);el('song-editor-save').addEventListener('click',()=>{const title=el('song-editor-title').value.trim(),lyrics=el('song-editor-lyrics').value.trim();if(!title||!lyrics){el('song-editor-status').textContent='A title and lyrics are required.';return}const index=el('song-editor').dataset.index;command('UPSERT_SONG',{songIndex:index===''?undefined:Number(index),title,author:el('song-editor-author').value,hymnal:el('song-editor-hymnal').value,page:el('song-editor-page').value,lyrics});el('song-editor-status').textContent='Saving…';setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},450)});el('song-editor-delete').addEventListener('click',()=>{const index=Number(el('song-editor').dataset.index);if(!Number.isInteger(index)||!confirm('Delete this song?'))return;command('DELETE_SONG',{songIndex:index});setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},350)});el('bible-apply').addEventListener('click',()=>command('SET_BIBLE_TRANSLATION',{bible:el('bible-version').value}));el('account-add-delegate-remote').addEventListener('click',()=>{const email=el('account-delegate-email-remote').value.trim();if(email)command('ACCOUNT_UPDATE_DELEGATE',{action:'add',email})});el('account-role-cancel').addEventListener('click',hideAccountRole);el('account-role-save').addEventListener('click',()=>{if(!editingAccount)return;const permissionOverrides={};ACCOUNT_PERMISSIONS.forEach(([, ...entries])=>entries.forEach(([key])=>permissionOverrides[key]=el(`account-permission-${key}`).value));command('ACCOUNT_SAVE_ROLE',{id:editingAccount.id||undefined,email:editingAccount.email,role:el('account-role-select').value,permissionOverrides});hideAccountRole()});boot();
+  </script>
+  <script>
+    // These controls belong only to the compact workspace.  Keeping them here
+    // lets the shared page/permission functions above remain the source of truth.
+    (() => {
+      const mobileOverflow = document.getElementById('mobile-overflow');
+      document.querySelector('[data-mobile-menu]').addEventListener('click', () => mobileOverflow.classList.remove('hidden'));
+      document.getElementById('mobile-overflow-close').addEventListener('click', () => mobileOverflow.classList.add('hidden'));
+      mobileOverflow.addEventListener('click', (event) => { if (event.target === mobileOverflow) mobileOverflow.classList.add('hidden'); });
+      mobileOverflow.querySelectorAll('[data-page]').forEach((button) => button.addEventListener('click', () => {
+        mobileOverflow.classList.add('hidden');
+        openPage(button.dataset.page);
+      }));
+      document.getElementById('mobile-verse-find').addEventListener('click', lookupMobileVerse);
+      document.getElementById('mobile-verse-reference').addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        lookupMobileVerse();
+      });
+    })();
+  </script>
+  <iframe id="desktop-shell" class="hidden" title="Liturgia desktop workspace" src="/desktop-template.html"></iframe>
+  <script>
+    /* The iframe is the real Liturgia desktop DOM from index.html.  This bridge
+       supplies browser-safe state and interaction in place of Electron IPC. */
+    (() => {
+      const shell = document.getElementById('desktop-shell');
+      const shellDocument = () => shell.contentDocument;
+      const nativeRender = render;
+      let ready = false;
+      const expandedScheduleItems = new Set();
+      const selectedScheduleSubItems = new Map();
+      let draggedScheduleIndex = null;
+      let selectedDesktopReference = null;
+
+      function drawSlide(canvas, kicker, title, body, canvasSnapshot) {
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const scale = window.devicePixelRatio || 1;
+        const targetWidth = Math.max(1, Math.floor(rect.width * scale));
+        const targetHeight = Math.max(1, Math.floor(rect.height * scale));
+        if (canvasSnapshot && canvas.dataset.remoteSnapshot === canvasSnapshot && canvas.width === targetWidth && canvas.height === targetHeight) return;
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const context = canvas.getContext('2d');
+        if (canvasSnapshot) {
+          if (canvas.dataset.remoteSnapshot === canvasSnapshot) return;
+          canvas.dataset.remoteSnapshot = canvasSnapshot;
+          const image = new Image();
+          image.onload = () => {
+            if (canvas.dataset.remoteSnapshot !== canvasSnapshot) return;
+            context.fillStyle = '#000';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            const imageScale = Math.min(canvas.width / image.width, canvas.height / image.height);
+            const width = image.width * imageScale;
+            const height = image.height * imageScale;
+            context.drawImage(image, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+          };
+          image.onerror = () => { if (canvas.dataset.remoteSnapshot === canvasSnapshot) delete canvas.dataset.remoteSnapshot; };
+          image.src = canvasSnapshot;
+          return;
+        }
+        delete canvas.dataset.remoteSnapshot;
+        context.scale(scale, scale);
+        context.fillStyle = '#000';
+        context.fillRect(0, 0, rect.width, rect.height);
+        context.fillStyle = '#fff';
+        context.textAlign = 'center';
+        context.font = '600 15px sans-serif';
+        context.fillText(kicker || 'Live display', rect.width / 2, Math.max(32, rect.height * .18));
+        context.font = `700 ${Math.max(22, Math.min(46, rect.width / 16))}px sans-serif`;
+        const words = String(title || 'Nothing is live').split(/\s+/); let line = '', y = rect.height * .46;
+        for (const word of words) { const next = `${line} ${word}`.trim(); if (context.measureText(next).width > rect.width * .82 && line) { context.fillText(line, rect.width / 2, y); y += 54; line = word; } else line = next; }
+        if (line) context.fillText(line, rect.width / 2, y);
+        context.font = '16px sans-serif'; context.fillStyle = '#ddd';
+        const detail = String(body || ''); if (detail) context.fillText(detail.slice(0, 160), rect.width / 2, Math.min(rect.height - 30, y + 52));
+      }
+
+      function parseReference(value) {
+        const match = String(value || '').trim().replace(/\s+/g, ' ').match(/^([1-3]?\s*[a-zA-Z ]+)\s*(\d+)?[:\s]?(\d+)?(?:\s*[-–]\s*(\d+))?$/);
+        if (!match) return null;
+        const requested = match[1].replace(/[^a-z0-9]/gi, '').toLowerCase();
+        const books = (state.verseMeta && state.verseMeta.bookNames) || [];
+        const book = books.find((name) => String(name).replace(/[^a-z0-9]/gi, '').toLowerCase().startsWith(requested));
+        if (!book || !match[2] || !match[3]) return null;
+        return { book, chapter: Number(match[2]), verse: Number(match[3]), verseEnd: match[4] ? Number(match[4]) : undefined };
+      }
+
+      function ensureDesktopControls(doc) {
+        if (!doc.getElementById('remote-controls-style')) { const style = doc.createElement('style'); style.id = 'remote-controls-style'; style.textContent = '.remote-desktop-action,.remote-schedule-actions button,.remote-song-row,.remote-song-section{background:#f5f5f5;border:1px solid #ccc;border-radius:4px;color:#333;cursor:pointer}.remote-desktop-action,.remote-schedule-actions button{height:32px;padding:0 10px}.remote-schedule-actions{display:flex;gap:4px;margin-left:6px}.remote-song-row{display:block;width:100%;padding:8px 10px;border-width:0 0 1px;text-align:left}.remote-song-row:hover{background:#eaf4fc}.remote-song-section{margin:10px 6px 0 0;padding:6px 9px}body.dark-theme .remote-desktop-action,body.dark-theme .remote-schedule-actions button,body.dark-theme .remote-song-row,body.dark-theme .remote-song-section{background:#2a2a2a;border-color:#444;color:#eee}body.dark-theme .remote-song-row:hover{background:#333}'; doc.head.appendChild(style); }
+        const shellWindow = doc.defaultView;
+        const books = (state.verseMeta && state.verseMeta.bookNames) || [];
+        if (shellWindow && typeof shellWindow.updateSearchBox === 'function') {
+          shellWindow.onToggleLowerThird = () => command('TOGGLE_WIDGET');
+          shellWindow.updateSearchBox({
+            containerId: 'search-box-container',
+            books,
+            onReferenceSelected: (reference) => {
+              selectedDesktopReference = { book: reference.book, chapter: reference.chapter, verse: reference.verse, verseEnd: reference.verseEnd || undefined };
+              command('LOOKUP_VERSES', selectedDesktopReference);
+            },
+            onNavigate: (direction) => command(direction === 'prev' ? 'PREV_VERSE' : 'NEXT_VERSE'),
+            onEnter: () => {
+              if (!selectedDesktopReference) return;
+              command('LOOKUP_VERSES', selectedDesktopReference);
+              command('SELECT_VERSE', { ...selectedDesktopReference, goLive: true });
+            },
+            onToggleLive: (enabled) => {
+              if (enabled && selectedDesktopReference) command('SELECT_VERSE', { ...selectedDesktopReference, goLive: true });
+              else if (!enabled) command('CLEAR_LIVE');
+            },
+            onToggleClear: () => command('CLEAR_LIVE'),
+            onToggleBlack: () => command('BLACK_SCREEN'),
+            onToggleDual: () => {},
+            onPickDual: () => {}
+          });
+          const controlPermissions = {
+            Widget: canGrant('presentation.goLiveSongs'),
+            'Go Live': canGrant('presentation.goLiveVerses'),
+            Live: canGrant('presentation.goLiveVerses'),
+            Clear: canGrant('presentation.clear'),
+            Black: canGrant('presentation.black')
+          };
+          doc.querySelectorAll('#control-buttons-container button').forEach((button) => {
+            const label = button.textContent.trim();
+            if (label in controlPermissions) button.disabled = !controlPermissions[label];
+          });
+          doc.querySelectorAll('#dual-btn-container button').forEach((button) => { button.disabled = !canGrant('bible.changeTranslation'); });
+        }
+        const songInput = doc.getElementById('song-search-input');
+        if (songInput && !songInput.dataset.remoteBound) { songInput.dataset.remoteBound = 'true'; songInput.addEventListener('input', renderDesktop); }
+        const clearSchedule = doc.getElementById('schedule-clear-btn');
+        if (clearSchedule && !clearSchedule.dataset.remoteBound) { clearSchedule.dataset.remoteBound = 'true'; clearSchedule.disabled = !canGrant('schedule.edit'); clearSchedule.addEventListener('click', () => { if (confirm('Remove all items from the schedule?')) command('CLEAR_SCHEDULE'); }); }
+      }
+
+      function renderDesktopSchedule(doc) {
+        const list = doc.getElementById('schedule-list'); if (!list) return;
+        const items = state.allScheduleItems || [], schedule = state.scheduling || {}; list.replaceChildren();
+        if (!items.length) { const empty = doc.createElement('div'); empty.className = 'schedule-empty-hint'; empty.textContent = 'No schedule items'; list.appendChild(empty); return; }
+        items.forEach((item, index) => {
+          const subItems = Array.isArray(item.subItems) ? item.subItems : [], expandable = subItems.length > 1, expanded = expandedScheduleItems.has(item.index);
+          const row = doc.createElement('div'); row.className = 'schedule-item'; row.draggable = canGrant('schedule.edit');
+          row.addEventListener('dragstart', (event) => { if (!canGrant('schedule.edit')) { event.preventDefault(); return; } draggedScheduleIndex = index; event.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
+          row.addEventListener('dragend', () => { draggedScheduleIndex = null; row.classList.remove('dragging'); });
+          row.addEventListener('dragover', (event) => { if (draggedScheduleIndex === null || draggedScheduleIndex === index) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; });
+          row.addEventListener('drop', (event) => { event.preventDefault(); if (draggedScheduleIndex !== null && draggedScheduleIndex !== index) command('REORDER_SCHEDULE', { from: draggedScheduleIndex, to: index }); });
+          const header = doc.createElement('div'); header.className = 'schedule-item-header' + (schedule.currentItem === item.index ? ' selected' : '');
+          if (expandable) { const arrow = doc.createElement('button'); arrow.className = 'expand-arrow' + (expanded ? ' expanded' : ''); arrow.textContent = '▶'; arrow.title = expanded ? 'Collapse nested items' : 'Expand nested items'; arrow.onclick = (event) => { event.stopPropagation(); if (expanded) expandedScheduleItems.delete(item.index); else expandedScheduleItems.add(item.index); renderDesktopSchedule(doc); }; header.appendChild(arrow); }
+          const text = doc.createElement('span'); text.className = 'schedule-item-text'; text.textContent = item.label || `Schedule item ${index + 1}`; header.appendChild(text);
+          const actions = doc.createElement('div'); actions.className = 'remote-schedule-actions';
+          [['Live', () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index }), !canGrant('schedule.goLive')], ['×', () => { if (confirm(`Remove ${item.label || 'this item'} from the schedule?`)) command('DELETE_SCHEDULE_ITEM', { scheduleIndex: index }); }, !canGrant('schedule.edit')]].forEach(([label, click, disabled]) => { const button = doc.createElement('button'); button.textContent = label; button.disabled = disabled; button.onclick = (event) => { event.stopPropagation(); click(); }; actions.appendChild(button); });
+          header.appendChild(actions); row.appendChild(header);
+          if (expandable && expanded) { const nested = doc.createElement('div'); nested.className = 'schedule-item-verses expanded'; const selected = selectedScheduleSubItems.get(item.index) || new Set(); subItems.forEach((subItem, subIndex) => { const child = doc.createElement('button'); child.className = 'schedule-verse-item' + (selected.has(subIndex) ? ' selected' : ''); child.textContent = subItem.label || `Item ${subIndex + 1}`; child.onclick = () => { selectedScheduleSubItems.set(item.index, new Set([subIndex])); if (item.type === 'verses') { const reference = parseReference(subItem.label); if (reference) { command('LOOKUP_VERSES', reference); command('SELECT_VERSE', reference); } } else if (item.type === 'song') command('SELECT_SONG_VERSE', { songIndex: item.songIndex, verseIndex: subIndex }); renderDesktopSchedule(doc); }; child.ondblclick = () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index, subItemIndex: subIndex }); nested.appendChild(child); }); row.appendChild(nested); }
+          list.appendChild(row);
+        });
+      }
+
+      function renderDesktopSongs(doc) {
+        const all = state.allSongs || [], query = (doc.getElementById('song-search-input')?.value || '').trim().toLowerCase();
+        const list = doc.getElementById('song-virtual-list'), display = doc.getElementById('song-display'); if (!list || !display) return;
+        list.replaceChildren(); all.filter((song) => !query || `${song.title || ''} ${song.author || ''} ${(song.lyrics || []).map((section) => section.text || '').join(' ')}`.toLowerCase().includes(query)).slice(0, 150).forEach((song) => { const button = doc.createElement('button'); button.className = 'remote-song-row'; button.textContent = song.title || 'Untitled'; button.onclick = () => { command('SELECT_SONG', { songIndex: song.index }); display.replaceChildren(); const heading = doc.createElement('h2'); heading.textContent = song.title || 'Untitled'; const author = doc.createElement('div'); author.textContent = song.author || ''; display.append(heading, author); let verseIndex = 0; (song.lyrics || []).forEach((section) => { String(section.text || '').split(/\n\n+/).forEach((verse, sectionVerseIndex) => { const part = doc.createElement('button'); part.className = 'remote-song-section'; part.textContent = `${section.section || 'Verse'}${sectionVerseIndex ? ` ${sectionVerseIndex + 1}` : ''}: ${verse.split('\n')[0].slice(0, 70)}`; const currentVerseIndex = verseIndex++; part.onclick = () => command('SELECT_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); part.ondblclick = () => command('DISPLAY_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); display.appendChild(part); }); }); }; list.appendChild(button); });
+      }
+
+      function renderDesktopVerses(doc) {
+        const verses = state.verseResults || [], refs = state.verseRefs || [], list = doc.getElementById('virtual-list'), listContainer = doc.getElementById('verse-list'), display = doc.getElementById('verse-display');
+        if (!list || !listContainer || !display) return;
+        list.style.height = `${refs.length * 24}px`;
+        const first = Math.max(0, Math.floor(listContainer.scrollTop / 24) - 20);
+        const last = Math.min(refs.length, first + 240);
+        const catalogKey = `${refs.length}|${refs[0]?.key || ''}|${refs[refs.length - 1]?.key || ''}`;
+        const needsWindowRender = list.dataset.catalogKey !== catalogKey || list.dataset.windowFirst !== String(first) || list.dataset.windowLast !== String(last);
+        if (needsWindowRender) {
+          list.replaceChildren();
+          for (let index = first; index < last; index++) {
+            const reference = refs[index];
+            const row = doc.createElement('div');
+            row.className = 'verse-item';
+            row.textContent = reference.key;
+            row.tabIndex = 0;
+            row.dataset.index = String(index);
+            row.dataset.key = reference.key;
+            row.draggable = true;
+            row.style.cssText = `position:absolute;top:${index * 24}px;left:0;right:0;width:100%;height:24px;`;
+            row.onclick = () => {
+              const parsed = parseReference(reference.key);
+              if (!parsed) return;
+              selectedDesktopReference = parsed;
+              command('LOOKUP_VERSES', parsed);
+              command('SELECT_VERSE', parsed);
+            };
+            row.ondblclick = () => {
+              const parsed = parseReference(reference.key);
+              if (parsed) command('SELECT_VERSE', { ...parsed, goLive: true });
+            };
+            row.onkeydown = (event) => { if (event.key === 'Enter') row.ondblclick(); };
+            list.appendChild(row);
+          }
+          list.dataset.catalogKey = catalogKey;
+          list.dataset.windowFirst = String(first);
+          list.dataset.windowLast = String(last);
+        }
+        // A normal selection must not scroll/recreate the virtual window.  Doing
+        // either shifts the clicked verse before the browser can issue dblclick.
+        const selectedKeys = new Set(verses.map((verse) => verse.key));
+        list.querySelectorAll('.verse-item').forEach((row) => row.classList.toggle('selected', selectedKeys.has(row.dataset.key)));
+        if (!listContainer.dataset.remoteBound) {
+          listContainer.dataset.remoteBound = 'true';
+          listContainer.addEventListener('scroll', () => renderDesktopVerses(doc));
+        }
+        display.replaceChildren();
+        if (!verses.length) { display.textContent = refs.length ? 'Select a verse to read it here.' : 'Bible verses are not available for this session.'; return; }
+        verses.forEach((verse) => { const heading = doc.createElement('h2'); heading.textContent = verse.key; const text = doc.createElement('div'); text.style.whiteSpace = 'pre-wrap'; text.textContent = verse.text || ''; display.append(heading, text); });
+      }
+
+      let remoteStyleEditorWindow = null;
+
+      function remoteStyleEditorInitData() {
+        return {
+          previewStyles: state.previewStyles || {},
+          content: null,
+          darkMode: shellDocument()?.body.classList.contains('dark-theme') || false
+        };
+      }
+
+      function initializeRemoteStyleEditor(editorWindow = remoteStyleEditorWindow) {
+        if (!editorWindow || editorWindow.closed) return;
+        editorWindow.postMessage({
+          type: 'LITURGIA_REMOTE_STYLE_INIT',
+          data: remoteStyleEditorInitData()
+        }, location.origin);
+      }
+
+      function closeRemoteStyleEditor() {
+        const editorWindow = remoteStyleEditorWindow;
+        remoteStyleEditorWindow = null;
+        if (editorWindow && !editorWindow.closed) editorWindow.close();
+      }
+
+      function openRemoteStyleEditor() {
+        if (!canGrant('settings.open')) return;
+        if (remoteStyleEditorWindow && !remoteStyleEditorWindow.closed) {
+          remoteStyleEditorWindow.focus();
+          initializeRemoteStyleEditor(remoteStyleEditorWindow);
+          return;
+        }
+
+        const width = Math.min(440, window.screen.availWidth || 440);
+        const height = Math.min(720, window.screen.availHeight || 720);
+        const left = Math.max(0, Math.round(((window.screen.availWidth || width) - width) / 2));
+        const top = Math.max(0, Math.round(((window.screen.availHeight || height) - height) / 2));
+        const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+        const editorWindow = window.open('/remote-style-window.html', 'liturgia-remote-style-editor', features);
+        if (!editorWindow) {
+          alert('The style editor was blocked. Allow pop-ups for this Liturgia Remote page and try again.');
+          return;
+        }
+
+        remoteStyleEditorWindow = editorWindow;
+        editorWindow.addEventListener('load', () => initializeRemoteStyleEditor(editorWindow), { once: true });
+        setTimeout(() => initializeRemoteStyleEditor(editorWindow), 250);
+        editorWindow.focus();
+      }
+
+      function renderDesktop() {
+        const doc = shellDocument(); if (!ready || !doc) return;
+        ensureDesktopControls(doc); queueMicrotask(() => { renderDesktopSchedule(doc); renderDesktopSongs(doc); renderDesktopVerses(doc); });
+        const bible = (state.bible || [])[0], song = (state.songs || [])[0];
+        const kicker = song ? (song.section || 'Song') : bible ? `${bible.book || ''} ${bible.chapter || ''}:${bible.startVerse || ''}` : 'Live display';
+        const title = song ? (song.title || 'Song') : bible ? (bible.text || 'Bible verse') : 'Nothing is live';
+        const body = song ? (song.text || '') : '';
+        const canvases = state.remoteCanvases || {};
+        drawSlide(doc.getElementById('preview-canvas'), kicker, title, body, canvases.preview);
+        drawSlide(doc.getElementById('live-canvas'), kicker, title, body, canvases.live);
+        const list = doc.getElementById('schedule-list');
+        if (list) { list.replaceChildren(); (state.allScheduleItems || []).forEach((item, index) => { const row = doc.createElement('div'); row.className = 'schedule-item'; const button = doc.createElement('button'); button.className = 'schedule-item-header' + ((state.scheduling || {}).currentItem === item.index ? ' selected' : ''); button.textContent = item.label || `Schedule item ${index + 1}`; button.disabled = !can('schedule', 'change'); button.onclick = () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index }); row.appendChild(button); list.appendChild(row); }); }
+        const songs = doc.getElementById('song-virtual-list');
+        if (songs) { songs.replaceChildren(); (state.allSongs || []).slice(0, 150).forEach((song) => { const button = doc.createElement('button'); button.className = 'song-item'; button.textContent = song.title || 'Untitled'; button.onclick = () => command('SELECT_SONG', { songIndex: song.index }); songs.appendChild(button); }); }
+      }
+
+      function activateTab(tab) {
+        const doc = shellDocument(); if (!doc) return;
+        doc.querySelectorAll('.bottom-tab').forEach((button) => { const active = button.dataset.tab === tab; button.classList.toggle('active', active); button.style.borderBottom = active ? '2px solid #0078d4' : 'none'; });
+        [['verses', 'verses-tab-content'], ['songs', 'songs-tab-content'], ['media', 'media-tab-content']].forEach(([name, id]) => { const pane = doc.getElementById(id); if (pane) pane.style.display = name === tab ? 'flex' : 'none'; });
+      }
+
+      function enableResizers(doc) {
+        const bind = (id, onMove) => { const divider = doc.getElementById(id); if (!divider) return; divider.addEventListener('pointerdown', (event) => { event.preventDefault(); divider.setPointerCapture(event.pointerId); const move = (next) => onMove(next); const finish = () => { divider.removeEventListener('pointermove', move); divider.removeEventListener('pointerup', finish); divider.removeEventListener('pointercancel', finish); }; divider.addEventListener('pointermove', move); divider.addEventListener('pointerup', finish); divider.addEventListener('pointercancel', finish); }); };
+        bind('schedule-resizer', (event) => { const pane = doc.getElementById('schedule-sidebar'); const top = doc.getElementById('top-section'); if (pane && top) pane.style.width = `${Math.max(180, Math.min(520, event.clientX - top.getBoundingClientRect().left))}px`; });
+        bind('preview-resizer', (event) => { const preview = doc.getElementById('slide-preview'); const slides = doc.getElementById('slide-container'); if (preview && slides) preview.style.flex = `0 0 ${Math.max(25, Math.min(75, (event.clientX - slides.getBoundingClientRect().left) / slides.getBoundingClientRect().width * 100))}%`; });
+        bind('verse-resizer', (event) => { const top = doc.getElementById('top-section'), panel = doc.getElementById('verse-panel'); if (!top || !panel) return; const bottomHeight = doc.defaultView.innerHeight - event.clientY; const topHeight = event.clientY - 8; if (bottomHeight > 30 && topHeight > 50) { top.style.flex = `0 0 ${topHeight}px`; panel.style.flex = `0 0 ${bottomHeight}px`; } });
+      }
+
+      shell.addEventListener('load', () => { const doc = shellDocument(); if (!doc) return; ready = true; doc.querySelectorAll('.bottom-tab').forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab))); const styleOverlay = doc.getElementById('preview-edit-overlay'); if (styleOverlay) styleOverlay.addEventListener('click', openRemoteStyleEditor); enableResizers(doc); activateTab('verses'); renderDesktop(); });
+      window.addEventListener('message', (event) => {
+        if (event.origin !== location.origin || !event.data) return;
+        if ((event.data.type === 'LITURGIA_REMOTE_STYLE_CLOSE' || event.data.type === 'LITURGIA_REMOTE_STYLES_SAVE') && event.source !== remoteStyleEditorWindow) return;
+        if (event.data.type === 'LITURGIA_REMOTE_STYLE_CLOSE') remoteStyleEditorWindow = null;
+        if (event.data.type === 'LITURGIA_REMOTE_STYLES_SAVE') {
+          state.previewStyles = event.data.styles || {};
+          command('UPDATE_STYLES', { previewStyles: state.previewStyles });
+          closeRemoteStyleEditor();
+        }
+      });
+      render = () => { nativeRender(); renderDesktop(); };
+      window.addEventListener('resize', renderDesktop);
+      const observer = new MutationObserver(() => { if (!document.getElementById('remote-app').classList.contains('hidden')) shell.classList.remove('hidden'); });
+      observer.observe(document.getElementById('remote-app'), { attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
+</body>
+</html>

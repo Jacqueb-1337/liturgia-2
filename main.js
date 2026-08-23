@@ -1576,15 +1576,23 @@ function handlePairRequest(deviceId, deviceName) {
   });
 }
 
+function createRemoteServer() {
+  // Browser account authentication compares against the token already saved on
+  // this desktop. The browser never receives that desktop token.
+  return new RemoteServer(app, mainWindow, handlePairRequest, readStoredAuthToken);
+}
+
 // Remote control server IPC handlers
 ipcMain.handle('remote-start', async (event, port) => {
   try {
     if (!remoteServer) {
-      remoteServer = new RemoteServer(app, mainWindow, handlePairRequest);
+      remoteServer = createRemoteServer();
     }
-    remoteServer.start(port);
-    await applySettingsPatch({ remote: { enabled: true, port } });
-    return { success: true };
+    const startResult = await remoteServer.start(port);
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (_) {}
+    await applySettingsPatch({ remote: { ...(settings.remote || {}), enabled: true, port } });
+    return { success: true, ...startResult };
   } catch (e) {
     console.error('[remote] Failed to start:', e);
     return { success: false, error: e.message };
@@ -1596,7 +1604,9 @@ ipcMain.handle('remote-stop', async () => {
     if (remoteServer) {
       remoteServer.stop();
     }
-    await applySettingsPatch({ remote: { enabled: false } });
+    let settings = {};
+    try { settings = JSON.parse(await fs.promises.readFile(settingsPath, 'utf8')); } catch (_) {}
+    await applySettingsPatch({ remote: { ...(settings.remote || {}), enabled: false } });
     return { success: true };
   } catch (e) {
     console.error('[remote] Failed to stop:', e);
@@ -1639,7 +1649,9 @@ ipcMain.handle('remote-get-info', async () => {
     running: true,
     port: remoteServer.port,
     httpPort: remoteServer.httpPort,
-    addresses: remoteServer.getLocalIpAddresses()
+    addresses: remoteServer.getLocalIpAddresses(),
+    firewall: remoteServer.firewallStatus || null,
+    error: remoteServer.lastError || null
   };
 });
 
@@ -1652,6 +1664,73 @@ ipcMain.handle('remote-fix-connection', async () => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('remote-list-credential-users', async () => {
+  return RemoteServer.listCredentialUsers(app);
+});
+
+ipcMain.handle('remote-save-credential-user', async (_event, user) => {
+  try {
+    return { ok: true, user: RemoteServer.saveCredentialUser(app, user) };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not save remote user.' };
+  }
+});
+
+ipcMain.handle('remote-delete-credential-user', async (_event, id) => {
+  return { ok: RemoteServer.deleteCredentialUser(app, String(id || '')) };
+});
+
+// Liturgia delegated-account roles are account data and therefore live on the
+// Liturgia service. Local username/password Browser Remote users remain local.
+ipcMain.handle('remote-list-liturgia-users', async () => {
+  const manager = remoteServer || createRemoteServer();
+  try {
+    return { ok: true, ...(await manager.listLiturgiaAccountUsers()) };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not load Liturgia account users.' };
+  }
+});
+
+ipcMain.handle('remote-save-liturgia-user', async (_event, user) => {
+  const manager = remoteServer || createRemoteServer();
+  try {
+    return { ok: true, user: await manager.saveLiturgiaAccountUser(user) };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not save the Liturgia account role.' };
+  }
+});
+
+ipcMain.handle('remote-delete-liturgia-user', async (_event, id) => {
+  const manager = remoteServer || createRemoteServer();
+  try {
+    await manager.resetLiturgiaAccountUser(String(id || ''));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not reset the Liturgia account role.' };
+  }
+});
+
+ipcMain.on('remote-open-settings', () => {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+  settingsWindow = new BrowserWindow({
+    width: 760,
+    height: 680,
+    parent: mainWindow,
+    icon: getIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: true,
+      contextIsolation: false
+    }
+  });
+  settingsWindow.setMenuBarVisibility(false);
+  settingsWindow.loadFile('settings.html');
+  settingsWindow.on('closed', () => { settingsWindow = null; });
 });
 
 // Cloud Relay IPC handlers
@@ -1750,13 +1829,34 @@ ipcMain.handle('relay-send-response', async (event, message) => {
 });
 
 ipcMain.handle('relay-push-state', async (event, state) => {
+  let stateForRemote = state;
+  try { stateForRemote = { ...state, bibleInfo: await getRemoteBibleInfo() }; } catch (_) {}
+  // LAN browser clients receive this same state directly via WebSocket.
+  if (remoteServer) remoteServer.broadcastState('state', stateForRemote);
   if (!relayClient) {
-    return { success: false, error: 'Not connected' };
+    return { success: !!remoteServer, local: !!remoteServer };
   }
-  console.log('[relay] Pushing state to mobile:', state);
-  const success = await relayClient.pushState(state);
-  return { success };
+  // Canvas snapshots are for the direct LAN Browser Remote only. They are
+  // intentionally excluded from the Internet relay to keep mobile updates
+  // compact and avoid sending display imagery off the local network.
+  const { remoteCanvases: _remoteCanvases, ...stateForRelay } = state;
+  console.log('[relay] Pushing state to mobile:', stateForRelay);
+  const success = await relayClient.pushState(stateForRelay);
+  return { success, local: !!remoteServer };
 });
+
+async function getRemoteBibleInfo() {
+  const base = path.join(getUserDataDir(app), BIBLE_STORAGE_DIR);
+  let entries = [];
+  try { entries = await fs.promises.readdir(base, { withFileTypes: true }); } catch (_) {}
+  const available = entries
+    .filter((entry) => entry.isDirectory() || (entry.isFile() && entry.name.endsWith('.json')))
+    .map((entry) => entry.isDirectory() ? entry.name : entry.name)
+    .sort((a, b) => a.localeCompare(b));
+  return { current: defaultBible || null, available };
+}
+
+ipcMain.handle('remote-get-bible-info', async () => getRemoteBibleInfo());
 
 ipcMain.on('set-default-bible', (event, bible) => {
   defaultBible = bible;
@@ -2919,11 +3019,11 @@ app.whenReady().then(async () => {
     // Start local remote server if enabled
     if (settings.remote && settings.remote.enabled) {
       try {
-        remoteServer = new RemoteServer(app, mainWindow, handlePairRequest);
+        remoteServer = createRemoteServer();
         // Delay start slightly to avoid Bonjour service name conflicts
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            remoteServer.start(settings.remote.port || 39847);
+            await remoteServer.start(settings.remote.port || 39847);
           } catch (e) {
             console.error('[remote] Failed to start:', e.message);
           }

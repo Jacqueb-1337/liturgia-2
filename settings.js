@@ -2,6 +2,7 @@ const { ipcRenderer } = require('electron');
 const { CDN_BASE, BIBLE_STORAGE_DIR } = require('./constants');
 const fs = require('fs');
 const path = require('path');
+const QRCode = require('qrcode');
 let cachedSettings = null;
 let _allDisplays = [];
 
@@ -46,21 +47,28 @@ function formatLicenseExpiry(status) {
   return Number.isFinite(milliseconds) ? new Date(milliseconds).toLocaleString() : 'n/a';
 }
 
+function activateSettingsPanel(panelId) {
+  const buttons = document.querySelectorAll('.sidebar button');
+  const panels = document.querySelectorAll('.settings-panel, .tab-content');
+  buttons.forEach(button => button.classList.toggle('active', button.getAttribute('data-panel') === panelId));
+  panels.forEach(panel => panel.classList.remove('active'));
+  const panel = document.getElementById(`panel-${panelId}`);
+  if (panel) panel.classList.add('active');
+  if (panelId === 'roles-permissions' && typeof window.refreshRolesAndPermissions === 'function') {
+    window.refreshRolesAndPermissions();
+  }
+  return panel;
+}
+window.activateSettingsPanel = activateSettingsPanel;
+
 // Sidebar navigation logic
 document.addEventListener('DOMContentLoaded', () => {
   const buttons = document.querySelectorAll('.sidebar button');
-  const panels = document.querySelectorAll('.settings-panel, .tab-content');
 
   buttons.forEach(button => {
     button.addEventListener('click', () => {
-      // Remove active class from all buttons and panels
-      buttons.forEach(btn => btn.classList.remove('active'));
-      panels.forEach(panel => panel.classList.remove('active'));
-
-      // Add active class to the clicked button and corresponding panel
-      button.classList.add('active');
       const panelId = button.getAttribute('data-panel') || 'bibles-tab';
-      document.getElementById(`panel-${panelId}`).classList.add('active');
+      activateSettingsPanel(panelId);
     });
   });
 
@@ -107,6 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof refreshRelayUI === 'function') {
         refreshRelayUI();
       }
+    });
+  }
+
+  const remoteTabButton = document.querySelector('button[data-panel="remote"]');
+  if (remoteTabButton) {
+    remoteTabButton.addEventListener('click', () => {
+      if (typeof window.refreshRemoteUI === 'function') window.refreshRemoteUI();
     });
   }
 });
@@ -157,6 +172,7 @@ window.addEventListener('DOMContentLoaded', () => {
       // Populate account/subscription info
       try {
         initAiTab(settings || {});
+        initRemoteTab(settings || {});
         
         const ai = document.getElementById('account-info');
         const si = document.getElementById('subscription-info');
@@ -651,7 +667,277 @@ function setupAtomicSaving() {
   observeKeybindsTab();
 }
 
-// Remote Control UI removed in favor of AI tab.
+// Browser Remote: local-LAN WebSocket controller and Discord-style role editor.
+const REMOTE_PERMISSION_FEATURES = [
+  'songs.view', 'songs.edit', 'verses.view', 'verses.select',
+  'presentation.view', 'presentation.goLiveSongs', 'presentation.goLiveVerses', 'presentation.clear', 'presentation.black',
+  'bible.view', 'bible.changeTranslation', 'schedule.view', 'schedule.edit', 'schedule.goLive', 'settings.view', 'settings.open',
+  'accounts.view', 'accounts.manageDelegates', 'accounts.manageRoles'
+];
+const remotePermissionId = (key) => key.replace(/([A-Z])/g, '-$1').replace(/\./g, '-').toLowerCase();
+let remoteTabReady = false;
+
+function initRemoteTab(settings = {}) {
+  const enabledEl = document.getElementById('remote-enabled');
+  if (!enabledEl || remoteTabReady) {
+    if (typeof window.refreshRemoteUI === 'function') window.refreshRemoteUI();
+    return;
+  }
+  remoteTabReady = true;
+  const portEl = document.getElementById('remote-port');
+  const accessEl = document.getElementById('remote-browser-access');
+  const descriptionEl = document.getElementById('remote-access-description');
+  const addressWrapEl = document.getElementById('remote-address-wrap');
+  const addressEl = document.getElementById('remote-address');
+  const qrCanvasEl = document.getElementById('remote-qr-code');
+  const firewallStatusEl = document.getElementById('remote-firewall-status');
+  const fixConnectionEl = document.getElementById('remote-fix-connection');
+  const usersWrapEl = document.getElementById('remote-access-users');
+  const usersEl = document.getElementById('remote-user-list');
+  const usersHeadingEl = document.getElementById('remote-users-heading');
+  const usersDescriptionEl = document.getElementById('remote-users-description');
+  const editorEl = document.getElementById('remote-user-editor');
+  const editorTitleEl = document.getElementById('remote-user-editor-title');
+  const editorStatusEl = document.getElementById('remote-user-editor-status');
+  const editorSaveEl = document.getElementById('remote-save-user');
+  const rolesLiturgiaListEl = document.getElementById('roles-liturgia-user-list');
+  const rolesCredentialListEl = document.getElementById('roles-credential-user-list');
+  const rolesEditorMountEl = document.getElementById('roles-editor-mount');
+  const saveStatusEl = document.getElementById('remote-save-status');
+  let currentUsers = [];
+  let currentUserKind = 'credentials';
+
+  if (rolesEditorMountEl && editorEl.parentElement !== rolesEditorMountEl) rolesEditorMountEl.appendChild(editorEl);
+
+  const renderQrCode = async (address) => {
+    if (!qrCanvasEl || !address) return;
+    try {
+      await QRCode.toCanvas(qrCanvasEl, address, {
+        width: 192,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#111827', light: '#ffffff' }
+      });
+    } catch (error) {
+      console.error('[remote] Could not render Browser Remote QR code:', error);
+    }
+  };
+
+  const readOverrides = () => Object.fromEntries(REMOTE_PERMISSION_FEATURES.map((feature) => [
+    feature,
+    document.getElementById(`remote-permission-${remotePermissionId(feature)}`).value
+  ]));
+  const applyOverrides = (overrides) => {
+    const next = overrides || {};
+    for (const feature of REMOTE_PERMISSION_FEATURES) {
+      const el = document.getElementById(`remote-permission-${remotePermissionId(feature)}`);
+      if (el) el.value = next[feature] || 'inherit';
+    }
+  };
+  const setEditor = (user = null) => {
+    const isLiturgia = user && user.kind === 'liturgia';
+    const isOwner = !!(user && user.isOwner);
+    currentUserKind = isLiturgia ? 'liturgia' : 'credentials';
+    editorStatusEl.textContent = '';
+    editorEl.style.display = 'block';
+    editorTitleEl.textContent = isOwner ? `${user.email} · Force-op` : (isLiturgia ? `Edit ${user.email}` : (user ? `Edit ${user.username}` : 'New local user'));
+    document.getElementById('remote-user-id').value = user ? user.id : '';
+    document.getElementById('remote-user-name').value = user ? (isLiturgia ? user.email : user.username) : '';
+    document.getElementById('remote-user-name').readOnly = isLiturgia || isOwner;
+    document.getElementById('remote-user-name-label').textContent = isLiturgia ? 'Liturgia email' : 'Username';
+    document.getElementById('remote-user-password-row').style.display = isLiturgia ? 'none' : '';
+    document.getElementById('remote-user-password').value = '';
+    document.getElementById('remote-user-role').value = isOwner ? 'admin' : (user ? user.role : 'guest');
+    applyOverrides(isOwner ? Object.fromEntries(REMOTE_PERMISSION_FEATURES.map((feature) => [feature, 'allow'])) : (user ? user.overrides : {}));
+    document.getElementById('remote-user-role').disabled = isOwner;
+    for (const feature of REMOTE_PERMISSION_FEATURES) {
+      const permissionEl = document.getElementById(`remote-permission-${remotePermissionId(feature)}`);
+      if (permissionEl) permissionEl.disabled = isOwner;
+    }
+    editorSaveEl.style.display = isOwner ? 'none' : '';
+    if (isOwner) editorStatusEl.textContent = 'The root Liturgia account always has every permission and cannot be changed.';
+    editorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const hideEditor = () => { editorEl.style.display = 'none'; editorStatusEl.textContent = ''; };
+  const updateAccessDescription = () => {
+    const messages = {
+      liturgia: 'Each browser signs into the same Liturgia account as this PC. Its browser session is remembered on that device.',
+      credentials: 'Users sign in with local credentials that you create below. Their role is enforced by the desktop.',
+      open: 'Anyone on this local network can control Liturgia. Use only on a network you trust.'
+    };
+    descriptionEl.textContent = messages[accessEl.value] || messages.liturgia;
+    const usesRoles = accessEl.value === 'credentials' || accessEl.value === 'liturgia';
+    usersWrapEl.style.display = usesRoles ? 'block' : 'none';
+    usersHeadingEl.textContent = accessEl.value === 'liturgia' ? 'Liturgia account access roles' : 'Local access roles';
+    usersDescriptionEl.textContent = accessEl.value === 'liturgia'
+      ? 'The root account is force-op. Delegated addresses appear automatically from Account Access; choose a role and then fine-tune each permission.'
+      : 'Choose a role, then fine-tune each permission just like a Discord role. Passwords are stored only as secure password hashes on this PC.';
+    document.getElementById('remote-new-user').style.display = accessEl.value === 'credentials' ? '' : 'none';
+  };
+  const renderUsers = () => {
+    usersEl.replaceChildren();
+    if (!currentUsers.length) {
+      const empty = document.createElement('div');
+      empty.className = 'remote-note';
+      empty.textContent = 'No local users yet. Add a user and assign a role preset.';
+      usersEl.appendChild(empty);
+      return;
+    }
+    currentUsers.forEach((user) => {
+      const card = document.createElement('div');
+      card.className = 'remote-user-card';
+      const details = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'remote-user-title';
+      title.textContent = user.email || user.username;
+      const summary = document.createElement('div');
+      summary.className = 'remote-user-summary';
+      const overrideCount = REMOTE_PERMISSION_FEATURES.filter((feature) => user.overrides && user.overrides[feature] !== 'inherit').length;
+      summary.textContent = `${user.role || 'guest'} role · ${overrideCount ? overrideCount + ' permission override' + (overrideCount === 1 ? '' : 's') : 'role defaults'}`;
+      details.append(title, summary);
+      const actions = document.createElement('div');
+      actions.style.display = 'flex'; actions.style.gap = '6px'; actions.style.alignItems = 'center';
+      const roles = document.createElement('button');
+      roles.className = 'btn'; roles.textContent = 'Roles & permissions';
+      roles.addEventListener('click', () => window.openRolesAndPermissions(user));
+      actions.appendChild(roles);
+      if (user.isOwner) {
+        const forced = document.createElement('span'); forced.className = 'remote-note'; forced.textContent = 'Force-op'; actions.appendChild(forced);
+      } else {
+        const remove = document.createElement('button');
+        remove.className = 'btn'; remove.textContent = user.kind === 'liturgia' ? 'Reset role' : 'Remove';
+        remove.disabled = user.kind === 'liturgia' && !user.id;
+        remove.addEventListener('click', async () => {
+          const identity = user.email || user.username;
+          const wording = user.kind === 'liturgia' ? `Reset the role for "${identity}" to Guest defaults? Their saved browser sessions will be signed out.` : `Remove local user "${identity}"? Their saved browser sessions will be signed out.`;
+          if (!confirm(wording)) return;
+          await ipcRenderer.invoke(user.kind === 'liturgia' ? 'remote-delete-liturgia-user' : 'remote-delete-credential-user', user.id);
+          await refreshUsers();
+        });
+        actions.appendChild(remove);
+      }
+      card.append(details, actions); usersEl.appendChild(card);
+    });
+  };
+  const refreshUsers = async () => {
+    if (accessEl.value === 'liturgia') {
+      const result = await ipcRenderer.invoke('remote-list-liturgia-users').catch(() => ({ ok: false }));
+      currentUsers = result && result.ok ? (result.users || []).map((user) => ({ ...user, kind: 'liturgia' })) : [];
+      if (!result || !result.ok) saveStatusEl.textContent = (result && result.error) || 'Sign in to Liturgia on this PC to manage delegated account roles.';
+    } else {
+      try { currentUsers = (await ipcRenderer.invoke('remote-list-credential-users')).map((user) => ({ ...user, kind: 'credentials' })); }
+      catch (_) { currentUsers = []; }
+    }
+    renderUsers();
+  };
+  let rolesRefreshPromise = null;
+  let roleDirectoryUsers = [];
+  const renderRoleDirectoryList = (container, users, emptyText) => {
+    if (!container) return;
+    container.replaceChildren();
+    if (!users.length) {
+      const empty = document.createElement('div'); empty.className = 'remote-note'; empty.textContent = emptyText; container.appendChild(empty); return;
+    }
+    users.forEach((user) => {
+      const card = document.createElement('div'); card.className = 'remote-user-card';
+      const details = document.createElement('div');
+      const title = document.createElement('div'); title.className = 'remote-user-title'; title.textContent = user.email || user.username;
+      const summary = document.createElement('div'); summary.className = 'remote-user-summary';
+      const overrideCount = REMOTE_PERMISSION_FEATURES.filter((feature) => user.overrides && user.overrides[feature] !== 'inherit').length;
+      summary.textContent = user.isOwner ? 'Force-op · all permissions' : `${user.role || 'guest'} role · ${overrideCount ? `${overrideCount} override${overrideCount === 1 ? '' : 's'}` : 'role defaults'}`;
+      details.append(title, summary);
+      const open = document.createElement('button'); open.className = 'btn'; open.textContent = user.isOwner ? 'View permissions' : 'Roles & permissions';
+      open.addEventListener('click', () => window.openRolesAndPermissions(user));
+      card.append(details, open); container.appendChild(card);
+    });
+  };
+  const refreshRolesAndPermissions = async () => {
+    if (rolesRefreshPromise) return rolesRefreshPromise;
+    rolesRefreshPromise = (async () => {
+      const [liturgiaResult, credentialResult] = await Promise.all([
+        ipcRenderer.invoke('remote-list-liturgia-users').catch(() => ({ ok: false, error: 'Could not load Liturgia account users.' })),
+        ipcRenderer.invoke('remote-list-credential-users').catch(() => [])
+      ]);
+      const liturgiaUsers = liturgiaResult && liturgiaResult.ok ? (liturgiaResult.users || []).map((user) => ({ ...user, kind: 'liturgia' })) : [];
+      const credentialUsers = (Array.isArray(credentialResult) ? credentialResult : []).map((user) => ({ ...user, kind: 'credentials' }));
+      roleDirectoryUsers = [...liturgiaUsers, ...credentialUsers];
+      renderRoleDirectoryList(rolesLiturgiaListEl, liturgiaUsers, (liturgiaResult && liturgiaResult.error) || 'No Liturgia account users are available.');
+      renderRoleDirectoryList(rolesCredentialListEl, credentialUsers, 'No local Browser Remote users yet.');
+      return roleDirectoryUsers;
+    })().finally(() => { rolesRefreshPromise = null; });
+    return rolesRefreshPromise;
+  };
+  window.refreshRolesAndPermissions = refreshRolesAndPermissions;
+  window.openRolesAndPermissions = async (target = null) => {
+    activateSettingsPanel('roles-permissions');
+    const users = await refreshRolesAndPermissions();
+    if (!target) { setEditor(); return; }
+    const kind = target.kind || (target.email ? 'liturgia' : 'credentials');
+    const identity = String(target.email || target.username || '').trim().toLowerCase();
+    const user = users.find((entry) => entry.kind === kind && String(entry.email || entry.username || '').trim().toLowerCase() === identity) || target;
+    setEditor({ ...user, kind });
+  };
+  const refresh = async () => {
+    const latest = await ipcRenderer.invoke('load-settings').catch(() => ({}));
+    cachedSettings = latest || {};
+    const remote = cachedSettings.remote || {};
+    enabledEl.checked = !!remote.enabled;
+    portEl.value = remote.port || 39847;
+    accessEl.value = remote.browserAccess || 'liturgia';
+    updateAccessDescription();
+    const info = await ipcRenderer.invoke('remote-get-info').catch(() => ({ running: false }));
+    if (info && info.running && info.addresses && info.addresses.length) {
+      const address = `http://${info.addresses[0]}:${info.httpPort}/`;
+      addressEl.textContent = address;
+      renderQrCode(address);
+      addressWrapEl.style.display = 'block';
+      if (firewallStatusEl) firewallStatusEl.textContent = info.error || (info.firewall && info.firewall.message) || 'Checking local firewall…';
+    } else {
+      addressWrapEl.style.display = 'none';
+    }
+    if (fixConnectionEl) fixConnectionEl.style.display = process.platform === 'win32' ? '' : 'none';
+    if (accessEl.value === 'credentials' || accessEl.value === 'liturgia') await refreshUsers();
+  };
+  window.refreshRemoteUI = refresh;
+
+  accessEl.addEventListener('change', async () => { updateAccessDescription(); hideEditor(); await refreshUsers(); });
+  document.getElementById('remote-new-user').addEventListener('click', () => window.openRolesAndPermissions());
+  document.getElementById('roles-new-local-user').addEventListener('click', () => window.openRolesAndPermissions());
+  document.getElementById('remote-cancel-user').addEventListener('click', hideEditor);
+  document.getElementById('remote-save-user').addEventListener('click', async () => {
+    const data = {
+      id: document.getElementById('remote-user-id').value || undefined,
+      role: document.getElementById('remote-user-role').value,
+      permissionOverrides: readOverrides()
+    };
+    if (currentUserKind === 'liturgia') data.email = document.getElementById('remote-user-name').value.trim();
+    else { data.username = document.getElementById('remote-user-name').value.trim(); data.password = document.getElementById('remote-user-password').value; }
+    const result = await ipcRenderer.invoke(currentUserKind === 'liturgia' ? 'remote-save-liturgia-user' : 'remote-save-credential-user', data);
+    if (!result || !result.ok) { editorStatusEl.textContent = (result && result.error) || 'Could not save this user.'; return; }
+    hideEditor();
+    await Promise.all([refreshUsers(), refreshRolesAndPermissions()]);
+  });
+  document.getElementById('remote-save-settings').addEventListener('click', async () => {
+    const port = Number(portEl.value);
+    if (!Number.isInteger(port) || port < 1024 || port > 65534) { saveStatusEl.textContent = 'Choose a port from 1024 through 65534.'; return; }
+    const remote = { ...(cachedSettings.remote || {}), enabled: enabledEl.checked, port, browserAccess: accessEl.value };
+    await ipcRenderer.invoke('update-settings', { remote });
+    const wasRunning = await ipcRenderer.invoke('remote-get-info').then((info) => !!info.running).catch(() => false);
+    if (wasRunning) await ipcRenderer.invoke('remote-stop');
+    const result = enabledEl.checked ? await ipcRenderer.invoke('remote-start', port) : { success: true };
+    saveStatusEl.textContent = result && result.success ? ((result.firewall && result.firewall.success === false) ? `Started, but ${result.firewall.message}` : 'Saved.') : ((result && result.error) || 'Could not start browser remote.');
+    setTimeout(() => { saveStatusEl.textContent = ''; }, 3500);
+    await refresh();
+  });
+  document.getElementById('remote-copy-address').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(addressEl.textContent); } catch (_) {}
+  });
+  document.getElementById('remote-fix-connection').addEventListener('click', async () => {
+    const result = await ipcRenderer.invoke('remote-fix-connection');
+    saveStatusEl.textContent = result && result.success ? 'Firewall rule added.' : ((result && result.error) || 'Could not update the firewall.');
+  });
+  refresh();
+}
 
 async function mergeAiSettings(patch) {
   try {
@@ -1958,6 +2244,7 @@ function renderAccountDelegates(delegates, limit) {
   delegates.forEach(delegate => {
     const created = delegate.created_at ? ('Added ' + new Date(delegate.created_at).toLocaleString()) : '';
     list.appendChild(makeAccessRow(delegate.delegate_email, created, [
+      { label: 'Roles & permissions', onClick: () => window.openRolesAndPermissions({ kind: 'liturgia', email: delegate.delegate_email }) },
       { label: 'Remove', onClick: () => updateAccountDelegate('remove', delegate.delegate_email) }
     ]));
   });

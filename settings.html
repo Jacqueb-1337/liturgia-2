@@ -796,9 +796,11 @@
     <div class="sidebar">
       <button class="active" data-panel="general">General</button>
       <button data-panel="account">Account Access</button>
+      <button data-panel="roles-permissions">Roles and permissions</button>
       <button data-panel="display">Display</button>
       <button data-panel="ai">Speech Recognition</button>
       <button data-panel="about">About</button>
+      <button data-panel="remote">Browser Remote</button>
       <button data-panel="relay">Cloud Relay</button>
       <button id="bibles-tab-button" data-panel="bibles">Bibles</button> <!-- Add id here -->
       <button data-panel="keybinds">Keybinds</button>
@@ -848,6 +850,22 @@
           </div>
         </div>
         <button id="account-refresh-access" class="btn" style="margin-top:12px">Refresh Account Access</button>
+      </div>
+      <div class="settings-panel" id="panel-roles-permissions">
+        <h2>Roles and permissions</h2>
+        <p class="remote-note">Choose a user to assign a role and override individual permissions. Liturgia's root account is always force-op and cannot be changed.</p>
+        <div class="roles-directory-grid">
+          <section>
+            <h3>Liturgia account users</h3>
+            <div id="roles-liturgia-user-list" class="remote-user-list"><div class="remote-note">Loading account users…</div></div>
+          </section>
+          <section>
+            <h3>Local Browser Remote users</h3>
+            <div id="roles-credential-user-list" class="remote-user-list"><div class="remote-note">Loading local users…</div></div>
+            <button id="roles-new-local-user" class="btn">Add local user</button>
+          </section>
+        </div>
+        <div id="roles-editor-mount"></div>
       </div>
       <div class="settings-panel" id="panel-display">
         <h2>Display Settings</h2>
@@ -989,6 +1007,91 @@
             </div>
           </section>
         </div>
+      </div>
+      <div class="settings-panel" id="panel-remote">
+        <h2>Browser Remote</h2>
+        <p class="remote-note">Control Liturgia instantly from a browser on this same network. The browser remote connects directly to this PC over WebSocket; no cloud relay or port forwarding is used.</p>
+
+        <div class="form-row">
+          <label class="toggle-label">
+            <input id="remote-enabled" type="checkbox" />
+            <span class="toggle-ui"></span>
+            Enable browser remote on this network
+          </label>
+        </div>
+        <div class="form-row">
+          <label for="remote-port">Browser remote port</label>
+          <input id="remote-port" class="relay-input" type="number" min="1024" max="65535" value="39847" />
+          <div class="remote-note">The browser page uses the next port (for example, WebSocket 39847 and browser page 39848).</div>
+        </div>
+        <div class="form-row">
+          <label for="remote-browser-access">Browser sign-in</label>
+          <select id="remote-browser-access" class="relay-input">
+            <option value="liturgia">Liturgia account sign-in</option>
+            <option value="credentials">Local usernames and passwords</option>
+            <option value="open">No sign-in (trusted LAN only)</option>
+          </select>
+          <div id="remote-access-description" class="remote-note"></div>
+        </div>
+
+        <div id="remote-address-wrap" style="display:none">
+          <label>Open this on another device</label>
+          <div id="remote-address" class="remote-address">Starting…</div>
+          <div class="remote-qr-wrap">
+            <canvas id="remote-qr-code" width="192" height="192" aria-label="QR code for the Browser Remote address"></canvas>
+            <div class="remote-note">Scan this QR code with your phone or tablet to open Browser Remote on this network.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="remote-copy-address" class="btn">Copy address</button>
+            <button id="remote-fix-connection" class="btn">Allow through Windows Firewall</button>
+          </div>
+          <div id="remote-firewall-status" class="remote-note" style="margin-top:8px"></div>
+        </div>
+
+        <div id="remote-access-users" style="display:none">
+          <h3 id="remote-users-heading" style="margin:22px 0 4px">Local access roles</h3>
+          <p id="remote-users-description" class="remote-note">Choose a role, then fine-tune each permission just like a Discord role.</p>
+          <div id="remote-user-list" class="remote-user-list"></div>
+          <button id="remote-new-user" class="btn">Add local user</button>
+
+          <div id="remote-user-editor" class="remote-editor" style="display:none">
+            <h3 id="remote-user-editor-title">New access user</h3>
+            <input id="remote-user-id" type="hidden" />
+            <div class="form-row" id="remote-user-name-row"><label id="remote-user-name-label" for="remote-user-name">Username</label><input id="remote-user-name" class="relay-input" autocomplete="username" maxlength="128" /></div>
+            <div class="form-row" id="remote-user-password-row"><label for="remote-user-password">Password <span class="remote-note">(leave blank to keep the current password)</span></label><input id="remote-user-password" class="relay-input" type="password" autocomplete="new-password" /></div>
+            <div class="form-row"><label for="remote-user-role">Role</label><select id="remote-user-role" class="permission-select"><option value="admin">Admin</option><option value="moderator">Moderator</option><option value="operator">Operator</option><option value="guest">Guest</option></select><div class="remote-note">The role supplies defaults. Change a permission below only when this user needs an exception.</div></div>
+            <div class="permission-grid" id="remote-permission-grid">
+              <div class="permission-group">Songs</div>
+              <label class="permission-feature" for="remote-permission-songs-view">View song list</label><select id="remote-permission-songs-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-songs-edit">Manage songs (add, edit, delete, import)</label><select id="remote-permission-songs-edit" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <div class="permission-group">Verses</div>
+              <label class="permission-feature" for="remote-permission-verses-view">View verses</label><select id="remote-permission-verses-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-verses-select">Select and preview verses</label><select id="remote-permission-verses-select" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <div class="permission-group">Presentation</div>
+              <label class="permission-feature" for="remote-permission-presentation-view">View live presentation</label><select id="remote-permission-presentation-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-presentation-go-live-songs">Go live with songs</label><select id="remote-permission-presentation-go-live-songs" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-presentation-go-live-verses">Go live with verses</label><select id="remote-permission-presentation-go-live-verses" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-presentation-clear">Clear presentation</label><select id="remote-permission-presentation-clear" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-presentation-black">Black screen</label><select id="remote-permission-presentation-black" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <div class="permission-group">Bible, schedule, and settings</div>
+              <label class="permission-feature" for="remote-permission-bible-view">View Bible translations</label><select id="remote-permission-bible-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-bible-change-translation">Change Bible translation</label><select id="remote-permission-bible-change-translation" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-schedule-view">View schedule</label><select id="remote-permission-schedule-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-schedule-edit">Edit and reorder schedule</label><select id="remote-permission-schedule-edit" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-schedule-go-live">Go live with schedule items</label><select id="remote-permission-schedule-go-live" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-settings-view">View settings access</label><select id="remote-permission-settings-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-settings-open">Open settings on PC</label><select id="remote-permission-settings-open" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <div class="permission-group">Account access</div>
+              <label class="permission-feature" for="remote-permission-accounts-view">View account access</label><select id="remote-permission-accounts-view" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-accounts-manage-delegates">Manage delegated emails</label><select id="remote-permission-accounts-manage-delegates" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+              <label class="permission-feature" for="remote-permission-accounts-manage-roles">Manage roles and permissions</label><select id="remote-permission-accounts-manage-roles" class="permission-select"><option value="inherit">/ Unchanged (use role)</option><option value="allow">✓ Allow</option><option value="deny">× Deny</option></select>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:14px"><button id="remote-save-user" class="btn primary">Save role</button><button id="remote-cancel-user" class="btn">Cancel</button></div>
+            <div id="remote-user-editor-status" class="remote-note" style="margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:18px"><button id="remote-save-settings" class="btn primary">Save browser remote</button><span id="remote-save-status" class="save-status"></span></div>
       </div>
       <div class="settings-panel" id="panel-relay">
         <h2>Cloud Relay (Beta)</h2>
@@ -1191,6 +1294,39 @@
     }
     body.dark-theme .subscribe-modal-email-desc { color: #aaa; }
     body.dark-theme .subscribe-modal-status { color: #f88; }
+    /* Browser remote and role-style permission editor */
+    .remote-address { padding: 10px 12px; border: 1px solid #b9d6fb; border-radius: 6px; background: #eef6ff; color: #144f8d; font-family: ui-monospace, Consolas, monospace; word-break: break-all; margin: 10px 0; }
+    .remote-qr-wrap { display: flex; align-items: center; gap: 14px; margin: 10px 0; padding: 10px; border: 1px solid #d9dce1; border-radius: 8px; background: #fff; }
+    .remote-qr-wrap canvas { width: 140px; height: 140px; background: #fff; image-rendering: pixelated; }
+    .remote-note { color: #666; font-size: .9em; line-height: 1.45; }
+    .remote-user-list { display: grid; gap: 8px; margin: 12px 0; }
+    .roles-directory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; margin: 16px 0 22px; }
+    .roles-directory-grid section { min-width: 0; }
+    .roles-directory-grid h3 { margin: 0 0 8px; }
+    .remote-user-card { border: 1px solid #d9dce1; border-radius: 8px; padding: 10px 12px; background: #fafbfc; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+    .remote-user-title { font-weight: 700; color: #1f2328; }
+    .remote-user-summary { color: #667085; font-size: .85em; margin-top: 2px; }
+    .remote-role-presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px; }
+    .remote-role-preset { border: 1px solid #c8ced8; border-radius: 999px; background: #fff; padding: 5px 10px; cursor: pointer; font-weight: 600; }
+    .remote-role-preset:hover { background: #eef3ff; border-color: #6b8cff; }
+    .permission-grid { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(130px, 1fr); gap: 8px 12px; align-items: center; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    .permission-feature { font-weight: 600; color: #30343b; }
+    .permission-group { grid-column: 1 / -1; color: #5865f2; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; font-size: .76em; padding-top: 7px; }
+    .permission-select { width: 100%; padding: 6px 8px; border: 1px solid #c8ced8; border-radius: 5px; background: #fff; }
+    .permission-select option[value="inherit"] { color: #747f92; }
+    .permission-select option[value="allow"] { color: #16803d; font-weight: 700; }
+    .permission-select option[value="deny"] { color: #c53030; font-weight: 700; }
+    .remote-editor { border: 1px solid #d5d9e0; border-radius: 10px; padding: 14px; margin-top: 12px; background: #fff; }
+    .remote-editor h3 { margin: 0 0 6px; }
+    body.dark-theme .remote-address { background: #193451; border-color: #2b6599; color: #b9dcff; }
+    body.dark-theme .remote-qr-wrap { background: #f8fafc; border-color: #4b4f58; }
+    body.dark-theme .remote-user-card, body.dark-theme .remote-editor { background: #292b30; border-color: #4b4f58; }
+    body.dark-theme .remote-user-title, body.dark-theme .permission-feature { color: #f1f3f5; }
+    body.dark-theme .remote-user-summary, body.dark-theme .remote-note { color: #b0b6c0; }
+    body.dark-theme .remote-role-preset, body.dark-theme .permission-select { background: #24262b; border-color: #555b66; color: #f2f4f7; }
+    body.dark-theme .permission-select option[value="inherit"] { color: #9aa4b2; }
+    body.dark-theme .permission-select option[value="allow"] { color: #44c77a; }
+    body.dark-theme .permission-select option[value="deny"] { color: #ff6b6b; }
   </style>
   <script src="settings.js"></script>
 </body>

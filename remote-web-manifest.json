@@ -1,0 +1,18 @@
+{
+  "name": "Liturgia Remote",
+  "short_name": "Liturgia",
+  "description": "Control Liturgia from this local network browser.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111527",
+  "theme_color": "#161b2e",
+  "icons": [
+    {
+      "src": "/remote-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
