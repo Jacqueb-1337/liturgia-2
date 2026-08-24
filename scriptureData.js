@@ -4,6 +4,14 @@ const { CDN_BASE, BOOKS, CHAPTER_COUNTS, BIBLE_JSON, VERSION } = require('./cons
 
 const LOCAL_BIBLE_FILE = 'bible.json';
 
+// Canonical USFM/USFX book IDs for the standard 66-book Protestant canon.
+// These let full legacy JSON Bibles interoperate safely with partial eBible
+// packages instead of matching verses purely by array position.
+const STANDARD_BOOK_IDS = [
+  'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
+  'MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL','EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN','JUD','REV'
+];
+
 async function ensureBibleJson(baseDir) {
   const filePath = path.join(baseDir, LOCAL_BIBLE_FILE);
   if (fs.existsSync(filePath)) {
@@ -23,17 +31,25 @@ async function loadAllVersesFromDisk(baseDir) {
   const txt = await fs.promises.readFile(filePath, 'utf8');
   const books = JSON.parse(txt);
 
-  // Flatten to allVerses: {key, text}
+  // Flatten to allVerses. Preserve canonical source book IDs when present so
+  // dual translation can match partial Bibles by reference instead of position.
   const allVerses = [];
-  for (const book of books) {
-    // Accept any of the common key names different Bible JSON sources use
+  const canUseStandardOrder = books.length === STANDARD_BOOK_IDS.length;
+  for (let bookIndex = 0; bookIndex < books.length; bookIndex++) {
+    const book = books[bookIndex];
+    // Accept any of the common key names different Bible JSON sources use.
     const bookName = book.name || book.book || book.bookname || book.abbrev || 'Unknown';
+    const explicitBookId = String(book.id || book.bookId || book.osisId || '').trim().toUpperCase();
+    const bookId = explicitBookId || (canUseStandardOrder ? STANDARD_BOOK_IDS[bookIndex] : null);
     for (let c = 0; c < book.chapters.length; ++c) {
       const chapter = book.chapters[c];
       for (let v = 0; v < chapter.length; ++v) {
         allVerses.push({
           key: `${bookName} ${c + 1}:${v + 1}`,
-          text: chapter[v]
+          text: chapter[v],
+          bookId,
+          chapter: c + 1,
+          verse: v + 1
         });
       }
     }
@@ -225,7 +241,7 @@ function parseUsfxXml(txt) {
       }
       if (verses.length > 0) chapters.push(verses);
     }
-    if (bookName && chapters.length > 0) books.push({ name: bookName, chapters });
+    if (bookName && chapters.length > 0) books.push({ id: bookId.toUpperCase(), name: bookName, chapters });
   }
   return books;
 }
@@ -260,7 +276,7 @@ function parseOsisXml(txt) {
       }
       if (verses.length > 0) chapters.push(verses);
     }
-    if (bookName && chapters.length > 0) books.push({ name: bookName, chapters });
+    if (bookName && chapters.length > 0) books.push({ id: osisIdMatch ? osisIdMatch[1].toUpperCase() : undefined, name: bookName, chapters });
   }
   return books;
 }
@@ -300,7 +316,8 @@ function parseUsfm(txt) {
       flushChapter();
       if (currentBook && currentBook.chapters.length > 0) books.push(currentBook);
       // Name comes from \h or \toc1 later; use id for now
-      currentBook = { name: line.slice(4).split(/\s/)[0], chapters: [] };
+      const sourceBookId = line.slice(4).split(/\s/)[0].toUpperCase();
+      currentBook = { id: sourceBookId, name: sourceBookId, chapters: [] };
       currentChapter = null;
       collectingVerse = false;
     } else if (line.startsWith('\\h ') || line.startsWith('\\h\t')) {
@@ -473,10 +490,24 @@ async function extractBibleFromZip(filePath) {
   const entries = zip.getEntries().filter(e => !e.isDirectory);
 
   const METADATA_RE = /metadata|booknames|parms|copr|vernacular|signature|readme|license/i;
+  // eBible USFX packages normally contain one whole-Bible XML file. Prefer it.
+  const usfxEntry = entries.find(e => /usfx[^/\\]*\.xml$/i.test(e.entryName));
+  if (usfxEntry) return { text: usfxEntry.getData().toString('utf8'), name: usfxEntry.entryName };
+
+  const xmlEntry = entries.find(e => /\.xml$/i.test(e.entryName) && !METADATA_RE.test(e.entryName));
+  if (xmlEntry) return { text: xmlEntry.getData().toString('utf8'), name: xmlEntry.entryName };
+
+  // USFM ZIPs commonly contain one file per book. Concatenate every book instead
+  // of silently importing only the first file in the archive.
+  const usfmEntries = entries.filter(e => /\.(usfm|sfm)$/i.test(e.entryName));
+  if (usfmEntries.length > 0) {
+    return {
+      text: usfmEntries.map(entry => entry.getData().toString('utf8')).join('\n\n'),
+      name: `${path.basename(filePath, path.extname(filePath))}.usfm`
+    };
+  }
+
   const priorities = [
-    e => /usfx[^/\\]*\.xml$/i.test(e.entryName),
-    e => /\.xml$/i.test(e.entryName) && !METADATA_RE.test(e.entryName),
-    e => /\.(usfm|sfm)$/i.test(e.entryName),
     e => /\.txt$/i.test(e.entryName) && !METADATA_RE.test(e.entryName),
     e => /\.tsv$/i.test(e.entryName),
     e => /\.json$/i.test(e.entryName),
@@ -485,9 +516,7 @@ async function extractBibleFromZip(filePath) {
 
   for (const test of priorities) {
     const entry = entries.find(test);
-    if (entry) {
-      return { text: entry.getData().toString('utf8'), name: entry.entryName };
-    }
+    if (entry) return { text: entry.getData().toString('utf8'), name: entry.entryName };
   }
   throw new Error('No recognizable Bible file found inside ZIP.');
 }
@@ -540,7 +569,14 @@ async function importBibleFile(filePath, versionId, storageDir) {
   const destDir = path.join(storageDir, versionId);
   await fs.promises.mkdir(destDir, { recursive: true });
   const destFile = path.join(destDir, 'bible.json');
-  await fs.promises.writeFile(destFile, JSON.stringify(books), 'utf8');
+  const tempFile = `${destFile}.tmp-${process.pid}-${Date.now()}`;
+  await fs.promises.writeFile(tempFile, JSON.stringify(books), 'utf8');
+  try {
+    await fs.promises.rename(tempFile, destFile);
+  } catch (error) {
+    try { await fs.promises.unlink(destFile); } catch (_) {}
+    await fs.promises.rename(tempFile, destFile);
+  }
   return destFile;
 }
 

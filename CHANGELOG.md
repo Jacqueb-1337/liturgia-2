@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.24 - 2026-08-24
+
+- feat: add eBible.org Bible search, download, validation, and automatic import
+- fix: make Widget and Dual Translation controls responsive and safe for partial Bibles
+
+
 ## 6.1.23 - 2026-08-24
 
 - fix: open downloaded updates through Electron on every platform

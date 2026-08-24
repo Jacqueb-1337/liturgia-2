@@ -978,7 +978,9 @@ function _syncWidgetButtonVisibility() {
   const widgetBtn = document.getElementById('lower-third-btn');
   if (!widgetBtn) return;
   const hasWidget = !!(_rememberedWidget && _rememberedWidget.url);
-  widgetBtn.style.display = hasWidget ? '' : 'none';
+  // Keep the control available even before the first widget is created. In
+  // that state clicking it opens the Add OBS Widget dialog.
+  widgetBtn.style.display = '';
   if (!hasWidget) {
     widgetBtn.classList.remove('active');
     widgetBtn.textContent = 'Widget';
@@ -2565,13 +2567,26 @@ async function loadSecondaryBible(bibleFileName, { enable = true, quiet = false 
     const baseDir = path.join(userData, 'bibles', baseName);
     const verses = await loadAllVersesFromDisk(baseDir);
     secondaryBibleFile = bibleFileName;
-    // Re-key secondary verses by position against the primary allVerses array so that
-    // translations with different book names (e.g. "Génesis" vs "Genesis") still match.
+    // Prefer canonical book/chapter/verse matching. This is critical for partial
+    // eBible packages (for example an NT-only translation), where positional
+    // matching would otherwise map Matthew 1:1 onto Genesis 1:1.
     secondaryVerseMap = new Map();
-    verses.forEach((sv, i) => {
-      const primaryKey = allVerses[i] ? allVerses[i].key : sv.key;
-      secondaryVerseMap.set(primaryKey, sv);
+    const primaryCanonicalKeys = new Map();
+    allVerses.forEach((pv) => {
+      if (pv.bookId && pv.chapter && pv.verse) {
+        primaryCanonicalKeys.set(`${pv.bookId}:${pv.chapter}:${pv.verse}`, pv.key);
+      }
     });
+    verses.forEach((sv, i) => {
+      let primaryKey = null;
+      if (sv.bookId && sv.chapter && sv.verse) {
+        primaryKey = primaryCanonicalKeys.get(`${sv.bookId}:${sv.chapter}:${sv.verse}`) || null;
+      }
+      // Compatibility fallback for older same-shape imports that predate book IDs.
+      if (!primaryKey && verses.length === allVerses.length && allVerses[i]) primaryKey = allVerses[i].key;
+      if (primaryKey) secondaryVerseMap.set(primaryKey, sv);
+    });
+    if (secondaryVerseMap.size === 0) throw new Error('No matching verses were found between these translations.');
     if (enable) {
       dualTranslationEnabled = true;
       await ipcRenderer.invoke('update-settings', { secondaryBibleFile: bibleFileName, dualTranslationEnabled: true });
@@ -2611,26 +2626,38 @@ async function handleToggleDual() {
 }
 
 async function openDualBiblePicker() {
-  const userData = await ipcRenderer.invoke('get-user-data-path');
-  const biblesBase = path.join(userData, 'bibles');
+  // Avoid stacking multiple pickers when a user clicks the control repeatedly.
+  document.querySelectorAll('.dual-bible-picker-overlay').forEach(node => node.remove());
+
+  let biblesBase;
   let availableBibles = [];
   try {
+    const userData = await ipcRenderer.invoke('get-user-data-path');
+    biblesBase = path.join(userData, 'bibles');
     const primaryBase = currentBibleFile ? currentBibleFile.replace(/\.json$/, '') : null;
-    const entries = fs.readdirSync(biblesBase, { withFileTypes: true });
+    const entries = fs.existsSync(biblesBase) ? fs.readdirSync(biblesBase, { withFileTypes: true }) : [];
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (entry.name === primaryBase) continue;
-      if (fs.existsSync(path.join(biblesBase, entry.name, 'bible.json'))) {
-        availableBibles.push(entry.name);
-      }
+      if (!entry.isDirectory() || entry.name === primaryBase) continue;
+      const biblePath = path.join(biblesBase, entry.name, 'bible.json');
+      if (!fs.existsSync(biblePath)) continue;
+      let metadata = null;
+      try {
+        const metadataPath = path.join(biblesBase, entry.name, 'metadata.json');
+        if (fs.existsSync(metadataPath)) metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+      } catch (_) {}
+      availableBibles.push({
+        id: entry.name,
+        title: metadata && metadata.title ? String(metadata.title) : '',
+        language: metadata && metadata.language ? String(metadata.language) : ''
+      });
     }
   } catch (err) {
-    console.error('Failed to list bibles:', err);
+    console.error('Failed to list secondary Bibles:', err);
+    safeStatus(`Could not load installed translations: ${err.message || err}`);
   }
-  if (availableBibles.length === 0) {
-    safeStatus('No other translations available. Download one in Settings > Bibles.');
-    return;
-  }
+
+  availableBibles.sort((a, b) => (a.title || a.id).localeCompare(b.title || b.id, undefined, { sensitivity: 'base' }));
+
   const overlay = document.createElement('div');
   overlay.className = 'dual-bible-picker-overlay';
   const modal = document.createElement('div');
@@ -2638,31 +2665,57 @@ async function openDualBiblePicker() {
   const title = document.createElement('h3');
   title.className = 'dual-bible-picker-title';
   title.textContent = 'Select Secondary Translation';
-  const list = document.createElement('ul');
-  list.className = 'dual-bible-picker-list';
-  availableBibles.forEach(bibleId => {
-    const item = document.createElement('li');
-    item.className = 'dual-bible-picker-item';
-    const parts = bibleId.split('_');
-    item.textContent = (parts.length >= 2 ? parts.slice(1) : parts).join(' ').toUpperCase() + `  (${bibleId})`;
-    item.addEventListener('click', async () => {
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      await loadSecondaryBible(bibleId);
-    });
-    list.appendChild(item);
-  });
+  modal.appendChild(title);
+
+  const close = () => {
+    document.removeEventListener('keydown', onKeyDown);
+    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  };
+  const onKeyDown = (event) => { if (event.key === 'Escape') close(); };
+
+  if (availableBibles.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'dual-bible-picker-empty';
+    empty.textContent = 'No other installed translation is available. Download another Bible in Settings > Bibles first.';
+    modal.appendChild(empty);
+  } else {
+    const list = document.createElement('ul');
+    list.className = 'dual-bible-picker-list';
+    for (const bible of availableBibles) {
+      const item = document.createElement('li');
+      item.className = 'dual-bible-picker-item';
+      const fallback = bible.id.replace(/[_-]+/g, ' ').toUpperCase();
+      item.textContent = bible.title ? `${bible.title}${bible.language ? ` · ${bible.language}` : ''}  (${bible.id})` : fallback;
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      const choose = async () => {
+        close();
+        await loadSecondaryBible(bible.id);
+      };
+      item.addEventListener('click', choose);
+      item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          choose();
+        }
+      });
+      list.appendChild(item);
+    }
+    modal.appendChild(list);
+  }
+
   const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
   cancelBtn.className = 'dual-bible-picker-cancel';
   cancelBtn.textContent = 'Cancel';
-  cancelBtn.addEventListener('click', () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); });
-  overlay.addEventListener('click', e => { if (e.target === overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); });
-  modal.appendChild(title);
-  modal.appendChild(list);
+  cancelBtn.addEventListener('click', close);
   modal.appendChild(cancelBtn);
+
   overlay.appendChild(modal);
+  overlay.addEventListener('click', event => { if (event.target === overlay) close(); });
   document.body.appendChild(overlay);
+  document.addEventListener('keydown', onKeyDown);
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
 function updateVerseDisplay() {
   const disp = document.getElementById('verse-display');
@@ -8617,7 +8670,12 @@ function initLowerThird() {
       window.__activeObsWidget = { url, layout, visible: true, transitionOut };
       _rememberedWidget = { url, layout, transitionOut };
       _sendWidgetToggle(true);
+      return;
     }
+
+    // A fresh install has no remembered widget. The toolbar control must still
+    // do something useful instead of silently returning with no feedback.
+    openLocalWidgetModal();
   };
 
   document.addEventListener('click', (e) => {

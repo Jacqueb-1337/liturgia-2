@@ -175,6 +175,69 @@
       font-size: 14px;
     }
 
+    .ebible-source-bar {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 18px 0 8px;
+      padding: 12px 14px;
+      border: 1px solid #d8e5f3;
+      border-radius: 8px;
+      background: #f5faff;
+    }
+    .ebible-source-copy {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 4px;
+      color: #334155;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+    .ebible-source-copy strong {
+      color: #172033;
+      font-size: 14px;
+    }
+    .ebible-status {
+      min-height: 18px;
+      margin: 0 0 8px;
+      color: #64748b;
+      font-size: 12px;
+    }
+    .ebible-status.success { color: #2e7d32; }
+    .ebible-status.error { color: #c62828; }
+    .bible-meta,
+    .bible-vernacular-title,
+    .bible-license-line {
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .bible-vernacular-title {
+      color: #334155;
+      font-size: 13px;
+    }
+    .bible-license-line {
+      margin-top: auto;
+    }
+    body.dark-theme .ebible-source-bar {
+      border-color: #3d5068;
+      background: #202d3b;
+    }
+    body.dark-theme .ebible-source-copy,
+    body.dark-theme .bible-meta,
+    body.dark-theme .bible-license-line,
+    body.dark-theme .ebible-status {
+      color: #aebdd0;
+    }
+    body.dark-theme .ebible-source-copy strong,
+    body.dark-theme .bible-vernacular-title {
+      color: #eef4fb;
+    }
+    body.dark-theme .ebible-status.success { color: #81c784; }
+    body.dark-theme .ebible-status.error { color: #ef9a9a; }
+
     /* Dark theme styles */
     body.dark-theme {
       background: #181a1b;
@@ -1150,12 +1213,20 @@
           <span id="bible-import-status"></span>
         </div>
         <div id="bibles-local-section" class="bible-local-section" style="display:none;">
-          <div class="bible-local-heading">Locally imported</div>
+          <div class="bible-local-heading">Installed Bibles</div>
           <div id="bibles-local-list"></div>
         </div>
-        <input type="text" id="bible-search" placeholder="Search for a Bible version..." />
+        <div class="ebible-source-bar">
+          <div class="ebible-source-copy">
+            <strong>eBible.org library</strong>
+            <span>Search and install Public Domain and Open Access translations. Liturgia downloads, validates, and imports them automatically.</span>
+          </div>
+          <button class="btn" id="ebible-refresh" type="button">Refresh</button>
+        </div>
+        <div id="ebible-status" class="ebible-status"></div>
+        <input type="text" id="bible-search" placeholder="Search eBible by language, title, or translation ID..." />
         <div id="bibles-list">
-          <div class="bible-loading">Loading Bible versions...</div>
+          <div class="bible-loading">Open the Bibles tab to load eBible.org translations.</div>
         </div>
       </div>
       

@@ -77,6 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Import Bible from local file
   document.getElementById('bible-import-btn').addEventListener('click', handleBibleImport);
+  const ebibleRefresh = document.getElementById('ebible-refresh');
+  if (ebibleRefresh) ebibleRefresh.addEventListener('click', () => loadBiblesList(true));
   
   // Bible export format chooser
   const exportFormatPopover = document.getElementById('bible-export-format-popover');
@@ -2538,139 +2540,201 @@ async function handleBibleImport() {
   }
 }
 
-// Load list of available Bibles from GitHub
-async function loadBiblesList() {
-  // Always show locally imported Bibles first
+// eBible.org catalog. Liturgia intentionally lists only eBible's Public Domain
+// and Open Access sections; traditional restricted-copyright entries are not
+// offered for automatic download.
+let allBibleFiles = [];
+let _bibleSearchBound = false;
+const _ebibleInstallButtons = new Map();
+
+function bibleSearchText(bible) {
+  return [
+    bible.id,
+    bible.title,
+    bible.vernacularTitle,
+    bible.language,
+    bible.nativeLanguage,
+    bible.dialect,
+    bible.year,
+    bible.license
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function renderEbibleStatus(message = '', tone = '') {
+  const status = document.getElementById('ebible-status');
+  if (!status) return;
+  status.textContent = message;
+  status.className = `ebible-status${tone ? ` ${tone}` : ''}`;
+}
+
+async function loadBiblesList(force = false) {
   const localIds = await loadLocalBibles();
   await renderLocalBiblesList(localIds);
 
-  const apiUrl = 'https://api.github.com/repos/thiagobodruk/bible/contents/json';
   const biblesContainer = document.getElementById('bibles-list');
+  if (!biblesContainer) return;
+  biblesContainer.innerHTML = '<div class="bible-loading">Loading eBible.org library...</div>';
+  renderEbibleStatus('Loading Public Domain and Open Access translations from eBible.org...');
+
   try {
-    const response = await fetch(apiUrl);
-    if (!response.ok) {
-      biblesContainer.innerHTML = '<div class="bible-loading" style="color: #f44336;">Failed to load Bible versions. Please check your connection.</div>';
-      console.error('Failed to fetch Bible list:', response.statusText);
-      return;
-    }
+    const result = await ipcRenderer.invoke('ebible:list', { force: !!force });
+    if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Could not load the eBible catalog.');
+    allBibleFiles = Array.isArray(result.bibles) ? result.bibles : [];
+    renderEbibleStatus(`${allBibleFiles.length.toLocaleString()} downloadable translations available from eBible.org.`, 'success');
 
-    const files = await response.json();
-    allBibleFiles = files.filter(file => file.name.endsWith('.json'));
-
-    renderBiblesList(allBibleFiles);
-
-    // Add search functionality
     const searchInput = document.getElementById('bible-search');
-    searchInput.addEventListener('input', (e) => {
-      const searchTerm = e.target.value.toLowerCase();
-      const filtered = allBibleFiles.filter(file => {
-        const bibleName = file.name.replace('.json', '').replace(/_/g, ' ').toLowerCase();
-        return bibleName.includes(searchTerm);
+    if (searchInput && !_bibleSearchBound) {
+      _bibleSearchBound = true;
+      searchInput.addEventListener('input', () => {
+        const term = searchInput.value.trim().toLowerCase();
+        const filtered = term ? allBibleFiles.filter(bible => bibleSearchText(bible).includes(term)) : allBibleFiles;
+        renderBiblesList(filtered);
       });
-      renderBiblesList(filtered);
-    });
+    }
+    const term = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    await renderBiblesList(term ? allBibleFiles.filter(bible => bibleSearchText(bible).includes(term)) : allBibleFiles);
   } catch (error) {
-    biblesContainer.innerHTML = '<div class="bible-loading" style="color: #f44336;">Error loading Bible versions: ' + error.message + '</div>';
-    console.error('Error loading Bibles:', error);
+    biblesContainer.innerHTML = '';
+    const failure = document.createElement('div');
+    failure.className = 'bible-loading';
+    failure.style.color = '#f44336';
+    failure.textContent = `Could not load eBible.org: ${error.message || error}`;
+    biblesContainer.appendChild(failure);
+    renderEbibleStatus('The eBible library could not be loaded. Check your connection and try Refresh.', 'error');
+    console.error('Error loading eBible catalog:', error);
   }
 }
 
 async function renderBiblesList(biblesList) {
   const biblesContainer = document.getElementById('bibles-list');
+  if (!biblesContainer) return;
   biblesContainer.innerHTML = '';
 
-  if (biblesList.length === 0) {
-    biblesContainer.innerHTML = '<div class="bible-loading">No Bible versions found.</div>';
+  if (!biblesList || biblesList.length === 0) {
+    biblesContainer.innerHTML = '<div class="bible-loading">No matching Bible versions found.</div>';
     return;
   }
 
-  // Get the currently selected Bible
   const currentBible = await ipcRenderer.invoke('get-default-bible');
   const userData = await ipcRenderer.invoke('get-user-data-path');
+  const storageBase = path.join(userData, BIBLE_STORAGE_DIR);
 
-  biblesList.forEach(file => {
-    const baseName = file.name.replace('.json','');
-    const bibleName = baseName.replace(/_/g, ' ').toUpperCase();
-    // Check both per-version folder and legacy file location
-    const isDownloaded = fs.existsSync(path.join(userData, BIBLE_STORAGE_DIR, baseName, 'bible.json')) || fs.existsSync(path.join(userData, BIBLE_STORAGE_DIR, file.name));
-    const isSelected = file.name === currentBible;
+  for (const bible of biblesList) {
+    const fileName = `${bible.id}.json`;
+    const installedPath = path.join(storageBase, bible.id, 'bible.json');
+    const isDownloaded = fs.existsSync(installedPath);
+    const isSelected = currentBible === fileName || currentBible === bible.id;
 
     const bibleItem = document.createElement('div');
-    bibleItem.className = 'bible-item';
-    if (isSelected) {
-      bibleItem.classList.add('selected');
+    bibleItem.className = `bible-item${isSelected ? ' selected' : ''}`;
+
+    const header = document.createElement('div');
+    header.className = 'bible-item-header';
+    const name = document.createElement('span');
+    name.className = 'bible-name';
+    name.textContent = bible.title || bible.id;
+    const sourceTag = document.createElement('span');
+    sourceTag.className = 'bible-local-tag';
+    sourceTag.textContent = 'eBible';
+    name.appendChild(sourceTag);
+    const status = document.createElement('span');
+    status.className = `bible-status ${isDownloaded ? 'downloaded' : 'not-downloaded'}`;
+    status.textContent = isDownloaded ? 'Downloaded' : bible.license;
+    header.appendChild(name);
+    header.appendChild(status);
+    bibleItem.appendChild(header);
+
+    const meta = document.createElement('div');
+    meta.className = 'bible-meta';
+    const languageParts = [bible.language];
+    if (bible.nativeLanguage && bible.nativeLanguage.toLowerCase() !== String(bible.language || '').toLowerCase()) languageParts.push(bible.nativeLanguage);
+    if (bible.dialect) languageParts.push(bible.dialect);
+    if (bible.year) languageParts.push(bible.year);
+    meta.textContent = languageParts.filter(Boolean).join(' · ') || bible.id;
+    bibleItem.appendChild(meta);
+
+    if (bible.vernacularTitle && bible.vernacularTitle !== bible.title) {
+      const vernacular = document.createElement('div');
+      vernacular.className = 'bible-vernacular-title';
+      vernacular.textContent = bible.vernacularTitle;
+      bibleItem.appendChild(vernacular);
     }
 
-    bibleItem.innerHTML = `
-      <div class="bible-item-header">
-        <span class="bible-name">${bibleName}</span>
-        <span class="bible-status ${isDownloaded ? 'downloaded' : 'not-downloaded'}">
-          ${isDownloaded ? '✓ Downloaded' : 'Not Downloaded'}
-        </span>
-      </div>
-      <button class="bible-action ${isDownloaded ? (isSelected ? 'selected' : 'select') : 'download'}" 
-              data-filename="${file.name}" 
-              data-url="${file.download_url}"
-              ${isSelected ? 'disabled' : ''}>
-        ${isSelected ? '✓ Currently Active' : (isDownloaded ? 'Select' : 'Download')}
-      </button>
-    `;
+    const license = document.createElement('div');
+    license.className = 'bible-license-line';
+    license.textContent = bible.category === 'public-domain'
+      ? 'Public Domain'
+      : `Open Access${bible.rightsHolder ? ` · ${bible.rightsHolder}` : ''}`;
+    bibleItem.appendChild(license);
 
-    const actionButton = bibleItem.querySelector('.bible-action');
-    actionButton.addEventListener('click', async (e) => {
-      const button = e.target;
-      const fileName = button.getAttribute('data-filename');
-      const downloadUrl = button.getAttribute('data-url');
-      const baseName = fileName.replace('.json','');
-      const wasDownloaded = fs.existsSync(path.join(userData, BIBLE_STORAGE_DIR, baseName, 'bible.json')) || fs.existsSync(path.join(userData, BIBLE_STORAGE_DIR, fileName));
+    const actions = document.createElement('div');
+    actions.className = 'bible-item-actions';
+    const actionButton = document.createElement('button');
+    actionButton.className = `bible-action ${isDownloaded ? (isSelected ? 'selected' : 'select') : 'download'}`;
+    actionButton.dataset.ebibleId = bible.id;
+    actionButton.disabled = isSelected;
+    actionButton.textContent = isSelected ? 'Currently Active' : (isDownloaded ? 'Select' : 'Download & Use');
+    actions.appendChild(actionButton);
 
-      if (!wasDownloaded) {
-        button.disabled = true;
-        button.textContent = 'Downloading...';
+    const detailsButton = document.createElement('button');
+    detailsButton.className = 'bible-action export';
+    detailsButton.textContent = 'License / Details';
+    detailsButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const url = bible.copyrightUrl || bible.detailsUrl;
+      if (url) await ipcRenderer.invoke('open-external-url', { url });
+    });
+    actions.appendChild(detailsButton);
+    bibleItem.appendChild(actions);
 
-        try {
-          await downloadBible(downloadUrl, fileName);
-          button.textContent = 'Select';
-          button.className = 'bible-action select';
-
-          // Update status badge
-          const statusBadge = bibleItem.querySelector('.bible-status');
-          statusBadge.textContent = '✓ Downloaded';
-          statusBadge.className = 'bible-status downloaded';
-        } catch (error) {
-          button.textContent = 'Download Failed';
-          button.disabled = false;
-          alert('Failed to download Bible: ' + error.message);
-          return;
+    actionButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const alreadyInstalled = fs.existsSync(installedPath);
+      actionButton.disabled = true;
+      _ebibleInstallButtons.set(bible.id, actionButton);
+      try {
+        if (!alreadyInstalled) {
+          actionButton.textContent = 'Starting download...';
+          renderEbibleStatus(`Downloading ${bible.title || bible.id} from eBible.org...`);
+          const result = await ipcRenderer.invoke('ebible:install', bible.id);
+          if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Download/import failed.');
+          renderEbibleStatus(`Imported ${bible.title || bible.id}: ${result.books} books, ${Number(result.verses || 0).toLocaleString()} verses.`, 'success');
         }
-      }
 
-      // Select the Bible
-      button.disabled = false;
-      await selectBible(fileName);
-      renderBiblesList(allBibleFiles); // Re-render to update UI
+        await selectBible(fileName);
+        const localIds = await loadLocalBibles();
+        await renderLocalBiblesList(localIds);
+        const searchInput = document.getElementById('bible-search');
+        const term = searchInput ? searchInput.value.trim().toLowerCase() : '';
+        await renderBiblesList(term ? allBibleFiles.filter(item => bibleSearchText(item).includes(term)) : allBibleFiles);
+      } catch (error) {
+        actionButton.disabled = false;
+        actionButton.textContent = alreadyInstalled ? 'Select' : 'Retry Download';
+        renderEbibleStatus(`Could not install ${bible.title || bible.id}: ${error.message || error}`, 'error');
+        console.error('eBible install failed:', error);
+      } finally {
+        _ebibleInstallButtons.delete(bible.id);
+      }
     });
 
     biblesContainer.appendChild(bibleItem);
-  });
-}
-
-async function downloadBible(url, fileName) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    console.error('Failed to download Bible:', response.statusText);
-    throw new Error('Failed to download Bible');
   }
-
-  const data = await response.text();
-  const userData = await ipcRenderer.invoke('get-user-data-path');
-  const baseName = fileName.replace('.json','');
-  const bibleDir = path.join(userData, BIBLE_STORAGE_DIR, baseName);
-  await fs.promises.mkdir(bibleDir, { recursive: true });
-
-  const biblePath = path.join(bibleDir, 'bible.json');
-  await fs.promises.writeFile(biblePath, data, 'utf8');
 }
+
+ipcRenderer.on('ebible:install-progress', (event, progress) => {
+  if (!progress || !progress.id) return;
+  const button = _ebibleInstallButtons.get(progress.id);
+  if (!button) return;
+  if (progress.stage === 'download') {
+    button.textContent = Number.isFinite(progress.percent) ? `Downloading ${progress.percent}%...` : 'Downloading...';
+  } else if (progress.stage === 'parse') {
+    button.textContent = 'Checking Bible...';
+  } else if (progress.stage === 'import') {
+    button.textContent = 'Importing...';
+  } else if (progress.stage === 'done') {
+    button.textContent = 'Finishing...';
+  }
+});
 
 async function selectBible(bible) {
   ipcRenderer.send('set-default-bible', bible);

@@ -157,6 +157,7 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
 
   // Dual picker button — always opens the bible selection dialog
   const dualPickerBtn = document.createElement('button');
+  dualPickerBtn.type = 'button';
   dualPickerBtn.title = 'Select secondary translation';
   dualPickerBtn.className = 'dual-picker-btn';
   const dualIcon = document.createElement('img');
@@ -164,17 +165,26 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   dualIcon.alt = 'Dual';
   dualIcon.className = 'dual-svg-icon';
   dualPickerBtn.appendChild(dualIcon);
-  dualPickerBtn.addEventListener('click', () => {
-    if (onPickDual) onPickDual();
+  dualPickerBtn.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onPickDual) return;
+    try { await onPickDual(); }
+    catch (error) { console.error('Failed to open dual translation picker:', error); }
   });
   window.dualPickerButton = dualPickerBtn;
 
   // Dual toggle button — shows selected translation name, toggles active class (like Clear button)
   const dualBtn = document.createElement('button');
+  dualBtn.type = 'button';
   dualBtn.title = 'Toggle dual translation on/off';
   dualBtn.style.display = 'none'; // hidden until a secondary is selected
-  dualBtn.addEventListener('click', () => {
-    if (onToggleDual) onToggleDual();
+  dualBtn.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onToggleDual) return;
+    try { await onToggleDual(); }
+    catch (error) { console.error('Failed to toggle dual translation:', error); }
   });
 
   // Store reference globally so renderer.js can update it

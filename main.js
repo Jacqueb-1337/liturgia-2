@@ -1931,6 +1931,38 @@ ipcMain.handle('import-bible-file', async (event, filePath, versionId) => {
   return await importBibleFile(filePath, versionId, storageDir);
 });
 
+ipcMain.handle('ebible:list', async (event, options = {}) => {
+  try {
+    const { fetchEbibleCatalog } = require('./lib/ebible');
+    const bibles = await fetchEbibleCatalog({ force: !!options.force });
+    return { ok: true, bibles };
+  } catch (error) {
+    console.error('[eBible] Failed to load catalog:', error);
+    return { ok: false, error: error && error.message ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('ebible:install', async (event, bibleId) => {
+  try {
+    const { fetchEbibleCatalog, installEbibleBible } = require('./lib/ebible');
+    const catalog = await fetchEbibleCatalog();
+    const entry = catalog.find(item => item.id === String(bibleId || ''));
+    if (!entry) return { ok: false, error: 'That eBible translation is no longer available in the downloadable catalog.' };
+
+    const storageDir = path.join(app.getPath('userData'), 'bibles');
+    const sendProgress = (progress) => {
+      try {
+        if (!event.sender.isDestroyed()) event.sender.send('ebible:install-progress', { id: entry.id, ...progress });
+      } catch (_) {}
+    };
+    const result = await installEbibleBible(entry, storageDir, { onProgress: sendProgress });
+    return { ok: true, ...result };
+  } catch (error) {
+    console.error('[eBible] Install failed:', error);
+    return { ok: false, error: error && error.message ? error.message : String(error) };
+  }
+});
+
 ipcMain.handle('export-bible-file', async (event, versionId, format = 'json') => {
   try {
     const storageDir = path.join(app.getPath('userData'), 'bibles');
