@@ -46,8 +46,8 @@ describe('live clear, media, and transition regressions', () => {
     expect(liveHtml).toContain('return as.blur === bs.blur && as.overlay === bs.overlay;');
   });
 
-  test('song, verse, Clear, and standalone media all enter the background transition path', () => {
-    expect(liveHtml).toContain('(!oldContent || !backgroundsEqual(oldContent, renderContent_content))');
+  test('background changes crossfade only when an old live frame exists', () => {
+    expect(liveHtml).toContain('if (!renderOptions.skipBackgroundTransition && oldContent && !backgroundsEqual(oldContent, renderContent_content)) {');
     expect(liveHtml).toContain('transitionTextLayer(oldContent, renderContent_content, renderOptions);');
     expect(liveHtml).toContain('applyBackgroundCrossfade(oldContent, renderContent_content, duration');
   });

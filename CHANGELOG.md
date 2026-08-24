@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.1.22 - 2026-08-24
+
+- fix: render the first live presentation directly instead of crossfading from an empty frame
+- fix: replace the fragile installer handoff and verify the helper is running before Liturgia exits
+- feat: default fresh installs and global style reset to maximum song and verse background blur
+
+
 ## 6.1.21 - 2026-08-24
 
 - fix: preserve completed live background transitions without black frame

@@ -1140,6 +1140,26 @@ ipcMain.handle('load-settings', async () => {
     const data = await fs.promises.readFile(settingsPath, 'utf8');
     return JSON.parse(data);
   } catch (e) {
+    // Only brand-new installs get the new presentation default. Existing settings
+    // files (including older ones with no bg-blur field) continue to parse exactly
+    // as they did before, so updates never overwrite a user's configured styles.
+    if (e && e.code === 'ENOENT') {
+      const freshGlobalStyle = [
+        'overlay-opacity: 0.4',
+        'bg-blur: 20',
+        'line-height: 1.2',
+        'vertical-position: center',
+        'safe-area-x: 0.0400',
+        'safe-area-y: 0.0400',
+        'safe-area-w: 0.9200',
+        'safe-area-h: 0.9200'
+      ].join('; ') + ';';
+      return {
+        previewStyles: {
+          global: Buffer.from(freshGlobalStyle, 'utf8').toString('base64')
+        }
+      };
+    }
     console.warn('[load-settings] returning default {}; error:', e && e.message);
     return {};
   }
@@ -3401,38 +3421,67 @@ ipcMain.handle('cancel-update-download', async (event, { file }) => {
 // Run the downloaded installer after this Electron process has exited.  Starting
 // NSIS first races its "close Liturgia" check against our still-open windows and
 // leaves the installer waiting for a process the user then has to force-close.
-function launchInstallerAfterAppExit(file) {
-  const { spawn } = require('child_process');
-  const launcherLog = path.join(require('os').tmpdir(), 'liturgia-update-launcher.log');
-  const escapedFile = file.replace(/'/g, "''");
-  const escapedLog = launcherLog.replace(/'/g, "''");
-  const waitScript = [
-    '$ErrorActionPreference = \'Stop\'',
-    `$parentPid = ${process.pid}`,
-    `$installer = '${escapedFile}'`,
-    `$launcherLog = '${escapedLog}'`,
-    'function Write-LauncherLog($message) { Add-Content -LiteralPath $launcherLog -Value ((Get-Date -Format o) + \' - \' + $message) }',
-    "Write-LauncherLog ('Waiting for Liturgia PID ' + $parentPid)",
-    'try { Wait-Process -Id $parentPid -ErrorAction Stop } catch {}',
-    'Start-Sleep -Milliseconds 750',
-    "Write-LauncherLog ('Starting installer: ' + $installer)",
-    "if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { Write-LauncherLog 'ERROR: installer disappeared before launch'; exit 2 }",
-    "try { $installerProcess = Start-Process -FilePath $installer -WorkingDirectory (Split-Path -Parent $installer) -PassThru -ErrorAction Stop; Write-LauncherLog ('Installer process started, PID ' + $installerProcess.Id) } catch { Write-LauncherLog ('ERROR starting installer: ' + $_.Exception.Message); exit 3 }"
-  ].join('; ');
-  const encoded = Buffer.from(waitScript, 'utf16le').toString('base64');
-  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
-  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+async function launchInstallerAfterAppExit(file) {
+  const os = require('os');
+  const launcherLog = path.join(os.tmpdir(), 'liturgia-update-launcher.log');
+  const helperPath = path.join(os.tmpdir(), `liturgia-update-launch-${process.pid}-${Date.now()}.cmd`);
+  const readyPath = `${helperPath}.ready`;
+  const batchEscape = (value) => String(value).replace(/%/g, '%%');
+  const installer = batchEscape(path.resolve(file));
+  const logFile = batchEscape(launcherLog);
+  const readyFile = batchEscape(readyPath);
+  const helper = [
+    '@echo off',
+    'setlocal DisableDelayedExpansion',
+    `set "PARENT_PID=${process.pid}"`,
+    `set "INSTALLER=${installer}"`,
+    `set "LAUNCHER_LOG=${logFile}"`,
+    `set "READY_FILE=${readyFile}"`,
+    '>"%READY_FILE%" echo ready',
+    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Helper started; waiting for Liturgia PID %PARENT_PID%',
+    ':wait_for_liturgia',
+    'tasklist /FI "PID eq %PARENT_PID%" /NH 2>NUL | find "%PARENT_PID%" >NUL',
+    'if not errorlevel 1 (',
+    '  >NUL 2>&1 ping 127.0.0.1 -n 2',
+    '  goto wait_for_liturgia',
+    ')',
+    '>NUL 2>&1 ping 127.0.0.1 -n 2',
+    'if not exist "%INSTALLER%" (',
+    '  >>"%LAUNCHER_LOG%" echo [%date% %time%] ERROR: installer disappeared before launch: %INSTALLER%',
+    '  goto cleanup',
+    ')',
+    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Starting installer: %INSTALLER%',
+    'start "" "%INSTALLER%"',
+    'set "START_ERROR=%ERRORLEVEL%"',
+    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Installer start returned %START_ERROR%',
+    ':cleanup',
+    'del "%READY_FILE%" >NUL 2>&1',
+    'del "%~f0" >NUL 2>&1',
+    'endlocal'
+  ].join('\r\n');
 
-  return new Promise((resolve, reject) => {
-    const launcher = spawn(powershell, [
-      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded
-    ], { detached: true, stdio: 'ignore', windowsHide: true });
-    launcher.once('error', reject);
-    launcher.once('spawn', () => {
-      launcher.unref();
-      resolve({ launcherLog });
-    });
-  });
+  fs.writeFileSync(helperPath, helper, 'utf8');
+  fs.appendFileSync(launcherLog, `${new Date().toISOString()} - Main prepared installer helper: ${helperPath}\r\n`);
+
+  const openError = await shell.openPath(helperPath);
+  if (openError) {
+    fs.appendFileSync(launcherLog, `${new Date().toISOString()} - ERROR handing helper to Windows shell: ${openError}\r\n`);
+    try { fs.unlinkSync(helperPath); } catch (_) {}
+    throw new Error(`Could not start installer helper: ${openError}`);
+  }
+
+  const readyDeadline = Date.now() + 2000;
+  while (!fs.existsSync(readyPath) && Date.now() < readyDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  if (!fs.existsSync(readyPath)) {
+    fs.appendFileSync(launcherLog, `${new Date().toISOString()} - ERROR: Windows shell accepted helper but it never started\r\n`);
+    try { fs.unlinkSync(helperPath); } catch (_) {}
+    throw new Error('Installer helper did not start; Liturgia was left open.');
+  }
+
+  fs.appendFileSync(launcherLog, `${new Date().toISOString()} - Installer helper confirmed running; safe to quit Liturgia\r\n`);
+  return { launcherLog, helperPath };
 }
 
 function quitForInstallerUpdate() {

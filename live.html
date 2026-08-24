@@ -1051,7 +1051,7 @@
 
       // Background media and background-only styles transition independently from text.
       // This covers song/verse default backgrounds, Clear style changes, and standalone media.
-      if (!renderOptions.skipBackgroundTransition && (!oldContent || !backgroundsEqual(oldContent, renderContent_content))) {
+      if (!renderOptions.skipBackgroundTransition && oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
         const oldBgType = getBgMediaType(oldContent);
         const newBgType = getBgMediaType(renderContent_content);
         const animatedTypes = ['GIF','MP4','WEBM','OGG','MOV','AVI'];
