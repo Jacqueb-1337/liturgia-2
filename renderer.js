@@ -3,6 +3,19 @@
 const fs = require('fs');
 const path = require('path');
 const { ipcRenderer, shell } = require('electron');
+
+function selectUpdateAssetForPlatform(assets) {
+  const list = Array.isArray(assets) ? assets : [];
+  const extensions = process.platform === 'win32'
+    ? ['.exe']
+    : process.platform === 'darwin'
+      ? ['.dmg', '.pkg']
+      : ['.appimage', '.deb'];
+  return list.find(asset => {
+    const name = String(asset && asset.name || '').toLowerCase();
+    return extensions.some(ext => name.endsWith(ext));
+  });
+}
 // Secure storage API using IPC to main (uses keytar in main if available)
 const secure = {
   async getToken() { try { return await ipcRenderer.invoke('secure-get-token'); } catch (e) { console.error('secure get token error', e); return null; } },
@@ -1699,7 +1712,7 @@ ipcRenderer.on('update-available', (event, res) => {
           let downloading = false;
           downloadBtn.onclick = async () => {
             if (downloading) return;
-            const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+            const asset = selectUpdateAssetForPlatform(info.assets);
             if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
             downloading = true;
             inlineProgress.style.display = 'block';
@@ -1798,7 +1811,7 @@ ipcRenderer.on('update-available', (event, res) => {
           let downloading = false;
           downloadBtn.onclick = async () => {
             if (downloading) return;
-            const asset = (info.assets || []).find(a => a.name && a.name.endsWith('.exe')) || (info.assets && info.assets[0]);
+            const asset = selectUpdateAssetForPlatform(info.assets);
             if (!asset || !asset.url) { alert('No downloadable installer found for this platform.'); return; }
             downloading = true;
             // Use rAF so the element is in the DOM at max-height:0 before we add .visible

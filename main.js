@@ -3418,70 +3418,18 @@ ipcMain.handle('cancel-update-download', async (event, { file }) => {
   } catch (e) { return { ok:false, error: String(e) }; }
 });
 
-// Run the downloaded installer after this Electron process has exited.  Starting
-// NSIS first races its "close Liturgia" check against our still-open windows and
-// leaves the installer waiting for a process the user then has to force-close.
-async function launchInstallerAfterAppExit(file) {
-  const os = require('os');
-  const launcherLog = path.join(os.tmpdir(), 'liturgia-update-launcher.log');
-  const helperPath = path.join(os.tmpdir(), `liturgia-update-launch-${process.pid}-${Date.now()}.cmd`);
-  const readyPath = `${helperPath}.ready`;
-  const batchEscape = (value) => String(value).replace(/%/g, '%%');
-  const installer = batchEscape(path.resolve(file));
-  const logFile = batchEscape(launcherLog);
-  const readyFile = batchEscape(readyPath);
-  const helper = [
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    `set "PARENT_PID=${process.pid}"`,
-    `set "INSTALLER=${installer}"`,
-    `set "LAUNCHER_LOG=${logFile}"`,
-    `set "READY_FILE=${readyFile}"`,
-    '>"%READY_FILE%" echo ready',
-    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Helper started; waiting for Liturgia PID %PARENT_PID%',
-    ':wait_for_liturgia',
-    'tasklist /FI "PID eq %PARENT_PID%" /NH 2>NUL | find "%PARENT_PID%" >NUL',
-    'if not errorlevel 1 (',
-    '  >NUL 2>&1 ping 127.0.0.1 -n 2',
-    '  goto wait_for_liturgia',
-    ')',
-    '>NUL 2>&1 ping 127.0.0.1 -n 2',
-    'if not exist "%INSTALLER%" (',
-    '  >>"%LAUNCHER_LOG%" echo [%date% %time%] ERROR: installer disappeared before launch: %INSTALLER%',
-    '  goto cleanup',
-    ')',
-    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Starting installer: %INSTALLER%',
-    'start "" "%INSTALLER%"',
-    'set "START_ERROR=%ERRORLEVEL%"',
-    '>>"%LAUNCHER_LOG%" echo [%date% %time%] Installer start returned %START_ERROR%',
-    ':cleanup',
-    'del "%READY_FILE%" >NUL 2>&1',
-    'del "%~f0" >NUL 2>&1',
-    'endlocal'
-  ].join('\r\n');
-
-  fs.writeFileSync(helperPath, helper, 'utf8');
-  fs.appendFileSync(launcherLog, `${new Date().toISOString()} - Main prepared installer helper: ${helperPath}\r\n`);
-
-  const openError = await shell.openPath(helperPath);
+// Open the downloaded installer/package through Electron's cross-platform shell.
+// Only shut Liturgia down after the OS has accepted the native open request.
+async function openDownloadedInstaller(file) {
+  const installerPath = path.resolve(file);
+  if (process.platform === 'linux' && /\.AppImage$/i.test(installerPath)) {
+    await fs.promises.chmod(installerPath, 0o755);
+  }
+  const openError = await shell.openPath(installerPath);
   if (openError) {
-    fs.appendFileSync(launcherLog, `${new Date().toISOString()} - ERROR handing helper to Windows shell: ${openError}\r\n`);
-    try { fs.unlinkSync(helperPath); } catch (_) {}
-    throw new Error(`Could not start installer helper: ${openError}`);
+    throw new Error(`Could not open downloaded installer: ${openError}`);
   }
-
-  const readyDeadline = Date.now() + 2000;
-  while (!fs.existsSync(readyPath) && Date.now() < readyDeadline) {
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  if (!fs.existsSync(readyPath)) {
-    fs.appendFileSync(launcherLog, `${new Date().toISOString()} - ERROR: Windows shell accepted helper but it never started\r\n`);
-    try { fs.unlinkSync(helperPath); } catch (_) {}
-    throw new Error('Installer helper did not start; Liturgia was left open.');
-  }
-
-  fs.appendFileSync(launcherLog, `${new Date().toISOString()} - Installer helper confirmed running; safe to quit Liturgia\r\n`);
-  return { launcherLog, helperPath };
+  return { installerPath };
 }
 
 function quitForInstallerUpdate() {
@@ -3504,9 +3452,9 @@ ipcMain.handle('run-installer', async (event, file) => {
     const installerSize = fs.statSync(file).size;
     if (!installerSize) return { ok:false, error:'Downloaded installer is empty' };
 
-    const launch = await launchInstallerAfterAppExit(file);
-    console.log('[update] Installer handoff scheduled; launcher log:', launch.launcherLog);
-    quitForInstallerUpdate();
+    const launch = await openDownloadedInstaller(file);
+    console.log('[update] OS accepted installer open request:', launch.installerPath);
+    setTimeout(() => quitForInstallerUpdate(), 300);
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
 });

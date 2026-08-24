@@ -1,27 +1,31 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('in-app installer shutdown', () => {
-  test('waits for Liturgia to exit before starting NSIS and proves helper startup before quitting', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+describe('in-app installer launch', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8');
 
-    expect(main).toContain('async function launchInstallerAfterAppExit(file)');
-    expect(main).toContain('liturgia-update-launcher.log');
-    expect(main).toContain('liturgia-update-launch-');
-    expect(main).toContain('tasklist /FI "PID eq %PARENT_PID%"');
-    expect(main).toContain('installer disappeared before launch');
-    expect(main).toContain('const openError = await shell.openPath(helperPath);');
-    expect(main).toContain('const readyDeadline = Date.now() + 2000;');
-    expect(main).toContain('Installer helper confirmed running; safe to quit Liturgia');
-    expect(main).toContain('Installer helper did not start; Liturgia was left open.');
-    expect(main).toContain('function quitForInstallerUpdate()');
-    expect(main).toContain('app.exit(0);');
-    expect(main).toMatch(/await launchInstallerAfterAppExit\(file\);\s+console\.log\('\[update\] Installer handoff scheduled/);
+  test('uses Electron native file opening instead of a platform-specific helper', () => {
+    expect(main).toContain('async function openDownloadedInstaller(file)');
+    expect(main).toContain('const openError = await shell.openPath(installerPath);');
+    expect(main).toContain('Could not open downloaded installer:');
+    expect(main).toContain("process.platform === 'linux' && /\\.AppImage$/i.test(installerPath)");
+    expect(main).toContain('await fs.promises.chmod(installerPath, 0o755);');
+    expect(main).toContain('setTimeout(() => quitForInstallerUpdate(), 300);');
+    expect(main).not.toContain('Wait-Process -Id $parentPid');
+    expect(main).not.toContain('liturgia-update-launch-');
+    expect(main).not.toContain('tasklist /FI "PID eq %PARENT_PID%"');
+  });
+
+  test('selects the correct installer/package type for each desktop platform', () => {
+    expect(renderer).toContain('function selectUpdateAssetForPlatform(assets)');
+    expect(renderer).toContain("? ['.exe']");
+    expect(renderer).toContain("? ['.dmg', '.pkg']");
+    expect(renderer).toContain(": ['.appimage', '.deb']");
+    expect(renderer.match(/selectUpdateAssetForPlatform\(info\.assets\)/g)).toHaveLength(2);
   });
 
   test('does not offer the installer until its download stream has finished writing', () => {
-    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-
     expect(main).toContain("destStream.on('finish'");
     expect(main).toContain('Downloaded installer is incomplete');
     expect(main).toContain('Downloaded installer is empty');

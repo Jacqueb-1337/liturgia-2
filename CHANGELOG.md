@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.23 - 2026-08-24
+
+- fix: open downloaded updates through Electron on every platform
+- fix: choose the correct update package for Windows macOS and Linux
+
+
 ## 6.1.22 - 2026-08-24
 
 - fix: render the first live presentation directly instead of crossfading from an empty frame
