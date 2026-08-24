@@ -52,9 +52,10 @@ describe('live clear, media, and transition regressions', () => {
     expect(liveHtml).toContain('applyBackgroundCrossfade(oldContent, renderContent_content, duration');
   });
 
-  test('unchanged static backgrounds stay on screen while verse text changes', () => {
-    expect(liveHtml).toContain('if (oldContent && backgroundsEqual(oldContent, renderContent_content)) {');
-    expect(liveHtml).toContain('// Repainting the same static image clears the canvas to black while the');
+  test('completed static transitions preserve their final frame instead of flashing black', () => {
+    expect(liveHtml).toContain('if (oldContent && backgroundsEqual(oldContent, renderContent_content) &&');
+    expect(liveHtml).toContain("!(renderOptions.skipBackgroundTransition && ['GIF','MP4','WEBM','OGG','MOV','AVI'].includes(getBgMediaType(renderContent_content))))");
+    expect(liveHtml).toContain('// the real animation after the snapshot crossfade completes.');
     expect(liveHtml).toContain('window.previousContent = renderContent_content;');
   });
 

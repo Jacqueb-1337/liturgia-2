@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.21 - 2026-08-24
+
+- fix: preserve completed live background transitions without black frame
+
+
 ## 6.1.20 - 2026-08-24
 
 - fix: synchronize live clear black and go-live state

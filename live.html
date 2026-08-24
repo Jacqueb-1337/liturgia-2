@@ -1075,6 +1075,19 @@
         return;
       }
       
+      // If the background visual is unchanged, preserve the exact frame already on bgCanvas.
+      // This must happen before any generic black fill/clear below. The post-crossfade
+      // finalize pass re-enters renderContent with the same content, and repainting here
+      // would otherwise erase the completed transition and leave the live window black.
+      // Animated GIF/video content is excluded here because its finalize pass must start
+      // the real animation after the snapshot crossfade completes.
+      if (oldContent && backgroundsEqual(oldContent, renderContent_content) &&
+          !(renderOptions.skipBackgroundTransition && ['GIF','MP4','WEBM','OGG','MOV','AVI'].includes(getBgMediaType(renderContent_content)))) {
+        transitionTextLayer(oldContent, renderContent_content, renderOptions);
+        window.previousContent = renderContent_content;
+        return;
+      }
+
       // GIF backgrounds need clearRect so the img element beneath the canvas is visible.
       // Video backgrounds: the rAF loop owns bgCtx every frame — writing black here would
       // flash before the first loop iteration fires, so skip the fill entirely.
@@ -1302,13 +1315,6 @@
         transitionTextLayer(oldContent, renderContent_content, renderOptions);
       };
       
-      // If the background visual is identical, keep the already-rendered frame.
-      // Repainting the same static image clears the canvas to black while the
-      // image reloads, which causes a visible black flash between verses.
-      if (oldContent && backgroundsEqual(oldContent, renderContent_content)) {
-        window.previousContent = renderContent_content;
-        return;
-      }
 
       // Handle background media (object with type, path, color, and settings)
       if (renderContent_content.backgroundMedia) {
