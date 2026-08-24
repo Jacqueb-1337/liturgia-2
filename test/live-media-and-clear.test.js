@@ -1,32 +1,61 @@
 const fs = require('fs');
 const path = require('path');
 
-describe('live clear and standalone media regressions', () => {
+describe('live clear, media, and transition regressions', () => {
   const liveHtml = fs.readFileSync(path.join(__dirname, '..', 'live.html'), 'utf8');
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8');
 
-  test('Clear restores its background after a live-window resize instead of filling black', () => {
-    expect(liveHtml).toContain("} else if (isClearMode) {");
-    expect(liveHtml).toContain("setLiveMode('clear');");
-  });
-
-  test('Clear sends a neutral background payload rather than retaining song styles', () => {
+  test('Clear uses a neutral raw background but preserves user text transitions', () => {
     expect(renderer).toContain('function createClearPresentation(content)');
     expect(renderer).toContain('styles: {}');
+    expect(renderer).toContain('transitionIn: content.transitionIn || null');
+    expect(renderer).toContain('transitionOut: content.transitionOut || null');
     expect(renderer).toContain('clearPresentation: true');
-    expect(renderer).toContain("ipcRenderer.send('update-live-window', clearPresentation);");
-    expect(liveHtml).toContain('const _isClearPresentation = !!renderContent_content.clearPresentation;');
-    expect(liveHtml).toContain('_isClearPresentation ? 0');
   });
 
-  test('Clear immediately erases the separate live text canvas', () => {
-    expect(liveHtml).toContain('if (_isClearPresentation) {');
-    expect(liveHtml).toContain('textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);');
+  test('renderer always sends canonical styled content and serializes output mode separately', () => {
+    expect(renderer).toContain("ipcRenderer.send('update-live-window', { ...payload, _outputMode: mode });");
+    expect(renderer).toContain("ipcRenderer.send('set-live-mode', mode);");
+    expect(liveHtml).toContain('if (data && data._outputMode) return;');
   });
 
-  test('standalone media bypasses the old text/background crossfade and clears the text layer', () => {
-    expect(liveHtml).toContain('if (!renderContent_content.isMedia && oldContent && !backgroundsEqual(oldContent, renderContent_content))');
-    expect(liveHtml).toContain('textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);');
+  test('Clear never replaces the canonical styled presentation', () => {
+    expect(liveHtml).toContain('function createLiveClearPresentation(content)');
+    expect(liveHtml).toContain('if (renderContent_content && !renderContent_content.clearPresentation)');
+    expect(liveHtml).toContain('if (data && !data.clearPresentation)');
+    expect(liveHtml).toContain('delete canonical._outputMode;');
+    expect(liveHtml).toContain('const clearPresentation = createLiveClearPresentation(window.currentContent);');
+  });
+
+  test('Clear text follows configured text transition rather than disappearing immediately', () => {
+    expect(liveHtml).toContain('function transitionTextLayer(oldContent, newContent, options = {})');
+    expect(liveHtml).toContain('const transitionOut = oldContent.transitionOut || oldContent.transitionIn');
+    expect(liveHtml).toContain("applyTextFadeOutAnimation(oldContent, transitionOut.duration, transitionOut.type || 'fade', fadeInNew);");
+  });
+
+  test('background transitions are independent simple fades with styled snapshots', () => {
+    expect(liveHtml).toContain('let textAnimationFrameId = null;');
+    expect(liveHtml).toContain('let backgroundAnimationFrameId = null;');
+    expect(liveHtml).toContain('async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4, callback = null)');
+    expect(liveHtml).toContain('const bgBlur = (isClearPresentation || isStandaloneMedia) ? 0');
+    expect(liveHtml).toContain('finishStyledBackground();');
+  });
+
+  test('blur and overlay changes count as a background visual change', () => {
+    expect(liveHtml).toContain('const styleState = (content) => {');
+    expect(liveHtml).toContain('return as.blur === bs.blur && as.overlay === bs.overlay;');
+  });
+
+  test('song, verse, Clear, and standalone media all enter the background transition path', () => {
+    expect(liveHtml).toContain('(!oldContent || !backgroundsEqual(oldContent, renderContent_content))');
+    expect(liveHtml).toContain('transitionTextLayer(oldContent, renderContent_content, renderOptions);');
+    expect(liveHtml).toContain('applyBackgroundCrossfade(oldContent, renderContent_content, duration');
+  });
+
+  test('unchanged static backgrounds stay on screen while verse text changes', () => {
+    expect(liveHtml).toContain('if (oldContent && backgroundsEqual(oldContent, renderContent_content)) {');
+    expect(liveHtml).toContain('// Repainting the same static image clears the canvas to black while the');
+    expect(liveHtml).toContain('window.previousContent = renderContent_content;');
   });
 
   test('making non-web media live exits clear or black mode first', () => {

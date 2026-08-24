@@ -981,6 +981,25 @@ function _syncWidgetButtonVisibility() {
 }
 let keybinds = {}; // Loaded from settings
 
+// Native alert() can leave Electron's Windows BrowserWindow without pointer
+// focus. That makes editable song fields look disabled until the app restarts.
+function showAppToast(message, tone = 'info') {
+  if (!document.body) return;
+  const existing = document.getElementById('app-notification-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'app-notification-toast';
+  toast.setAttribute('role', 'status');
+  const background = tone === 'error' ? '#b3261e' : '#0078d4';
+  toast.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${background};color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;max-width:min(90vw,640px);overflow:hidden;text-overflow:ellipsis;`;
+  toast.textContent = String(message || 'Something went wrong.');
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.isConnected) toast.remove(); }, 4500);
+}
+
+window.alert = (message) => showAppToast(String(message), 'error');
+
 // Refresh keybinds whenever settings are saved from the settings window
 ipcRenderer.on('settings-updated', (event, data) => {
   if (data && data.keybinds) {
@@ -1005,11 +1024,7 @@ ipcRenderer.on('songs-imported', (event, info) => {
   // Use a non-blocking in-app toast instead of alert() — native alert() causes
   // Electron on Windows to lose pointer focus on the BrowserWindow, making the
   // UI unresponsive until the app is restarted.
-  const _t = document.createElement('div');
-  _t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0078d4;color:#fff;padding:10px 20px;border-radius:6px;font-size:13px;z-index:9999;box-shadow:0 2px 12px rgba(0,0,0,0.35);pointer-events:none;white-space:nowrap;';
-  _t.textContent = `${label}: found ${total} song(s), imported ${added} new song(s).`;
-  document.body.appendChild(_t);
-  setTimeout(() => { try { document.body.removeChild(_t); } catch (e) {} }, 4000);
+  showAppToast(`${label}: found ${total} song(s), imported ${added} new song(s).`);
   // Refresh songs list from disk
   loadSongs();
 });
@@ -1292,9 +1307,7 @@ function rerenderPreviewForStyles() {
     }
     // Push updated styles to the live window if it is open
     if (liveMode) {
-      const livePayload = clearMode ? createClearPresentation(updatedLive) : updatedLive;
-      ipcRenderer.send('update-live-window', livePayload);
-      if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
+      sendLivePresentation(updatedLive);
     }
   }
 }
@@ -1496,10 +1509,36 @@ function createClearPresentation(content) {
     secondaryRef: '',
     // Clear is the raw background, not a song/verse with its styles hidden.
     styles: {},
-    transitionIn: null,
-    transitionOut: null,
+    // Keep text transition settings so Clear can animate text out/in using the
+    // user's choice while the background itself always uses a simple crossfade.
+    transitionIn: content.transitionIn || null,
+    transitionOut: content.transitionOut || null,
     clearPresentation: true
   };
+}
+
+function getRendererLiveOutputMode() {
+  if (blackMode) return 'black';
+  if (clearMode) return 'clear';
+  return 'normal';
+}
+
+function syncLiveMaskButtons() {
+  if (window.clearButton) window.clearButton.classList.toggle('active', clearMode && !blackMode);
+  if (window.blackButton) window.blackButton.classList.toggle('active', blackMode);
+}
+
+function sendLivePresentation(payload) {
+  const mode = getRendererLiveOutputMode();
+  syncLiveMaskButtons();
+  // Always send the canonical styled presentation. Clear and Black are output
+  // modes, not alternate copies of the content. The live window derives the
+  // temporary Clear visual without ever replacing this styled payload.
+  ipcRenderer.send('update-live-window', { ...payload, _outputMode: mode });
+  // update-live-window stores the next payload; set-live-mode commits it once.
+  // This prevents Enter, Go Live, double-click, Clear, and Black from rendering
+  // the same payload in different orders.
+  ipcRenderer.send('set-live-mode', mode);
 }
 
 function renderAndSendClearPresentation() {
@@ -1509,9 +1548,11 @@ function renderAndSendClearPresentation() {
     if (liveCanvas) {
       renderToCanvas(liveCanvas, clearPresentation, clearPresentation.width || 1920, clearPresentation.height || 1080);
     }
-    // Give the live window the actual background before changing modes so it
-    // cannot derive Clear from stale content and fall back to black.
-    ipcRenderer.send('update-live-window', clearPresentation);
+  }
+  // Preserve the full styled presentation in the live window. Clear is derived
+  // there as a temporary output mode so un-clearing cannot restore stripped styles.
+  if (window.currentContent) {
+    ipcRenderer.send('update-live-window', { ...window.currentContent, _outputMode: 'clear' });
   }
   ipcRenderer.send('set-live-mode', 'clear');
 }
@@ -1524,7 +1565,7 @@ function restoreLivePresentationAfterClear() {
     }
     // Clear replaces the live-window payload, so restore the real content
     // before returning the output to normal mode.
-    ipcRenderer.send('update-live-window', window.currentContent);
+    ipcRenderer.send('update-live-window', { ...window.currentContent, _outputMode: 'normal' });
   }
   ipcRenderer.send('set-live-mode', 'normal');
 }
@@ -1671,7 +1712,10 @@ ipcRenderer.on('update-available', (event, res) => {
                 progressText.textContent = 'Download complete';
                 downloadBtn.textContent = 'Run';
                 downloadBtn.disabled = false;
-                downloadBtn.onclick = async () => { await ipcRenderer.invoke('run-installer', currentFile); };
+                downloadBtn.onclick = async () => {
+                  const launch = await ipcRenderer.invoke('run-installer', currentFile);
+                  if (!launch || !launch.ok) showAppToast('Could not start the installer: ' + ((launch && launch.error) || 'unknown error'), 'error');
+                };
               } else {
                 alert('Download failed: ' + (res && res.error));
                 downloadBtn.disabled = false;
@@ -1769,7 +1813,8 @@ ipcRenderer.on('update-available', (event, res) => {
                 downloadBtn.textContent = 'Run Installer';
                 downloadBtn.disabled = false;
                 downloadBtn.onclick = async () => {
-                  await ipcRenderer.invoke('run-installer', currentFile);
+                  const launch = await ipcRenderer.invoke('run-installer', currentFile);
+                  if (!launch || !launch.ok) showAppToast('Could not start the installer: ' + ((launch && launch.error) || 'unknown error'), 'error');
                 };
               } else {
                 alert('Download failed: ' + (res && res.error));
@@ -3578,8 +3623,7 @@ async function updateLive(verseOrIndices) {
     transitionOut: transitionSettings['fade-out'],
     ..._liveSec
   };
-  ipcRenderer.send('update-live-window', clearMode ? createClearPresentation(livePayload) : livePayload);
-  if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
+  sendLivePresentation(livePayload);
   
   // Push state to relay for mobile to display
   try {
@@ -3855,17 +3899,11 @@ async function handleVerseDoubleClick(i) {
   // Check if we're in songs tab
   if (currentTab === 'songs') {
     if (selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
-      if (!liveMode) {
-        // Create the window first, then push content
-        await toggleLive(true);
-        await updateLiveFromSongVerse(selectedSongVerseIndex);
-      } else {
-        await updateLiveFromSongVerse(selectedSongVerseIndex);
-      }
+      if (!liveMode) await toggleLive(true, { skipInitialContent: true });
+      await updateLiveFromSongVerse(selectedSongVerseIndex);
       return;
-    } else {
-      return; // nothing to do in songs tab without selection
     }
+    return; // nothing to do in songs tab without selection
   }
   
   // Verses tab logic
@@ -3885,15 +3923,10 @@ async function handleVerseDoubleClick(i) {
 
   // Do not change clear/black mode here - respect user's current display mode
 
-  if (!liveMode) {
-    // Create the window first, then push the content
-    await toggleLive(true);
-    // Explicitly update with the double-clicked verse(s)
-    await updateLive(indicesToGo);
-  } else {
-    // Window already open — push content directly
-    await updateLive(indicesToGo);
-  }
+  if (!liveMode) await toggleLive(true, { skipInitialContent: true });
+  await updateLive(indicesToGo);
+
+
 
   // Persist live selection as the last selected verse (single or array)
   if (Array.isArray(i)) {
@@ -4049,28 +4082,30 @@ function selectPrevScheduleItem() {
   handleVerseDoubleClick(prevItem.indices);
 }
 
-async function toggleLive(isActive) {
+async function toggleLive(isActive, options = {}) {
+  const skipInitialContent = !!options.skipInitialContent;
   liveMode = !!isActive;
   if (isActive) {
-    // Await window creation so IPC messages sent immediately after are received
+    // Await window creation so IPC messages sent immediately after are received.
     await ipcRenderer.invoke('create-live-window');
-    
-    // Display based on current tab and selection
-    if (currentTab === 'media' && selectedMediaIndex !== null) {
-      const media = allMedia[selectedMediaIndex];
-      if (media) {
-        displayMediaOnLive(media);
+
+    // Callers that already know the exact target can create the window without
+    // sending a second, competing update from the current selection.
+    if (!skipInitialContent) {
+      if (currentTab === 'media' && selectedMediaIndex !== null) {
+        const media = allMedia[selectedMediaIndex];
+        if (media) await displayMediaOnLive(media);
+      } else if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
+        await updateLiveFromSongVerse(selectedSongVerseIndex);
+      } else if (currentTab === 'verses' && selectedIndices.length > 0) {
+        await updateLive(selectedIndices);
       }
-    } else if (currentTab === 'songs' && selectedSongIndices.length > 0 && selectedSongVerseIndex !== null) {
-      updateLiveFromSongVerse(selectedSongVerseIndex);
-    } else if (currentTab === 'verses' && selectedIndices.length > 0) {
-      updateLive(selectedIndices);
     }
   } else {
-    ipcRenderer.invoke('close-live-window');
+    await ipcRenderer.invoke('close-live-window');
     pushScheduleUpdate();
   }
-  // Update the Live button state in the UI
+  // Update the Live button state in the UI.
   updateLiveButtonState(isActive);
 }
 
@@ -5954,15 +5989,12 @@ function renderSongList(songs) {
       handleSongClick(actualIndex, e);
     });
     
-    songItem.addEventListener('dblclick', async (e) => {
-      // Double-click to go live with first verse
+    songItem.addEventListener('dblclick', async () => {
+      // Use the same go-live path as Enter and the Live action.
       selectedSongIndices = [actualIndex];
       selectedSongVerseIndex = 0;
       displaySelectedSong();
-      await updateLiveFromSongVerse(0);
-      if (!liveMode) {
-        toggleLive(true);
-      }
+      await handleVerseDoubleClick();
     });
     
     songItem.addEventListener('contextmenu', (e) => {
@@ -6219,8 +6251,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
   };
-  ipcRenderer.send('update-live-window', clearMode ? createClearPresentation(livePayload) : livePayload);
-  if (clearMode) ipcRenderer.send('set-live-mode', 'clear');
+  sendLivePresentation(livePayload);
   
   // Push song state to relay for mobile to display
   try {
@@ -6761,7 +6792,7 @@ function editSong(songIndex) {
     const previewEl = document.getElementById('song-editor-preview');
     if (previewEl) previewEl.style.display = 'none';
     
-    titleInput.focus();
+    focusSongEditorField(titleInput);
   }
 }
 
@@ -7504,7 +7535,7 @@ function initSongEditor() {
     menu.style.background = 'white';
     menu.style.border = '1px solid #ccc';
     menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-    menu.style.zIndex = 3000;
+    menu.style.zIndex = 21000;
     menu.style.padding = '8px';
     menu.innerHTML = `<div style="padding:6px; cursor:pointer;">Edit Song Title Style</div>
                       <div style="padding:6px; cursor:pointer;">Edit Song Text Style</div>
@@ -7520,6 +7551,18 @@ function initSongEditor() {
     // Close the menu on any click outside
     setTimeout(() => document.addEventListener('click', removeMenu, { once: true }), 0);
   });
+
+  // Keep editor fields explicitly focusable even if another handler changed focus state.
+  if (modal) {
+    modal.addEventListener('pointerdown', (e) => {
+      const field = e.target && e.target.closest
+        ? e.target.closest('#song-editor-title, #song-editor-author, #song-editor-hymnal, #song-editor-page, #song-editor-lyrics')
+        : null;
+      if (field && modal.contains(field) && !field.disabled) {
+        requestAnimationFrame(() => focusSongEditorField(field));
+      }
+    }, true);
+  }
 
   // Close on backdrop click
   if (modal) {
@@ -7552,10 +7595,16 @@ function openSongEditor() {
       lyricsInput.textContent = '';
       const previewEl = document.getElementById('song-editor-preview');
       if (previewEl) previewEl.style.display = 'none';
-      lyricsInput.focus();
     }
-    if (titleInput) titleInput.focus();
+    focusSongEditorField(titleInput);
   }
+}
+
+function focusSongEditorField(field) {
+  if (!field) return;
+  requestAnimationFrame(() => {
+    if (field.isConnected && !field.disabled) field.focus({ preventScroll: true });
+  });
 }
 
 function closeSongEditor() {
@@ -7645,12 +7694,14 @@ async function saveSongFromEditor() {
   const lyricsText = lyricsDiv ? lyricsDiv.innerText.trim() : '';
   
   if (!title) {
-    alert('Please enter a song title');
+    showAppToast('Please enter a song title', 'error');
+    focusSongEditorField(document.getElementById('song-editor-title'));
     return;
   }
-  
+
   if (!lyricsText) {
-    alert('Please enter song lyrics');
+    showAppToast('Please enter song lyrics', 'error');
+    focusSongEditorField(lyricsDiv);
     return;
   }
   
@@ -7682,7 +7733,8 @@ async function saveSongFromEditor() {
   });
   
   if (sections.length === 0) {
-    alert('Please enter song lyrics with at least one section');
+    showAppToast('Please enter song lyrics with at least one section', 'error');
+    focusSongEditorField(lyricsDiv);
     return;
   }
   

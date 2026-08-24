@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.1.20 - 2026-08-24
+
+- fix: synchronize live clear black and go-live state
+- fix: crossfade backgrounds and preserve unchanged background frames
+- fix: keep song editor inputs focusable during normal use
+- fix: launch downloaded installer reliably after Liturgia exits
+
+
 ## 6.1.19 - 2026-08-23
 
 - fix: clear live text while retaining the unstyled background

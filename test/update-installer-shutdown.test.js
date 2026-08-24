@@ -8,9 +8,15 @@ describe('in-app installer shutdown', () => {
     expect(main).toContain('function launchInstallerAfterAppExit(file)');
     expect(main).toContain('Wait-Process -Id $parentPid');
     expect(main).toContain('Start-Process -FilePath $installer');
+    expect(main).toContain('-PassThru -ErrorAction Stop');
+    expect(main).toContain('installer disappeared before launch');
+    expect(main).toContain('ERROR starting installer:');
+    expect(main).toContain("process.env.SystemRoot || process.env.WINDIR || 'C:\\\\Windows'");
+    expect(main).toContain('liturgia-update-launcher.log');
+    expect(main).toContain("launcher.once('spawn'");
     expect(main).toContain('function quitForInstallerUpdate()');
     expect(main).toContain('app.exit(0);');
-    expect(main).toMatch(/launchInstallerAfterAppExit\(file\);\s+quitForInstallerUpdate\(\);/);
+    expect(main).toMatch(/await launchInstallerAfterAppExit\(file\);\s+console\.log\('\[update\] Installer handoff scheduled/);
   });
 
   test('does not offer the installer until its download stream has finished writing', () => {

@@ -547,178 +547,235 @@
     let currentRenderWidth = 0;
     let currentRenderHeight = 0;
     let currentAnimationFrameId = null;
+    let textAnimationFrameId = null;
+    let backgroundAnimationFrameId = null;
+    let backgroundTransitionToken = 0;
+    let liveRenderToken = 0;
+
+    function cancelTextAnimation() {
+      if (textAnimationFrameId) {
+        cancelAnimationFrame(textAnimationFrameId);
+        textAnimationFrameId = null;
+      }
+    }
+
+    function cancelBackgroundAnimation() {
+      backgroundTransitionToken += 1;
+      if (backgroundAnimationFrameId) {
+        cancelAnimationFrame(backgroundAnimationFrameId);
+        backgroundAnimationFrameId = null;
+      }
+    }
+
+    function cancelPresentationAnimations() {
+      cancelTextAnimation();
+      cancelBackgroundAnimation();
+      if (currentAnimationFrameId) {
+        cancelAnimationFrame(currentAnimationFrameId);
+        currentAnimationFrameId = null;
+      }
+    }
     
     /**
      * Apply fade-out animation to remove current text
      */
     function applyTextFadeOutAnimation(oldContent, duration = 1, animationType = 'fade', callback) {
-      // Check if there's actually content to fade out
-      if (!oldContent || !oldContent.text) {
+      const width = currentRenderWidth;
+      const height = currentRenderHeight;
+      let oldTextCanvas = null;
+      if (textAnimationFrameId) {
+        // Continue from the exact partially animated frame instead of jumping
+        // back to full-opacity text when the operator changes slides quickly.
+        oldTextCanvas = document.createElement('canvas');
+        oldTextCanvas.width = width;
+        oldTextCanvas.height = height;
+        oldTextCanvas.getContext('2d').drawImage(textCanvas, 0, 0);
+      }
+      cancelTextAnimation();
+      if (!oldTextCanvas && (!oldContent || !oldContent.text)) {
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
         if (callback) callback();
         return;
       }
 
       const startTime = Date.now();
-      const width = currentRenderWidth;
-      const height = currentRenderHeight;
-
-      // If a video loop is actively drawing to bgCtx (ctx), DO NOT touch bgCtx at all —
-      // any putImageData/fillRect here will overwrite the video frame just painted and
-      // produce a visible freeze.  Animate text-only on textCtx instead, mirroring the
-      // approach used by applyTextFadeInAnimation.
-      const _liveVidRunning = !!(window._liveBgVideo && !window._liveBgVideo.paused);
-
-      // Pre-render the OLD text using buildTextCanvas (full style support)
-      const textCanvas = buildTextCanvas(oldContent, width, height);
-      // Capture background snapshot only when no video loop owns bgCtx.
-      const backgroundImageData = _liveVidRunning ? null : ctx.getImageData(0, 0, width, height);
-
-      // Easing helper (smooth acceleration/deceleration)
+      if (!oldTextCanvas) oldTextCanvas = buildTextCanvas(oldContent, width, height);
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
       const animate = () => {
         const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / (duration * 1000), 1);
+        const progress = Math.min(elapsed / (Math.max(0.01, duration) * 1000), 1);
         const eased = easeInOutCubic(progress);
         const reverseEased = 1 - eased;
 
-        if (_liveVidRunning) {
-          // Video loop owns bgCtx — animate text fade-out on textCtx only.
-          textCtx.clearRect(0, 0, width, height);
-          if (animationType === 'fade') {
-            textCtx.globalAlpha = reverseEased;
-            textCtx.drawImage(textCanvas, 0, 0);
-            textCtx.globalAlpha = 1;
-          } else if (animationType === 'slide-left') {
-            textCtx.drawImage(textCanvas, -(eased * width), 0);
-          } else if (animationType === 'slide-right') {
-            textCtx.drawImage(textCanvas, eased * width, 0);
-          } else if (animationType === 'slide-up') {
-            textCtx.drawImage(textCanvas, 0, -(eased * height));
-          } else if (animationType === 'slide-down') {
-            textCtx.drawImage(textCanvas, 0, eased * height);
-          }
+        // Text transitions own only textCtx. Background transitions may run at
+        // the same time without either animation cancelling or repainting the other.
+        textCtx.clearRect(0, 0, width, height);
+        if (animationType === 'fade') {
+          textCtx.globalAlpha = reverseEased;
+          textCtx.drawImage(oldTextCanvas, 0, 0);
+          textCtx.globalAlpha = 1;
+        } else if (animationType === 'slide-left') {
+          textCtx.drawImage(oldTextCanvas, -(eased * width), 0);
+        } else if (animationType === 'slide-right') {
+          textCtx.drawImage(oldTextCanvas, eased * width, 0);
+        } else if (animationType === 'slide-up') {
+          textCtx.drawImage(oldTextCanvas, 0, -(eased * height));
+        } else if (animationType === 'slide-down') {
+          textCtx.drawImage(oldTextCanvas, 0, eased * height);
         } else {
-          // Static/image/color background — composite on bgCtx as before.
-          ctx.putImageData(backgroundImageData, 0, 0);
-          drawLicenseWatermark();
-          if (animationType === 'fade') {
-            ctx.globalAlpha = reverseEased;
-            ctx.drawImage(textCanvas, 0, 0);
-            ctx.globalAlpha = 1;
-          } else if (animationType === 'slide-left') {
-            ctx.drawImage(textCanvas, -(eased * width), 0);
-          } else if (animationType === 'slide-right') {
-            ctx.drawImage(textCanvas, eased * width, 0);
-          } else if (animationType === 'slide-up') {
-            ctx.drawImage(textCanvas, 0, -(eased * height));
-          } else if (animationType === 'slide-down') {
-            ctx.drawImage(textCanvas, 0, eased * height);
-          }
+          textCtx.globalAlpha = reverseEased;
+          textCtx.drawImage(oldTextCanvas, 0, 0);
+          textCtx.globalAlpha = 1;
         }
 
         if (progress < 1) {
-          currentAnimationFrameId = requestAnimationFrame(animate);
+          textAnimationFrameId = requestAnimationFrame(animate);
         } else {
-          // Animation complete
-          currentAnimationFrameId = null;
-          if (_liveVidRunning) textCtx.clearRect(0, 0, width, height);
+          textAnimationFrameId = null;
+          textCtx.clearRect(0, 0, width, height);
           if (callback) callback();
         }
       };
 
-      // Run first frame synchronously to start animation immediately
-      currentAnimationFrameId = requestAnimationFrame(animate);
+      textAnimationFrameId = requestAnimationFrame(animate);
     }
     
     /**
      * Apply text animation with support for fade and slide effects
      */
     function applyTextFadeInAnimation(duration = 1.0, animationType = 'fade', callback = null) {
-      const startTime = Date.now();
+      cancelTextAnimation();
       const content = currentRenderContent;
       const width = currentRenderWidth;
       const height = currentRenderHeight;
+      if (!content || !content.text || isClearMode || isBlackMode) {
+        textCtx.clearRect(0, 0, width, height);
+        if (callback) callback();
+        return;
+      }
 
-      // Pre-render text using buildTextCanvas (full style support)
+      const startTime = Date.now();
       const off = buildTextCanvas(content, width, height);
-      // Animate onto the text canvas
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 
       const animate = () => {
-        // If clear or black mode became active while this animation was in-flight,
-        // stop drawing immediately and ensure textCtx is clean.
         if (isClearMode || isBlackMode) {
-          currentAnimationFrameId = null;
-          try { textCtx.clearRect(0, 0, width, height); } catch (e) {}
+          textAnimationFrameId = null;
+          textCtx.clearRect(0, 0, width, height);
           if (callback) callback();
           return;
         }
 
         const elapsed = (Date.now() - startTime) / 1000;
-        const progress = Math.min(elapsed / duration, 1);
+        const progress = Math.min(elapsed / Math.max(0.01, duration), 1);
         const eased = easeInOutCubic(progress);
 
-        // Clear text canvas and draw with eased alpha/offset
         textCtx.clearRect(0, 0, width, height);
         if (animationType === 'fade') {
           textCtx.globalAlpha = eased;
           textCtx.drawImage(off, 0, 0);
           textCtx.globalAlpha = 1;
         } else if (animationType === 'slide-left') {
-          const offset = (1 - eased) * width;
-          textCtx.drawImage(off, offset, 0);
+          textCtx.drawImage(off, (1 - eased) * width, 0);
         } else if (animationType === 'slide-right') {
-          const offset = (eased - 1) * width;
-          textCtx.drawImage(off, offset, 0);
+          textCtx.drawImage(off, (eased - 1) * width, 0);
         } else if (animationType === 'slide-up') {
-          const offset = (1 - eased) * height;
-          textCtx.drawImage(off, 0, offset);
+          textCtx.drawImage(off, 0, (1 - eased) * height);
         } else if (animationType === 'slide-down') {
-          const offset = (eased - 1) * height;
-          textCtx.drawImage(off, 0, offset);
+          textCtx.drawImage(off, 0, (eased - 1) * height);
+        } else {
+          textCtx.globalAlpha = eased;
+          textCtx.drawImage(off, 0, 0);
+          textCtx.globalAlpha = 1;
         }
 
         if (progress < 1) {
-          currentAnimationFrameId = requestAnimationFrame(animate);
+          textAnimationFrameId = requestAnimationFrame(animate);
         } else {
-          currentAnimationFrameId = null;
+          textAnimationFrameId = null;
           textCtx.clearRect(0, 0, width, height);
           textCtx.drawImage(off, 0, 0);
-          // Defensive: ensure watermark is present after fade-in completes
-          try { drawLicenseWatermark(ctx, canvas); } catch (e) { console.warn('[live] drawLicenseWatermark failed after fade-in', e); }
           if (callback) callback();
         }
       };
 
-      currentAnimationFrameId = requestAnimationFrame(animate);
+      textAnimationFrameId = requestAnimationFrame(animate);
+    }
+
+    function transitionTextLayer(oldContent, newContent, options = {}) {
+      if (options.skipTextTransition) {
+        cancelTextAnimation();
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+        if (newContent && newContent.text && !isClearMode && !isBlackMode) {
+          const finalText = buildTextCanvas(newContent, currentRenderWidth, currentRenderHeight);
+          textCtx.drawImage(finalText, 0, 0);
+        }
+        return;
+      }
+
+      const hasOldText = !!(oldContent && oldContent.text);
+      const hasNewText = !!(newContent && newContent.text) && !isClearMode && !isBlackMode;
+      const fadeInNew = () => {
+        if (!hasNewText) {
+          textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+          return;
+        }
+        const transitionIn = newContent.transitionIn || { duration: 0.4, type: 'fade' };
+        applyTextFadeInAnimation(transitionIn.duration, transitionIn.type || 'fade');
+      };
+
+      if (hasOldText) {
+        const transitionOut = oldContent.transitionOut || oldContent.transitionIn || { duration: 0.4, type: 'fade' };
+        applyTextFadeOutAnimation(oldContent, transitionOut.duration, transitionOut.type || 'fade', fadeInNew);
+      } else {
+        fadeInNew();
+      }
+    }
+
+    function getBackgroundTransitionDuration(oldContent, newContent) {
+      const outDuration = Number((oldContent && (oldContent.transitionOut || oldContent.transitionIn) || {}).duration) || 0.4;
+      const inDuration = Number((newContent && newContent.transitionIn || {}).duration) || 0.4;
+      if (!oldContent) return Math.max(0.05, inDuration);
+      // Clear background styling always uses a simple fade. Entering Clear uses
+      // the outgoing duration, leaving Clear uses the incoming duration.
+      if (newContent && newContent.clearPresentation) return Math.max(0.05, outDuration);
+      if (oldContent && oldContent.clearPresentation) return Math.max(0.05, inDuration);
+      return Math.max(0.05, outDuration + inDuration);
     }
     
-    // Helper: compare backgrounds (supports backgroundMedia and legacy backgroundPath)
+    // Compare the full visual background, including blur/overlay styling.
     function backgroundsEqual(a, b) {
       if (!a && !b) return true;
       if (!a || !b) return false;
 
-      // Handle explicit backgroundMedia first
       const am = a.backgroundMedia || (a.isMedia ? { type: a.mediaType, path: a.mediaPath, color: a.mediaColor } : null);
       const bm = b.backgroundMedia || (b.isMedia ? { type: b.mediaType, path: b.mediaPath, color: b.mediaColor } : null);
+      let mediaEqual = false;
 
       if (am || bm) {
-        if (!am || !bm) return false;
-        if (am.type !== bm.type) return false;
-        if (am.type === 'COLOR') return am.color === bm.color;
-        if (am.type === 'ANNOUNCEMENT') return am.color === bm.color;
-        if (am.path && bm.path) return am.path === bm.path;
-        return false;
+        if (!am || !bm || am.type !== bm.type) return false;
+        if (am.type === 'COLOR' || am.type === 'ANNOUNCEMENT') mediaEqual = am.color === bm.color;
+        else if (am.path || bm.path) mediaEqual = (am.path || '') === (bm.path || '');
+        else mediaEqual = true;
+      } else if (a.backgroundPath || b.backgroundPath) {
+        mediaEqual = (a.backgroundPath || '') === (b.backgroundPath || '');
+      } else {
+        mediaEqual = true;
       }
 
-      // Legacy backgroundPath or color
-      if (a.backgroundPath || b.backgroundPath) {
-        return (a.backgroundPath || '') === (b.backgroundPath || '');
-      }
-
-      // Neither content has any background — both are plain black, so they're equal
-      return true;
+      if (!mediaEqual) return false;
+      const styleState = (content) => {
+        const global = (content && content.styles && content.styles.global) || {};
+        const raw = !!(content && (content.clearPresentation || content.isMedia));
+        return {
+          blur: raw ? 0 : (parseFloat(global.bgBlur) || 0),
+          overlay: raw ? 0 : (global.overlayOpacity !== undefined ? Number(global.overlayOpacity) : 0.4)
+        };
+      };
+      const as = styleState(a);
+      const bs = styleState(b);
+      return as.blur === bs.blur && as.overlay === bs.overlay;
     }
 
     // Helper: file URL helper that delegates to preload-exposed paths.fileUrlFor
@@ -734,6 +791,20 @@
         const height = canvas.height;
         ctxLocal.fillStyle = '#000';
         ctxLocal.fillRect(0, 0, width, height);
+
+        const globalStyle = (content && content.styles && content.styles.global) || {};
+        const isClearPresentation = !!(content && content.clearPresentation);
+        const isStandaloneMedia = !!(content && content.isMedia);
+        const overlayOpacity = (isClearPresentation || isStandaloneMedia) ? 0 : (globalStyle.overlayOpacity !== undefined ? Number(globalStyle.overlayOpacity) : 0.4);
+        const bgBlur = (isClearPresentation || isStandaloneMedia) ? 0 : (parseFloat(globalStyle.bgBlur) || 0);
+        const normScale = height / 1080;
+        const finishStyledBackground = () => {
+          ctxLocal.filter = 'none';
+          if (overlayOpacity > 0) {
+            ctxLocal.fillStyle = `rgba(0,0,0,${overlayOpacity})`;
+            ctxLocal.fillRect(0, 0, width, height);
+          }
+        };
 
         // Prefer backgroundMedia, but also accept media fields from isMedia payloads
         let media = null;
@@ -774,11 +845,13 @@
           if (imageExts.includes(ext)) {
             const img = new Image();
             img.onload = () => {
+              if (bgBlur > 0) ctxLocal.filter = `blur(${bgBlur * normScale}px)`;
               drawImageWithSettings(ctxLocal, img, width, height, {
                 bgSize: (media && media.bgSize) || 'cover',
                 bgRepeat: (media && media.bgRepeat) || 'no-repeat',
                 bgPosition: (media && media.bgPosition) || 'center'
               });
+              finishStyledBackground();
               resolve();
             };
             img.onerror = (e) => {
@@ -801,10 +874,11 @@
             // Wait for a frame to be available
             video.addEventListener('loadeddata', () => {
               try {
-                // Draw current frame
+                if (bgBlur > 0) ctxLocal.filter = `blur(${bgBlur * normScale}px)`;
                 ctxLocal.drawImage(video, 0, 0, width, height);
+                finishStyledBackground();
               } catch (e) {
-                // Drawing may fail on some codecs; fallback to black
+                ctxLocal.filter = 'none';
                 ctxLocal.fillStyle = '#000';
                 ctxLocal.fillRect(0, 0, width, height);
               }
@@ -816,17 +890,20 @@
               ctxLocal.fillRect(0, 0, width, height);
               resolve();
             });
+            try { video.load(); } catch (_) {}
             return;
           }
 
           // Unknown extension: try as image first
           const img = new Image();
           img.onload = () => {
+            if (bgBlur > 0) ctxLocal.filter = `blur(${bgBlur * normScale}px)`;
             drawImageWithSettings(ctxLocal, img, width, height, {
               bgSize: (media && media.bgSize) || 'cover',
               bgRepeat: (media && media.bgRepeat) || 'no-repeat',
               bgPosition: (media && media.bgPosition) || 'center'
             });
+            finishStyledBackground();
             resolve();
           };
           img.onerror = () => {
@@ -850,79 +927,63 @@
       const H = currentRenderHeight || window.innerHeight;
       return buildTextCanvas(content, W, H);
     }
-    // Apply a simple background cross-fade between two contents (text remains on top)
-    async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4) {
-      // Cancel any ongoing animations
-      if (currentAnimationFrameId) {
-        cancelAnimationFrame(currentAnimationFrameId);
-        currentAnimationFrameId = null;
-      }
-
+    // Background visuals always use a simple crossfade. Text transitions run
+    // independently on textCtx and keep the user's selected animation type.
+    async function applyBackgroundCrossfade(oldContent, newContent, duration = 0.4, callback = null) {
+      const transitionToken = ++backgroundTransitionToken;
       const width = canvas.width;
       const height = canvas.height;
-
       const oldBgCanvas = document.createElement('canvas');
-      oldBgCanvas.width = width; oldBgCanvas.height = height;
       const newBgCanvas = document.createElement('canvas');
-      newBgCanvas.width = width; newBgCanvas.height = height;
+      oldBgCanvas.width = newBgCanvas.width = width;
+      oldBgCanvas.height = newBgCanvas.height = height;
 
-      // Render both backgrounds (await images to load when necessary)
+      const hadActiveBackgroundFade = !!backgroundAnimationFrameId;
+      if (hadActiveBackgroundFade) {
+        oldBgCanvas.getContext('2d').drawImage(bgCanvas, 0, 0);
+        cancelAnimationFrame(backgroundAnimationFrameId);
+        backgroundAnimationFrameId = null;
+      }
       await Promise.all([
-        renderBackgroundToCanvas(oldContent, oldBgCanvas),
+        hadActiveBackgroundFade ? Promise.resolve() : renderBackgroundToCanvas(oldContent, oldBgCanvas),
         renderBackgroundToCanvas(newContent, newBgCanvas)
       ]);
-
-      // Pre-render text: keep the currently visible text stable during the background fade.
-      // If old content has visible text, prefer that; otherwise fall back to newContent.
-      const textSource = (oldContent && oldContent.text) ? oldContent : newContent;
-      const textCanvas = renderTextToCanvas(textSource);
+      if (transitionToken !== backgroundTransitionToken) return;
 
       const startTime = Date.now();
       function easeInOutCubic(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
-
       const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / (duration * 1000), 1);
+        if (transitionToken !== backgroundTransitionToken) return;
+        const progress = Math.min((Date.now() - startTime) / (Math.max(0.01, duration) * 1000), 1);
         const eased = easeInOutCubic(progress);
-
-        // Draw blended backgrounds
         ctx.clearRect(0, 0, width, height);
-        ctx.globalAlpha = 1;
-
-        // Draw old bg with (1 - eased)
-        if (eased < 1) {
-          ctx.globalAlpha = 1 - eased;
-          ctx.drawImage(oldBgCanvas, 0, 0);
-        }
-        // Draw new bg with eased
+        ctx.globalAlpha = 1 - eased;
+        ctx.drawImage(oldBgCanvas, 0, 0);
         ctx.globalAlpha = eased;
         ctx.drawImage(newBgCanvas, 0, 0);
         ctx.globalAlpha = 1;
-
-        // Draw watermark between background and text so it stays visible during crossfade
         drawLicenseWatermark(ctx, canvas);
 
-        // Draw text on top
-        if (textCanvas) ctx.drawImage(textCanvas, 0, 0);
-
         if (progress < 1) {
-          currentAnimationFrameId = requestAnimationFrame(animate);
+          backgroundAnimationFrameId = requestAnimationFrame(animate);
         } else {
-          currentAnimationFrameId = null;
-          // Re-render with new content so the new text is shown on the final background.
-          // backgroundsEqual(newContent, newContent) will be true, so no infinite crossfade.
-          renderContent(newContent);
+          backgroundAnimationFrameId = null;
+          if (callback) callback();
         }
       };
-
-      currentAnimationFrameId = requestAnimationFrame(animate);
+      backgroundAnimationFrameId = requestAnimationFrame(animate);
     }
 
     /**
      * Render verse content to canvas
      */
-    function renderContent(renderContent_content) {
-      window.currentContent = renderContent_content;
+    function renderContent(renderContent_content, renderOptions = {}) {
+      const renderToken = ++liveRenderToken;
+      // Clear is a transient visual projection. Never let its stripped styles
+      // replace the canonical styled presentation used when returning to Normal.
+      if (renderContent_content && !renderContent_content.clearPresentation) {
+        window.currentContent = renderContent_content;
+      }
 
       // Kill any background video loop that was started by a previous renderContent call.
       // EXCEPTION: if the new content reuses the exact same video path, keep the token and
@@ -946,12 +1007,15 @@
         renderContent._sameBgVideo = _sameBgVideo;
       }
 
-      // Stop any media video loop (window.currentVideo) unless the new content is also
-      // a video media item. The drawFrame loop exits when window.currentVideo !== video.
+      // Keep a standalone video loop only when the exact same media remains live.
+      // A different video must stop before a background crossfade or it will repaint bgCtx.
       {
         const _newIsVideoMedia = renderContent_content.isMedia &&
           ['MP4','WEBM','OGG','MOV','AVI'].includes(renderContent_content.mediaType);
-        if (!_newIsVideoMedia && window.currentVideo) {
+        const _newMediaUrl = _newIsVideoMedia ? _fileUrlFor(renderContent_content.mediaPath) : null;
+        const _sameVideoMedia = _newIsVideoMedia && window._liveVideoForControl &&
+          window._liveVideoForControl.src === _newMediaUrl;
+        if (!_sameVideoMedia && window.currentVideo) {
           try { window.currentVideo.pause(); } catch (_) {}
           window.currentVideo = null;
           window._liveVideoForControl = null;
@@ -969,18 +1033,6 @@
       const _bgBlur         = _isClearPresentation ? 0 : (parseFloat(_rstGlobal.bgBlur) || 0);
       const _normScale      = height / 1080;
 
-      // Clear is delivered as a normal background-only presentation.  Text lives
-      // on its own canvas, so an empty payload must explicitly erase the last
-      // song/verse before the background-only render continues.
-      if (_isClearPresentation) {
-        if (currentAnimationFrameId) {
-          cancelAnimationFrame(currentAnimationFrameId);
-          currentAnimationFrameId = null;
-        }
-        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
-        window.previousContent = null;
-      }
-
       // IMPORTANT: Store OLD content before updating currentRenderContent
       const oldContent = currentRenderContent ? { ...currentRenderContent } : null;
       
@@ -997,42 +1049,30 @@
         return null;
       }
 
-      // If only the background changed, perform a background-only crossfade and keep text.
-      // Exception: GIF backgrounds cannot be crossfaded through canvas drawImage (kills animation),
-      // so skip the crossfade and let normal rendering call setGifBg instead.
-      // Standalone media is a replacement, never a background transition for
-      // the previous verse/song.  In particular, do not draw the old text
-      // while an image is being made live.
-      if (!renderContent_content.isMedia && oldContent && !backgroundsEqual(oldContent, renderContent_content)) {
-        const newBgType = getBgMediaType(renderContent_content);
+      // Background media and background-only styles transition independently from text.
+      // This covers song/verse default backgrounds, Clear style changes, and standalone media.
+      if (!renderOptions.skipBackgroundTransition && (!oldContent || !backgroundsEqual(oldContent, renderContent_content))) {
         const oldBgType = getBgMediaType(oldContent);
-        if (newBgType === 'GIF') {
-          // Fall through to normal rendering path which calls setGifBg.
-          // (crossfade via canvas drawImage resets GIF animation)
-          if (currentAnimationFrameId) {
-            cancelAnimationFrame(currentAnimationFrameId);
-            currentAnimationFrameId = null;
+        const newBgType = getBgMediaType(renderContent_content);
+        const animatedTypes = ['GIF','MP4','WEBM','OGG','MOV','AVI'];
+        if (animatedTypes.includes(oldBgType) || animatedTypes.includes(newBgType)) {
+          clearGifBg();
+          if (window._liveBgVideo) {
+            try { window._liveBgVideo.pause(); } catch (_) {}
+            if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
+            window._liveBgVideo = null;
           }
-          if (oldBgType !== 'GIF') clearGifBg();
-        } else if (['MP4','WEBM','OGG','MOV','AVI'].includes(newBgType)) {
-          // Fall through to normal rendering path which starts the video rAF loop.
-          // applyBackgroundCrossfade would capture only a single static frame via
-          // renderBackgroundToCanvas and return early, leaving the canvas frozen.
-          if (currentAnimationFrameId) {
-            cancelAnimationFrame(currentAnimationFrameId);
-            currentAnimationFrameId = null;
-          }
-          if (oldBgType === 'GIF') clearGifBg();
-        } else {
-          // Crossfade is safe; clear the GIF img overlay if old background was a GIF
-          if (oldBgType === 'GIF') clearGifBg();
-          const dur = (renderContent_content && renderContent_content.transitionIn && renderContent_content.transitionIn.duration) ? renderContent_content.transitionIn.duration : 0.4;
-          applyBackgroundCrossfade(oldContent, renderContent_content, dur);
-          // Don't continue with normal rendering (crossfade draws the backgrounds and text)
-          // Store previous content for future out transitions
-          window.previousContent = renderContent_content;
-          return;
+          window._liveBgToken = (window._liveBgToken || 0) + 1;
         }
+
+        const duration = getBackgroundTransitionDuration(oldContent, renderContent_content);
+        transitionTextLayer(oldContent, renderContent_content, renderOptions);
+        applyBackgroundCrossfade(oldContent, renderContent_content, duration, () => {
+          // Start the final live background/video after the fade without replaying text transitions.
+          renderContent(renderContent_content, { skipBackgroundTransition: true, skipTextTransition: true });
+        });
+        window.previousContent = renderContent_content;
+        return;
       }
       
       // GIF backgrounds need clearRect so the img element beneath the canvas is visible.
@@ -1051,10 +1091,9 @@
 
       // Handle media content
       if (renderContent_content.isMedia) {
-        // Verse/song text is painted on a separate canvas over the media
-        // canvas. Clear it before drawing media so double-clicking an image
-        // produces media-only output immediately.
-        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+        // Media owns the background layer. Let any outgoing verse/song text use
+        // its configured transition on the independent text layer.
+        transitionTextLayer(oldContent, renderContent_content, renderOptions);
         window.previousContent = renderContent_content;
         console.log('Rendering media - type:', renderContent_content.mediaType);
         const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(renderContent_content.mediaType);
@@ -1138,6 +1177,7 @@
             });
             const img = new Image();
             img.onload = () => {
+              if (renderToken !== liveRenderToken) return;
               ctx.fillStyle = '#000';
               ctx.fillRect(0, 0, width, height);
               drawImageWithSettings(ctx, img, width, height, {
@@ -1257,107 +1297,19 @@
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       
-      // Function to render background and show text
+      // Background rendering and text transitions are separate layers.
       const showTextWithAnimation = () => {
-        // Store previous content for transition-out animation on next call
-        const hasPreviousContent = window.previousContent && 
-                                   window.previousContent.text && 
-                                   renderContent_content.text && 
-                                   window.previousContent !== renderContent_content;
-        
-        if (hasPreviousContent) {
-          // Use previous content's transitionOut if provided, otherwise fall back to transitionIn
-          const transitionOut = window.previousContent.transitionOut || window.previousContent.transitionIn || { duration: 0.4, type: 'fade' };
-          
-          // Fade out old content, then fade in new content
-          applyTextFadeOutAnimation(
-            oldContent,
-            transitionOut.duration,
-            transitionOut.type || 'fade',
-            () => {
-              // After fade-out completes, re-render the background before fade-in.
-              // EXCEPTION: if a video loop is already running on bgCtx, do NOT touch
-              // bgCtx at all — the loop is already painting every frame and a single
-              // synchronous fillRect here would produce a visible freeze/black flash.
-              const _bgM = renderContent_content.backgroundMedia;
-              const _bgIsLiveVideo = _bgM &&
-                ['MP4','WEBM','OGG','MOV','AVI'].includes(_bgM.type) &&
-                window._liveBgVideo && window._liveBgVideo.dataset.bgSrc === _fileUrlFor(_bgM.path);
-
-              if (_bgIsLiveVideo) {
-                // Video loop handles bgCtx — just trigger the text fade-in.
-                if (renderContent_content.transitionIn) {
-                  applyTextFadeInAnimation(renderContent_content.transitionIn.duration, renderContent_content.transitionIn.type || 'fade');
-                }
-                return;
-              }
-
-              // Non-video backgrounds: repaint bgCtx before the text fade-in.
-              // Black background is the fallback - render it first
-              ctx.fillStyle = '#000';
-              ctx.fillRect(0, 0, width, height);
-              
-              if (renderContent_content.backgroundMedia) {
-                const media = renderContent_content.backgroundMedia;
-                if (media.type === 'COLOR') {
-                  applyColorToCanvas(ctx, media.color, width, height);
-                  // Reapply watermark after redrawing the background color
-                  drawLicenseWatermark(ctx, canvas);
-                } else if (media.type === 'GIF') {
-                  setGifBg(media.path, media);
-                  gifBg.style.filter = _bgBlur > 0 ? `blur(${_bgBlur * _normScale}px)` : '';
-                  ctx.clearRect(0, 0, width, height);
-                  ctx.fillStyle = `rgba(0,0,0,${_overlayOpacity})`;
-                  ctx.fillRect(0, 0, width, height);
-                  drawLicenseWatermark(ctx, canvas);
-                  if (renderContent_content.transitionIn) {
-                    applyTextFadeInAnimation(renderContent_content.transitionIn.duration, renderContent_content.transitionIn.type || 'fade');
-                  }
-                  return;
-                } else if (isStaticImageType(media.type)) {
-                  clearGifBg();
-                  // Image background - redraw it
-                  const bgImg = new Image();
-                  bgImg.onload = () => {
-                    drawImageWithSettings(ctx, bgImg, width, height, {
-                      bgSize: media.bgSize || 'cover',
-                      bgRepeat: media.bgRepeat || 'no-repeat',
-                      bgPosition: media.bgPosition || 'center'
-                    });
-                    drawLicenseWatermark(ctx, canvas);
-                    if (renderContent_content.transitionIn) {
-                      applyTextFadeInAnimation(
-                        renderContent_content.transitionIn.duration,
-                        renderContent_content.transitionIn.type || 'fade'
-                      );
-                    }
-                  };
-                  bgImg.src = _fileUrlFor(media.path);
-                  return; // Don't call fade-in below
-                }
-              }
-              
-              // Apply fade-in after background is ready
-              if (renderContent_content.transitionIn) {
-                applyTextFadeInAnimation(
-                  renderContent_content.transitionIn.duration,
-                  renderContent_content.transitionIn.type || 'fade'
-                );
-              }
-            }
-          );
-        } else {
-          // No fade-out needed, ensure watermark is present then apply fade-in
-          drawLicenseWatermark();
-          if (renderContent_content.transitionIn) {
-            applyTextFadeInAnimation(
-              renderContent_content.transitionIn.duration,
-              renderContent_content.transitionIn.type || 'fade'
-            );
-          }
-        }
+        transitionTextLayer(oldContent, renderContent_content, renderOptions);
       };
       
+      // If the background visual is identical, keep the already-rendered frame.
+      // Repainting the same static image clears the canvas to black while the
+      // image reloads, which causes a visible black flash between verses.
+      if (oldContent && backgroundsEqual(oldContent, renderContent_content)) {
+        window.previousContent = renderContent_content;
+        return;
+      }
+
       // Handle background media (object with type, path, color, and settings)
       if (renderContent_content.backgroundMedia) {
         const media = renderContent_content.backgroundMedia;
@@ -1388,6 +1340,7 @@
           console.log('Live window: Loading image background with settings:', media);
           const bgImg = new Image();
           bgImg.onload = () => {
+            if (renderToken !== liveRenderToken) return;
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, width, height);
             if (_bgBlur > 0) ctx.filter = `blur(${_bgBlur * _normScale}px)`;
@@ -1481,6 +1434,7 @@
         const fileURL = renderContent_content.backgroundPath;
         console.log('Live window: Loading background from:', fileURL);
         bgImg.onload = () => {
+          if (renderToken !== liveRenderToken) return;
           console.log('Live window: Background loaded successfully');
           const scale = Math.min(width / bgImg.width, height / bgImg.height);
           const w = bgImg.width * scale;
@@ -2098,136 +2052,77 @@
       requestAnimationFrame(step);
     }
 
+    function createLiveClearPresentation(content) {
+      if (!content) return null;
+      const clear = {
+        ...content,
+        number: '',
+        text: '',
+        reference: '',
+        secondaryText: '',
+        secondaryRef: '',
+        styles: {},
+        clearPresentation: true
+      };
+      delete clear._outputMode;
+      return clear;
+    }
+
     function setLiveMode(mode) {
       console.debug('[live] setLiveMode ->', mode);
-      // Cancel any ongoing canvas animations
-      if (currentAnimationFrameId) {
-        cancelAnimationFrame(currentAnimationFrameId);
-        currentAnimationFrameId = null;
-      }
-      // Stop any video draw loop. The RVFC-driven loop checks window.currentVideo !== video,
-      // so nulling it is the only reliable way to stop it (cancelAnimationFrame won't work).
-      if (window.currentVideo) { window.currentVideo = null; }
-      window._liveVideoForControl = null;
-      if (window._liveBgVideo) {
-        try { window._liveBgVideo.pause(); } catch (_) {}
-        if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
-        window._liveBgVideo = null;
-      }
-      window._liveBgToken = (window._liveBgToken || 0) + 1;
 
-      // Capture whether the website mirror overlay was visible before we do anything.
-      // If it was, we fade it out instead of hiding immediately so the transition looks smooth.
-      const _mirrorWasVisible = (mirrorImg.style.display !== 'none');
-      _mirrorEnabled = false; // stop accepting new mirror frames immediately
-
-      // Always make canvases visible — they may have been obscured by the mirror
+      const mirrorWasVisible = mirrorImg.style.display !== 'none';
+      _mirrorEnabled = false;
       bgCanvas.style.display = '';
       textCanvas.style.display = '';
 
       if (mode === 'black') {
+        // Black is an immediate safety/output mask. It intentionally does not
+        // inherit slide/fade presentation transitions.
+        cancelPresentationAnimations();
         isClearMode = false;
         isBlackMode = true;
+        if (window.currentVideo) window.currentVideo = null;
+        window._liveVideoForControl = null;
+        if (window._liveBgVideo) {
+          try { window._liveBgVideo.pause(); } catch (_) {}
+          if (window._liveBgVideo.parentNode) window._liveBgVideo.parentNode.removeChild(window._liveBgVideo);
+          window._liveBgVideo = null;
+        }
+        window._liveBgToken = (window._liveBgToken || 0) + 1;
         clearGifBg();
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
+        textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
         currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-        if (_mirrorWasVisible) {
-          const _dur = (window.currentContent && window.currentContent.transitionIn) ? window.currentContent.transitionIn.duration : 0.4;
-          _fadeMirrorOut(_dur);
+        if (mirrorWasVisible) {
+          const duration = Number((window.currentContent && (window.currentContent.transitionOut || window.currentContent.transitionIn) || {}).duration) || 0.4;
+          _fadeMirrorOut(duration);
         } else {
           hideMirrorVideo();
         }
-        return;
-      }
-
-      // Renderer sends a neutral background-only payload before this mode
-      // change. Render that same payload instead of maintaining a divergent
-      // hand-built Clear renderer that can lose media or keep its blur.
-      if (mode === 'clear' && window.currentContent && window.currentContent.clearPresentation) {
-        isClearMode = true;
-        isBlackMode = false;
-        hideMirrorVideo();
-        renderContent(window.currentContent);
         return;
       }
 
       if (mode === 'clear') {
-        // If already clear, no-op
-        if (isClearMode) return;
+        // Clear is a temporary, unstyled view of the canonical live content.
+        // The canonical payload keeps its blur, overlay, and text styles intact.
         isClearMode = true;
         isBlackMode = false;
-
-        const width = canvas.width;
-        const height = canvas.height;
-        const transitionSettings = window.currentContent && window.currentContent.transitionIn ? window.currentContent.transitionIn : { duration: 0.4, type: 'fade' };
-
-        const renderBackground = () => {
-          const _rbMedia = window.currentContent && window.currentContent.backgroundMedia ? window.currentContent.backgroundMedia : null;
-          if (_rbMedia && _rbMedia.type === 'COLOR') {
-            clearGifBg();
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, width, height);
-            applyColorToCanvas(ctx, _rbMedia.color, width, height);
-          } else if (_rbMedia && _rbMedia.type === 'GIF') {
-            setGifBg(_rbMedia.path, _rbMedia);
-            ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            ctx.fillRect(0, 0, width, height);
-          } else if (_rbMedia && isStaticImageType(_rbMedia.type)) {
-            clearGifBg();
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, width, height);
-            const bgImg = new Image();
-            bgImg.onload = () => drawImageWithSettings(ctx, bgImg, width, height, { bgSize: _rbMedia.bgSize || 'cover', bgRepeat: _rbMedia.bgRepeat || 'no-repeat', bgPosition: _rbMedia.bgPosition || 'center' });
-            bgImg.src = _fileUrlFor(_rbMedia.path);
-          } else {
-            clearGifBg();
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, width, height);
-          }
-        };
-
-        if (_mirrorWasVisible) {
-          // Website mirror was on top — text was never visible to the audience.
-          // Render the background on the canvas, clear text immediately, then fade the mirror
-          // out so it dissolves smoothly into the background instead of snapping away.
-          renderBackground();
-          drawLicenseWatermark();
-          try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
-          currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-          _fadeMirrorOut(transitionSettings.duration);
+        const clearPresentation = createLiveClearPresentation(window.currentContent);
+        if (clearPresentation) renderContent(clearPresentation);
+        if (mirrorWasVisible) {
+          const duration = Number((window.currentContent && (window.currentContent.transitionOut || window.currentContent.transitionIn) || {}).duration) || 0.4;
+          _fadeMirrorOut(duration);
         } else {
           hideMirrorVideo();
-          // If there's visible text on screen, fade it out; otherwise just show background
-          const hasVisibleText = currentRenderContent && currentRenderContent.text;
-          if (hasVisibleText) {
-            const oldContent = { ...currentRenderContent };
-            renderBackground();
-            drawLicenseWatermark();
-            // Clear textCtx IMMEDIATELY so the audience sees no text from this instant.
-            // applyTextFadeOutAnimation below runs on bgCtx as a subtle background-only
-            // transition; textCtx is already blank so text cannot linger even if the
-            // callback is delayed or the animation is cancelled mid-way.
-            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
-            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-            applyTextFadeOutAnimation(oldContent, transitionSettings.duration, transitionSettings.type || 'fade', () => {
-              try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
-              currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-            });
-          } else {
-            renderBackground();
-            drawLicenseWatermark();
-            try { textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height); } catch (e) {}
-            currentRenderContent = window.currentContent ? { ...window.currentContent, number: '', text: '', reference: '' } : null;
-          }
         }
-
         return;
       }
 
-      // mode === 'normal'
+      // Normal mode commits the payload stored by update-content. This also
+      // restores text immediately after Clear is toggled off, without requiring
+      // a second double-click or another go-live action.
       hideMirrorVideo();
       isClearMode = false;
       isBlackMode = false;
@@ -2257,10 +2152,19 @@
         return;
       }
 
-      // Non-website: update content and disable mirror
-      window.currentContent = data;
+      // Non-website: keep one canonical styled presentation. A legacy or
+      // transient Clear payload must never replace it.
+      if (data && !data.clearPresentation) {
+        const canonical = { ...data };
+        delete canonical._outputMode;
+        window.currentContent = canonical;
+      }
       _mirrorEnabled = false;
       hideMirrorVideo();
+
+      // New renderer payloads are committed by the following set-live-mode IPC.
+      // Store them here, but do not render twice or race mode state.
+      if (data && data._outputMode) return;
 
       // Respect current mode: keep screen black or cleared if those modes are active
       if (isBlackMode) {

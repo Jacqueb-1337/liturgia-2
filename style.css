@@ -2873,7 +2873,7 @@ body:not(.dark-theme) .vlb-device-item:hover {
 
 .song-editor-ctx-menu {
   position: fixed;
-  z-index: 9000;
+  z-index: 21000;
   background: #fff;
   border: 1px solid #ccc;
   border-radius: 6px;

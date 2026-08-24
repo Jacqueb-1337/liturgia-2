@@ -3403,20 +3403,36 @@ ipcMain.handle('cancel-update-download', async (event, { file }) => {
 // leaves the installer waiting for a process the user then has to force-close.
 function launchInstallerAfterAppExit(file) {
   const { spawn } = require('child_process');
+  const launcherLog = path.join(require('os').tmpdir(), 'liturgia-update-launcher.log');
   const escapedFile = file.replace(/'/g, "''");
+  const escapedLog = launcherLog.replace(/'/g, "''");
   const waitScript = [
     '$ErrorActionPreference = \'Stop\'',
     `$parentPid = ${process.pid}`,
     `$installer = '${escapedFile}'`,
+    `$launcherLog = '${escapedLog}'`,
+    'function Write-LauncherLog($message) { Add-Content -LiteralPath $launcherLog -Value ((Get-Date -Format o) + \' - \' + $message) }',
+    "Write-LauncherLog ('Waiting for Liturgia PID ' + $parentPid)",
     'try { Wait-Process -Id $parentPid -ErrorAction Stop } catch {}',
-    'Start-Sleep -Milliseconds 300',
-    'Start-Process -FilePath $installer'
+    'Start-Sleep -Milliseconds 750',
+    "Write-LauncherLog ('Starting installer: ' + $installer)",
+    "if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { Write-LauncherLog 'ERROR: installer disappeared before launch'; exit 2 }",
+    "try { $installerProcess = Start-Process -FilePath $installer -WorkingDirectory (Split-Path -Parent $installer) -PassThru -ErrorAction Stop; Write-LauncherLog ('Installer process started, PID ' + $installerProcess.Id) } catch { Write-LauncherLog ('ERROR starting installer: ' + $_.Exception.Message); exit 3 }"
   ].join('; ');
   const encoded = Buffer.from(waitScript, 'utf16le').toString('base64');
-  const launcher = spawn('powershell.exe', [
-    '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded
-  ], { detached: true, stdio: 'ignore', windowsHide: true });
-  launcher.unref();
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const powershell = path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+  return new Promise((resolve, reject) => {
+    const launcher = spawn(powershell, [
+      '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded
+    ], { detached: true, stdio: 'ignore', windowsHide: true });
+    launcher.once('error', reject);
+    launcher.once('spawn', () => {
+      launcher.unref();
+      resolve({ launcherLog });
+    });
+  });
 }
 
 function quitForInstallerUpdate() {
@@ -3439,7 +3455,8 @@ ipcMain.handle('run-installer', async (event, file) => {
     const installerSize = fs.statSync(file).size;
     if (!installerSize) return { ok:false, error:'Downloaded installer is empty' };
 
-    launchInstallerAfterAppExit(file);
+    const launch = await launchInstallerAfterAppExit(file);
+    console.log('[update] Installer handoff scheduled; launcher log:', launch.launcherLog);
     quitForInstallerUpdate();
     return { ok:true };
   } catch (e) { return { ok:false, error: String(e) }; }
