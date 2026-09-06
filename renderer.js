@@ -1,6 +1,7 @@
 // renderer.js
 
 const fs = require('fs');
+const { LICENSE_SERVER } = require('./constants');
 const path = require('path');
 const { ipcRenderer, shell } = require('electron');
 
@@ -2493,7 +2494,7 @@ async function initScripture() {
     onEnter: () => {
       // Go live using the current selection (supports multi-select); if a single
       // verse is focused/present it'll still work because selectedIndices will contain it.
-      if (selectedIndices.length > 0) handleVerseDoubleClick();
+      return handleVerseDoubleClick();
     },
     onToggleLive: toggleLive,
     onToggleClear: toggleClear,
@@ -4262,9 +4263,8 @@ async function createSetupModal() {
   // Focus email input to let user start typing immediately
   const emailEl = document.getElementById('setup-email'); if (emailEl) setTimeout(()=>emailEl.focus(),50);
 
-  // Resolve configured server (managed) up-front
-  const _settings = await ipcRenderer.invoke('load-settings');
-  const server = (_settings && _settings.licenseServer) ? _settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+  // Account endpoints are fixed, independent of saved settings.
+  const server = LICENSE_SERVER;
 
   document.getElementById('btn-magic').onclick = async () => {
     const emailInput = document.getElementById('setup-email');
@@ -4285,7 +4285,6 @@ async function createSetupModal() {
       }
       if (json && json.ok) {
         // Persist chosen server so the app remembers it across restarts
-        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
         document.getElementById('setup-status').textContent = 'Magic link sent — check your email (and spam/junk folder) and paste the token via "Enter Token".';
       } else {
         document.getElementById('setup-status').textContent = 'Failed to send: ' + (json && (json.error || json.message) ? (json.error || json.message) : 'Unknown error');
@@ -4336,7 +4335,6 @@ async function createSetupModal() {
         // Cache its confirmed subscription only after persistence succeeds.
         if (saved && result.status) await cacheVerifiedLicenseStatus(token, result.status);
         // Persist the server we used so restarts keep it
-        try { await ipcRenderer.invoke('update-settings', { licenseServer: server }); } catch (e) {}
         if (!saved) {
           document.getElementById('token-status').textContent = 'Signed in but failed to persist token to secure storage. It will be stored in settings as fallback.';
         } else if (result.active) {
@@ -4430,10 +4428,9 @@ async function restoreOfflineLicenseStatus(token, failedReason) {
   }
 }
 
-async function validateTokenAndActivate(token, serverUrl) {
+async function validateTokenAndActivate(token) {
   try {
-    const settings = await ipcRenderer.invoke('load-settings') || {};
-    const server = (serverUrl || settings.licenseServer || '').replace(/\/$/, '');
+    const server = LICENSE_SERVER;
     if (!server) {
       const offline = await restoreOfflineLicenseStatus(token, 'no-server');
       if (offline) return offline;
@@ -4544,7 +4541,7 @@ async function ensureAuthSetup() {
   // Called on startup. If no token, show setup modal.
   const token = await getSavedToken();
   const settings = await ipcRenderer.invoke('load-settings') || {};
-  const server = settings.licenseServer || '';
+  const server = LICENSE_SERVER;
   if (token) {
     const result = await validateTokenAndActivate(token, server);
     if (result && result.ok) {
@@ -4588,7 +4585,7 @@ async function ensureAuthSetup() {
         }
       } else {
         const settings = await ipcRenderer.invoke('load-settings') || {};
-        const server = settings.licenseServer || '';
+        const server = LICENSE_SERVER;
         const res = await validateTokenAndActivate(token, server);
         if (!res || !res.ok) {
           if (!document.getElementById('setup-modal')) createSetupModal();

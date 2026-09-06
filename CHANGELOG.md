@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.25 - 2026-09-06
+
+- fix: use fixed account server and correct shared Go Live selection
+
+
 ## 6.1.24 - 2026-08-24
 
 - feat: add eBible.org Bible search, download, validation, and automatic import

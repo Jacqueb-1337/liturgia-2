@@ -1,5 +1,5 @@
 const { ipcRenderer } = require('electron');
-const { CDN_BASE, BIBLE_STORAGE_DIR } = require('./constants');
+const { CDN_BASE, BIBLE_STORAGE_DIR, LICENSE_SERVER } = require('./constants');
 const fs = require('fs');
 const path = require('path');
 const QRCode = require('qrcode');
@@ -1978,7 +1978,7 @@ document.getElementById('close-live-window').addEventListener('click', async () 
         }
         if (!token) { alert('Sign in first'); return; }
         const settings = await ipcRenderer.invoke('load-settings');
-        const server = (settings && settings.licenseServer) ? settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+        const server = LICENSE_SERVER;
         // Send token in both Authorization header and JSON body to survive proxies that strip headers
         const res = await fetch(server + '/create-portal-session.php', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
         let j = null;
@@ -2070,7 +2070,7 @@ document.getElementById('close-live-window').addEventListener('click', async () 
       confirmBtn.disabled = true;
       try {
         const settings = await ipcRenderer.invoke('load-settings');
-        const server = (settings && settings.licenseServer) ? settings.licenseServer.replace(/\/$/, '') : 'https://jacqueb.me/liturgia';
+        const server = LICENSE_SERVER;
         const body = new URLSearchParams({ email, plan: _subscribePlan }).toString();
         const res = await fetch(server + '/create-checkout-session.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
         let j = null;
@@ -2172,7 +2172,7 @@ async function getAccountAccessContext() {
     const error = new Error('Sign in first.'); error.code = 'no-token'; throw error;
   }
   const settings = await ipcRenderer.invoke('load-settings').catch(() => ({}));
-  const server = ((settings && settings.licenseServer) || 'https://jacqueb.me/liturgia').replace(/\/$/, '');
+  const server = LICENSE_SERVER;
   return { token, server };
 }
 

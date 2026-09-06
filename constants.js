@@ -92,6 +92,9 @@ const CHAPTER_COUNTS = {
   "revelation": 22
 };
 
+const LICENSE_SERVER = 'https://jacqueb.me/liturgia';
+
 module.exports = {
+  LICENSE_SERVER,
   VERSION, CDN_BASE, BIBLE_JSON, ITEM_HEIGHT, WINDOW_SIZE, BUFFER, BOOKS, CHAPTER_COUNTS, BIBLE_STORAGE_DIR
 };
