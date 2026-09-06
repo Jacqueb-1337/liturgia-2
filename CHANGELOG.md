@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.1.26 - 2026-09-06
+
+- fix: build and publish Windows and Linux packages locally
+
+
 ## 6.1.25 - 2026-09-06
 
 - fix: use fixed account server and correct shared Go Live selection
