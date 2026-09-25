@@ -1976,17 +1976,86 @@ body.dark-theme .verse-item.selected {
   border-left: 4px solid #00796b; /* Accent border */
 }
 
+.app-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.app-confirm-dialog {
+  width: min(420px, calc(100vw - 48px));
+  background: #252525;
+  color: #fff;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+.app-confirm-message {
+  margin-bottom: 18px;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.app-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-confirm-actions .btn {
+  min-width: 88px;
+}
+
+.app-confirm-ok {
+  background: #0078d4;
+  color: #fff;
+}
+
+.app-confirm-cancel {
+  background: #444;
+  color: #fff;
+}
+
 /* Schedule sidebar styles */
 .schedule-item {
+  position: relative;
   background: #3a3a3a;
   margin: 5px 0;
   border-radius: 4px;
-  cursor: grab;
   user-select: none;
 }
 
-.schedule-item:active {
-  cursor: grabbing;
+.schedule-item.dragging {
+  opacity: 0.55;
+}
+
+.schedule-item.schedule-drop-before::before,
+.schedule-item.schedule-drop-after::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 3px;
+  z-index: 3;
+  border-radius: 3px;
+  background: #2f9cff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  pointer-events: none;
+}
+
+.schedule-item.schedule-drop-before::before {
+  top: -4px;
+}
+
+.schedule-item.schedule-drop-after::after {
+  bottom: -4px;
 }
 
 .schedule-item:hover {
@@ -1999,8 +2068,13 @@ body.dark-theme .verse-item.selected {
   padding: 8px;
   color: white;
   outline: none;
+  cursor: grab;
   /* Allow flex children to shrink when the sidebar is narrow */
   min-width: 0;
+}
+
+.schedule-item-header:active {
+  cursor: grabbing;
 }
 
 .schedule-item-header:focus {
@@ -2010,6 +2084,28 @@ body.dark-theme .verse-item.selected {
 
 .schedule-item-header.selected {
   background: #0078d4;
+}
+
+.schedule-drag-handle {
+  width: 24px;
+  height: 28px;
+  margin: -4px 6px -4px -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 4px;
+  color: #9b9b9b;
+  cursor: grab;
+}
+
+.schedule-item-header:hover .schedule-drag-handle {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.schedule-item-header:active .schedule-drag-handle {
+  cursor: grabbing;
 }
 
 /* Small icons for schedule items */

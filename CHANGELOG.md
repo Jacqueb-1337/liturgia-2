@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.27 - 2026-09-25
+
+- fix: keep text inputs focusable after schedule confirmations and rerenders
+- fix: make schedule reordering easier with draggable headers and visible insertion indicators
+- test: cover schedule focus and reorder safeguards
+
 ## 6.1.26 - 2026-09-06
 
 - fix: build and publish Windows and Linux packages locally

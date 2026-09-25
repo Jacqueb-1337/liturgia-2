@@ -908,6 +908,75 @@ let blackMode = false;
 function isTextEntryElement(element) {
   return !!(element && (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT' || element.isContentEditable));
 }
+
+function showAppConfirm(message, { confirmLabel = 'OK', cancelLabel = 'Cancel' } = {}) {
+  return new Promise(resolve => {
+    const focusBeforeDialog = document.activeElement;
+    const overlay = document.createElement('div');
+    overlay.className = 'app-confirm-overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'app-confirm-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', 'Confirmation');
+
+    const messageEl = document.createElement('div');
+    messageEl.className = 'app-confirm-message';
+    messageEl.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.className = 'app-confirm-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn app-confirm-cancel';
+    cancelBtn.textContent = cancelLabel;
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn app-confirm-ok';
+    confirmBtn.textContent = confirmLabel;
+
+    actions.append(cancelBtn, confirmBtn);
+    dialog.append(messageEl, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    let finished = false;
+    const finish = result => {
+      if (finished) return;
+      finished = true;
+      overlay.remove();
+      resolve(result);
+
+      requestAnimationFrame(() => {
+        try { window.focus(); } catch (_) {}
+        if (focusBeforeDialog && focusBeforeDialog.isConnected && isTextEntryElement(focusBeforeDialog)) {
+          focusBeforeDialog.focus({ preventScroll: true });
+        }
+      });
+    };
+
+    cancelBtn.addEventListener('click', () => finish(false));
+    confirmBtn.addEventListener('click', () => finish(true));
+    overlay.addEventListener('mousedown', event => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.addEventListener('keydown', event => {
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      }
+    });
+
+    requestAnimationFrame(() => confirmBtn.focus({ preventScroll: true }));
+  });
+}
 let _websiteIsLive = false; // true while a website is the active live source
 let _rememberedWidget = null;
 window.__activeObsWidget = window.__activeObsWidget || {
@@ -4789,9 +4858,9 @@ function initSchedule() {
   // Clear All button
   const clearBtn = document.getElementById('schedule-clear-btn');
   if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
+    clearBtn.addEventListener('click', async () => {
       if (scheduleItems.length === 0) return;
-      if (!confirm('Remove all items from the schedule?')) return;
+      if (!await showAppConfirm('Remove all items from the schedule?', { confirmLabel: 'Remove All' })) return;
       scheduleItems = [];
       renderSchedule();
       saveScheduleToSettings();
@@ -4818,9 +4887,9 @@ function initSchedule() {
   });
 
   // Opened via file association (double-click .litsch file or passed at launch)
-  ipcRenderer.on('schedule:open-file', (_e, data) => {
+  ipcRenderer.on('schedule:open-file', async (_e, data) => {
     if (!Array.isArray(data)) return;
-    if (!confirm('Load this schedule file? Your current schedule will be cleared.')) return;
+    if (!await showAppConfirm('Load this schedule file? Your current schedule will be cleared.', { confirmLabel: 'Load Schedule' })) return;
     scheduleItems = data;
     renderSchedule();
     saveScheduleToSettings();
@@ -4831,7 +4900,7 @@ function initSchedule() {
     if (!Array.isArray(data)) return;
     const songs = data.filter(s => s.title && s.lyrics && Array.isArray(s.lyrics));
     if (songs.length === 0) return;
-    if (!confirm(`Import ${songs.length} song${songs.length !== 1 ? 's' : ''} from this file? Duplicates will be skipped.`)) return;
+    if (!await showAppConfirm(`Import ${songs.length} song${songs.length !== 1 ? 's' : ''} from this file? Duplicates will be skipped.`, { confirmLabel: 'Import' })) return;
     let addedCount = 0;
     songs.forEach(song => {
       const exists = allSongs.some(s => s.title === song.title && s.author === song.author);
@@ -4968,7 +5037,7 @@ function renderSchedule() {
   scheduleItems.forEach((item, itemIndex) => {
     const itemDiv = document.createElement('div');
     itemDiv.className = 'schedule-item';
-    itemDiv.setAttribute('draggable', 'true');
+    itemDiv.setAttribute('draggable', 'false');
     itemDiv.setAttribute('data-schedule-index', itemIndex);
     
     // Drag handlers for reordering
@@ -4980,6 +5049,14 @@ function renderSchedule() {
     // Create header
     const header = document.createElement('div');
     header.className = 'schedule-item-header';
+    header.setAttribute('draggable', 'true');
+    header.title = 'Drag to reorder';
+
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'schedule-drag-handle';
+    dragHandle.setAttribute('aria-hidden', 'true');
+    dragHandle.innerHTML = '<i class="fa-solid fa-grip-vertical"></i>';
+    header.appendChild(dragHandle);
     
     const itemType = item.type || 'verses'; // Default to verses for backwards compatibility
     const itemLength = itemType === 'song' ? getSongVerseCount(item.songIndex) : 
@@ -5049,6 +5126,7 @@ function renderSchedule() {
     
     // Delete button
     const deleteBtn = document.createElement('div');
+    deleteBtn.className = 'schedule-delete-btn delete-btn';
     deleteBtn.innerHTML = '×';
     deleteBtn.style.cssText = 'width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; color: #999; margin-left: 4px;';
     deleteBtn.onmouseover = () => deleteBtn.style.color = '#fff';
@@ -5198,6 +5276,13 @@ function renderSchedule() {
   // Re-focus the previously focused item after render
   if (focusedScheduleItem) {
     setTimeout(() => {
+      const active = document.activeElement;
+      const focusIsStillInSchedule = active && active.closest && active.closest('#schedule-sidebar');
+      const canRestoreScheduleFocus = !active ||
+        active === document.body ||
+        active === document.documentElement ||
+        focusIsStillInSchedule;
+      if (!canRestoreScheduleFocus) return;
       if (focusedScheduleItem.type === 'header') {
         const headers = document.querySelectorAll('.schedule-item-header');
         if (headers[focusedScheduleItem.itemIndex]) {
@@ -5634,11 +5719,25 @@ async function loadSongViewMode() {
 
 let draggedScheduleIndex = null;
 
+function clearScheduleDropIndicators() {
+  document.querySelectorAll('.schedule-item').forEach(item => {
+    item.classList.remove('schedule-drop-before', 'schedule-drop-after');
+    delete item.dataset.scheduleDropPosition;
+  });
+}
+
 function handleScheduleItemDragStart(e) {
-  draggedScheduleIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'));
+  if (e.target.closest && e.target.closest('.expand-arrow, .schedule-delete-btn')) {
+    e.preventDefault();
+    return;
+  }
+
+  draggedScheduleIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'), 10);
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', 'schedule-reorder');
-  e.currentTarget.style.opacity = '0.5';
+  clearScheduleDropIndicators();
+  document.querySelectorAll('.schedule-item.dragging').forEach(item => item.classList.remove('dragging'));
+  e.currentTarget.classList.add('dragging');
 }
 
 function handleScheduleItemDragOver(e) {
@@ -5646,11 +5745,15 @@ function handleScheduleItemDragOver(e) {
   e.preventDefault();
   e.stopPropagation(); // Prevent outer list handler from overwriting dropEffect to 'copy'
   e.dataTransfer.dropEffect = 'move';
-  
-  const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'));
-  if (targetIndex !== draggedScheduleIndex) {
-    e.currentTarget.style.borderTop = '2px solid #0078d4';
-  }
+
+  const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'), 10);
+  clearScheduleDropIndicators();
+  if (targetIndex === draggedScheduleIndex) return;
+
+  const rect = e.currentTarget.getBoundingClientRect();
+  const dropPosition = e.clientY >= rect.top + (rect.height / 2) ? 'after' : 'before';
+  e.currentTarget.dataset.scheduleDropPosition = dropPosition;
+  e.currentTarget.classList.add(dropPosition === 'after' ? 'schedule-drop-after' : 'schedule-drop-before');
 }
 
 function handleScheduleItemDrop(e) {
@@ -5676,27 +5779,28 @@ function handleScheduleItemDrop(e) {
     return;
   }
 
-  const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'));
-  
-  if (targetIndex !== draggedScheduleIndex) {
-    // Reorder the items
-    const item = scheduleItems.splice(draggedScheduleIndex, 1)[0];
-    scheduleItems.splice(targetIndex, 0, item);
+  const sourceIndex = draggedScheduleIndex;
+  const targetIndex = parseInt(e.currentTarget.getAttribute('data-schedule-index'), 10);
+  const dropPosition = e.currentTarget.dataset.scheduleDropPosition ||
+    (e.clientY >= e.currentTarget.getBoundingClientRect().top + (e.currentTarget.getBoundingClientRect().height / 2) ? 'after' : 'before');
+
+  if (targetIndex !== sourceIndex) {
+    let insertionIndex = targetIndex + (dropPosition === 'after' ? 1 : 0);
+    if (sourceIndex < insertionIndex) insertionIndex -= 1;
+
+    const item = scheduleItems.splice(sourceIndex, 1)[0];
+    scheduleItems.splice(insertionIndex, 0, item);
     saveScheduleToSettings();
     renderSchedule();
   }
-  
-  e.currentTarget.style.borderTop = '';
+
+  clearScheduleDropIndicators();
 }
 
-function handleScheduleItemDragEnd(e) {
-  e.currentTarget.style.opacity = '';
+function handleScheduleItemDragEnd() {
   draggedScheduleIndex = null;
-  
-  // Clear all border highlights
-  document.querySelectorAll('.schedule-item').forEach(item => {
-    item.style.borderTop = '';
-  });
+  clearScheduleDropIndicators();
+  document.querySelectorAll('.schedule-item.dragging').forEach(item => item.classList.remove('dragging'));
 }
 
 // ========== RESIZABLE PANELS ==========
@@ -6867,7 +6971,7 @@ async function deleteSongs(songIndices) {
     ? `Are you sure you want to delete "${allSongs[songIndices[0]].title}"?`
     : `Are you sure you want to delete ${count} songs?`;
   
-  if (!confirm(message)) return;
+  if (!await showAppConfirm(message, { confirmLabel: 'Delete' })) return;
   
   // Sort indices in descending order to avoid index shifting issues
   const sortedIndices = songIndices.slice().sort((a, b) => b - a);
@@ -8355,7 +8459,7 @@ function showMediaContextMenu(x, y) {
     document.getElementById('media-context-delete').addEventListener('click', async () => {
       if (selectedMediaIndex !== null) {
         const media = allMedia[selectedMediaIndex];
-        if (confirm(`Delete "${media.name}"?`)) {
+        if (await showAppConfirm(`Delete "${media.name}"?`, { confirmLabel: 'Delete' })) {
           // Delete file (skip for virtual types like WEBSITE / COLOR that have no path)
           if (media.path) {
             try {
