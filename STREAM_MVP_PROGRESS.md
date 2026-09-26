@@ -80,3 +80,10 @@
 - The Electron application was launched with `npm --prefix stream start`; this turn did not complete a visual or camera/Worship in-app test.
 - The direct 10-second Facebook RTMPS test used synthetic color bars and silence. It verified service ingest but not the Stream UI or live Worship/camera pipeline.
 - Next Stream validation is an in-app Go Live test with Worship Program, camera, and audio sources.
+
+### Local in-app test preflight
+
+- The FFmpeg runtime probe found NVIDIA NVENC, Intel Quick Sync, AMD AMF, and software H.264 encoders.
+- The FFmpeg DirectShow device scan listed audio devices but could not enumerate a video capture device.
+- A five-second local mDNS scan returned no Liturgia Display advertisement.
+- The in-app Worship Program plus camera test could not be run in this environment. The Stream app has not sent another broadcast.
