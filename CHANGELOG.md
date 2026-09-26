@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.1.30 - 2026-09-26
+
+- feat: add Liturgia Stream with persistent scenes, saved destinations, device persistence, encoder detection, RTMPS output, and output health
+- feat: add a layered custom scene editor with per-source appearance controls, context actions, duplication, crop, pan, resize, and positioning
+- feat: render each Worship Program layer through an independent network receiver with transparent backgrounds and source-specific style overrides
+- fix: bring Browser Remote mobile and desktop controls, schedule navigation, selected song verses, scrolling, and live preview refresh into parity
+- fix: keep presentation shortcuts working after schedule interactions while allowing normal typing in Bible and song searches
+- fix: improve Worship Program capture, connected preview behavior, RTMPS rejection reporting, and closed-pipe handling
+
+## 6.1.29 - 2026-09-26
+
+- fix: preserve per-display safe area and schedule verse sync
+
 ## 6.1.28 - 2026-09-25
 
 - fix: keep left and right song verse navigation scrolled to the selected verse
