@@ -908,6 +908,9 @@ let blackMode = false;
 function isTextEntryElement(element) {
   return !!(element && (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT' || element.isContentEditable));
 }
+function isPresentationSearchInput(element) {
+  return !!(element && (element.id === 'search-autocomplete-input' || element.id === 'song-search-input'));
+}
 
 function showAppConfirm(message, { confirmLabel = 'OK', cancelLabel = 'Cancel' } = {}) {
   return new Promise(resolve => {
@@ -2285,8 +2288,10 @@ ipcRenderer.on('prepare-renderer-report', async () => {
     // Never let presentation keybinds consume a character intended for an
     // editable field.  This includes the Songs and Bible search boxes, which
     // otherwise can look focused but refuse to accept the bound key.
-    const isTextInput = isTextEntryElement(e.target) || isTextEntryElement(document.activeElement);
-    if (isTextInput) {
+    const activeTextElement = isTextEntryElement(e.target) ? e.target : document.activeElement;
+    const isTextInput = isTextEntryElement(activeTextElement);
+    const allowPresentationShortcuts = isPresentationSearchInput(activeTextElement);
+    if (isTextInput && !allowPresentationShortcuts) {
       if (matchesKeybind(keybinds['focus-search'], e)) {
         e.preventDefault();
         const searchEl = currentTab === 'songs'
@@ -2296,6 +2301,10 @@ ipcRenderer.on('prepare-renderer-report', async () => {
       }
       return;
     }
+
+    // Search fields may own keys such as ArrowLeft, ArrowRight, or Enter.
+    // If they already handled the event, do not run a second presentation action.
+    if (e.defaultPrevented) return;
 
     // Check for go-live keybind when not entering text.
     if (matchesKeybind(keybinds['go-live'], e)) {
@@ -2337,8 +2346,8 @@ ipcRenderer.on('prepare-renderer-report', async () => {
       return;
     }
     
-    // Ignore if focus is on other schedule items (they have their own handlers)
-    if (active && (active.closest('.schedule-item-header') || (active.closest('.schedule-verse-item') && !isSongScheduleVerse))) return;
+    // Schedule items can keep keyboard focus after click or double-click, but
+    // that must not disable global presentation shortcuts such as Clear or Black.
     
     // Check keybinds in songs tab
     if (isInSongsTab && isSongDisplayOpen) {
@@ -6691,15 +6700,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (songSearchInput) {
     songSearchInput.addEventListener('input', applyFiltersAndRender);
     // A queued list-focus operation can otherwise win immediately after the
-    // user clicks this input. Reassert it on the next frame, and keep keyboard
-    // events inside the search field instead of bubbling to presentation
-    // keybinds.
+    // user clicks this input. Reassert it on the next frame.
     songSearchInput.addEventListener('pointerdown', () => {
       requestAnimationFrame(() => {
         if (songSearchInput.isConnected && !songSearchInput.disabled) songSearchInput.focus();
       });
     });
-    songSearchInput.addEventListener('keydown', (event) => event.stopPropagation());
+    // Key events intentionally bubble so configured presentation shortcuts work
+    // while typing in the Songs search box.
   }
   const hymnalSelect = document.getElementById('song-hymnal-filter');
   if (hymnalSelect) {

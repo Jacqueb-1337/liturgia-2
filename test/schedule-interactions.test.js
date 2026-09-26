@@ -48,4 +48,10 @@ describe('schedule and song interaction safeguards', () => {
     expect(renderer).toContain('updateSearchBoxForVerse(clickedVerseIndex);');
     expect(renderer).toContain('updateSearchBoxForVerse(item.indices[0]);');
   });
+  test('schedule focus does not block global presentation shortcuts', () => {
+    const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+
+    expect(renderer).not.toContain("if (active && (active.closest('.schedule-item-header') || (active.closest('.schedule-verse-item') && !isSongScheduleVerse))) return;");
+    expect(renderer).toContain('must not disable global presentation shortcuts such as Clear or Black');
+  });
 });

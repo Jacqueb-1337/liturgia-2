@@ -241,9 +241,8 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
 
   // Also handle navigation and enter
   input.addEventListener('keydown', (e) => {
-    // Global presentation hotkeys live on window. Let the search own its keys
-    // so a configured shortcut cannot make a focused field appear frozen.
-    e.stopPropagation();
+    // Let configured presentation shortcuts bubble to the global handler.
+    // Arrow navigation and Enter remain owned here and mark the event handled.
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
       if (onNavigate) onNavigate('prev');

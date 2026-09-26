@@ -7,10 +7,12 @@ describe('desktop search focus safety', () => {
   const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const styleCss = fs.readFileSync(path.join(__dirname, '..', 'style.css'), 'utf8');
 
-  test('global presentation shortcuts do not consume keys from editable fields', () => {
+  test('editable fields block presentation shortcuts except the Songs and Bible searches', () => {
     expect(renderer).toContain('function isTextEntryElement(element)');
-    expect(renderer).toContain('const isTextInput = isTextEntryElement(e.target) || isTextEntryElement(document.activeElement);');
-    expect(renderer).toContain('if (isTextInput) {');
+    expect(renderer).toContain('function isPresentationSearchInput(element)');
+    expect(renderer).toContain("element.id === 'search-autocomplete-input'");
+    expect(renderer).toContain("element.id === 'song-search-input'");
+    expect(renderer).toContain('if (isTextInput && !allowPresentationShortcuts) {');
   });
 
   test('Bible search keeps focus while its arrow navigation changes the selected verse', () => {
@@ -18,9 +20,10 @@ describe('desktop search focus safety', () => {
     expect(renderer).toContain('if (!preserveTextFocus) {');
   });
 
-  test('both search inputs stop key events from bubbling into presentation controls', () => {
-    expect(renderer).toContain("songSearchInput.addEventListener('keydown', (event) => event.stopPropagation());");
-    expect(searchBox).toContain('e.stopPropagation();');
+  test('both search inputs let configured presentation shortcuts reach the global handler', () => {
+    expect(renderer).not.toContain("songSearchInput.addEventListener('keydown', (event) => event.stopPropagation());");
+    expect(searchBox).toContain('Let configured presentation shortcuts bubble to the global handler.');
+    expect(renderer).toContain('if (e.defaultPrevented) return;');
     expect(searchBox).toContain("input.addEventListener('pointerdown'");
   });
 
