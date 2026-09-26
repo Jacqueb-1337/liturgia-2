@@ -58,4 +58,18 @@ describe('browser remote parity safeguards', () => {
     expect(css).toContain('.mobile-canvas-dock');
     expect(css).toContain('.mobile-canvas-thumb.expanded');
   });
+
+  test('keeps mobile live controls visible and refreshes canvas snapshots promptly', () => {
+    const browser = fs.readFileSync(path.join(root, 'remote-browser.html'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'remote-desktop.css'), 'utf8');
+    const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+
+    expect(browser).toContain('class="mobile-quick-controls"');
+    expect(browser).toContain('data-command="CLEAR_LIVE"');
+    expect(browser).toContain('data-command="BLACK_SCREEN"');
+    expect(css).toContain('.mobile-quick-controls');
+    expect(css).toContain('#remote-app > main { padding-bottom: 86px; }');
+    expect(renderer).toContain('function scheduleBrowserRemoteCanvasRefresh(delay = 250)');
+    expect(renderer).toContain('This path bypasses the normal desktop song-live handler.');
+  });
 });

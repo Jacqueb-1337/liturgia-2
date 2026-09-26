@@ -782,10 +782,26 @@ function buildBrowserRemoteState() {
   return state;
 }
 
+let remoteCanvasRefreshTimer = null;
+function scheduleBrowserRemoteCanvasRefresh(delay = 250) {
+  if (remoteCanvasRefreshTimer) clearTimeout(remoteCanvasRefreshTimer);
+  remoteCanvasRefreshTimer = setTimeout(async () => {
+    remoteCanvasRefreshTimer = null;
+    try {
+      const refreshedState = buildBrowserRemoteState();
+      lastRelayState = refreshedState;
+      await ipcRenderer.invoke('relay-push-state', refreshedState);
+    } catch (error) {
+      console.warn('[remote] Failed to refresh canvas snapshots:', error);
+    }
+  }, delay);
+}
+
 async function pushBrowserRemoteState() {
   const state = buildBrowserRemoteState();
   lastRelayState = state;
   await ipcRenderer.invoke('relay-push-state', state);
+  scheduleBrowserRemoteCanvasRefresh();
 }
 
 // The LAN Browser Remote uses compact snapshots of the actual desktop canvases
@@ -1669,6 +1685,7 @@ function restoreLivePresentationAfterClear() {
 }
 
 function toggleClear() {
+  scheduleBrowserRemoteCanvasRefresh();
   if (_websiteIsLive) {
     if (clearMode) {
       // Un-clear while website is source: restore mirror
@@ -3846,6 +3863,7 @@ async function updateLive(verseOrIndices) {
     state.remoteCanvases = getRemoteCanvasSnapshots();
     lastRelayState = state;
     await ipcRenderer.invoke('relay-push-state', state);
+    scheduleBrowserRemoteCanvasRefresh();
   } catch (err) {
     console.error('[relay] Failed to push state:', err);
   }
@@ -4781,6 +4799,7 @@ async function saveLastSelectionToSettings() {
 }
 
 function toggleBlack() {
+  scheduleBrowserRemoteCanvasRefresh();
   if (_websiteIsLive) {
     if (blackMode) {
       // Un-black while website is source: restore mirror
@@ -6498,6 +6517,7 @@ async function updateLiveFromSongVerse(verseIndex) {
         state.remoteCanvases = getRemoteCanvasSnapshots();
         lastRelayState = state;
         await ipcRenderer.invoke('relay-push-state', state);
+        scheduleBrowserRemoteCanvasRefresh();
       }
     }
   } catch (err) {
@@ -11464,6 +11484,9 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           if (!liveMode) {
             toggleLive(true);
           }
+          // This path bypasses the normal desktop song-live handler.
+          // Push immediately so Browser Remote does not wait for another event.
+          await pushBrowserRemoteState();
         } else {
           console.warn('[remote] DISPLAY_SONG_VERSE missing songIndex or verseIndex:', data);
         }

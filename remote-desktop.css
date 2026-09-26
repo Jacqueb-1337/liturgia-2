@@ -374,7 +374,7 @@ main {
 }
 
 @media (min-width: 920px) {
-  .mobile-more-button, .mobile-overflow, .mobile-reference, .mobile-verse-results, .mobile-canvas-dock { display: none !important; }
+  .mobile-more-button, .mobile-overflow, .mobile-reference, .mobile-verse-results, .mobile-canvas-dock, .mobile-quick-controls { display: none !important; }
 }
 
 /* A narrow display is a compact continuation of the desktop workspace, not a
@@ -400,6 +400,9 @@ main {
   .nav button.active, .nav button:hover { color: #0078d4; background: transparent; border-bottom-color: #0078d4; }
   .nav button[data-page="bible"], .nav button[data-page="settings"], .nav button[data-page="accounts"] { display: none; }
   .mobile-more-button { display: block; margin-left: auto !important; }
+  .mobile-quick-controls { position: sticky; top: 82px; z-index: 39; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 6px 8px; background: #fafafa; border-bottom: 1px solid #ccc; }
+  .mobile-quick-controls .button { min-height: 36px; padding: 6px 8px; font-size: .84rem; }
+  #remote-app > main { padding-bottom: 86px; }
 
   .desktop-stage { display: block; height: auto; background: #f3f3f3; }
   .desktop-stage > .schedule-pane, .desktop-splitter, .preview-pane { display: none; }
