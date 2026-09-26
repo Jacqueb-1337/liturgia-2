@@ -77,6 +77,35 @@ describe('Liturgia Stream output manager', () => {
     await manager.stop();
   });
 
+  test('drops closed-pipe chunks and hides stream credentials in reconnect errors', async () => {
+    const child = makeChild();
+    const manager = new StreamOutputManager({
+      spawnProcess: () => child,
+      setTimeout: () => 1,
+      clearTimeout: jest.fn()
+    });
+    const states = [];
+    manager.on('status', (status) => states.push(status));
+    await manager.start(createConfig());
+    child.emit('spawn');
+    child.stdin.write.mockImplementation((_buffer, callback) => {
+      callback(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    });
+    expect(await manager.writeChunk(Buffer.from('frame'))).toBe(false);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      child.stderr.emit('data', Buffer.from('Error opening output rtmps://example.test/live/key: I/O error\\n'));
+      child.emit('close', 1);
+      expect(states.at(-1).state).toBe('reconnecting');
+      expect(states.at(-1).error).toContain('[stream destination]');
+      expect(states.at(-1).error).not.toContain('/live/key');
+      expect(await manager.writeChunk(Buffer.from('late-frame'))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      await manager.stop();
+    }
+  });
+
   test('falls back to software when a hardware encoder cannot initialize', async () => {
     const child = makeChild();
     let retryCallback;

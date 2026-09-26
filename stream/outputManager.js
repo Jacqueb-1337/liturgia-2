@@ -87,8 +87,9 @@ class StreamOutputManager extends EventEmitter {
     });
     child.stderr?.on('data', (chunk) => {
       const text = String(chunk);
-      if (/error|failed|cannot load|no capable devices/i.test(text)) {
+      if (/error|failed|invalid|cannot load|no capable devices/i.test(text)) {
         this.lastError = (this.lastError + text).slice(-4000);
+        console.warn('[stream-encoder]', text.replace(/rtmps?:\/\/\S+/gi, '[stream destination]').trim().slice(-1000));
       }
       this.handleProgress(chunk);
     });
@@ -119,13 +120,18 @@ class StreamOutputManager extends EventEmitter {
   }
 
   writeChunk(data) {
+    if (this.state === 'reconnecting' || this.state === 'stopping' || this.state === 'stopped') return Promise.resolve(false);
     const child = this.child;
     if (!child || !child.stdin || child.stdin.destroyed || !child.stdin.writable) {
       return Promise.reject(new Error('The stream encoder is reconnecting.'));
     }
     const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
     return new Promise((resolve, reject) => {
-      child.stdin.write(buffer, (error) => error ? reject(error) : resolve());
+      child.stdin.write(buffer, (error) => {
+        if (error?.code === 'EPIPE' || error?.code === 'ERR_STREAM_DESTROYED') return resolve(false);
+        if (error) return reject(error);
+        resolve(true);
+      });
     });
   }
 
@@ -148,7 +154,7 @@ class StreamOutputManager extends EventEmitter {
     this.publish('reconnecting', {
       message: 'Connection lost. Reconnecting…',
       retryInMs: delayMs,
-      error: this.lastError || null
+      error: this.lastError ? this.lastError.replace(/rtmps?:\/\/\S+/gi, '[stream destination]').slice(-600) : null
     });
     this.retryTimer = this.setTimeoutImpl(() => {
       this.retryTimer = null;
