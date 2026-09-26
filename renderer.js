@@ -1637,7 +1637,12 @@ function renderAndSendClearPresentation() {
   // Preserve the full styled presentation in the live window. Clear is derived
   // there as a temporary output mode so un-clearing cannot restore stripped styles.
   if (window.currentContent) {
-    ipcRenderer.send('update-live-window', { ...window.currentContent, _outputMode: 'clear' });
+    const type = window.currentContent.type === 'song' ? 'song' : 'verse';
+    ipcRenderer.send('update-live-window', {
+      ...window.currentContent,
+      _displayStyleOverrides: getPerDisplayStyleOverrides(type) || undefined,
+      _outputMode: 'clear'
+    });
   }
   ipcRenderer.send('set-live-mode', 'clear');
 }
@@ -1650,7 +1655,12 @@ function restoreLivePresentationAfterClear() {
     }
     // Clear replaces the live-window payload, so restore the real content
     // before returning the output to normal mode.
-    ipcRenderer.send('update-live-window', { ...window.currentContent, _outputMode: 'normal' });
+    const type = window.currentContent.type === 'song' ? 'song' : 'verse';
+    ipcRenderer.send('update-live-window', {
+      ...window.currentContent,
+      _displayStyleOverrides: getPerDisplayStyleOverrides(type) || undefined,
+      _outputMode: 'normal'
+    });
   }
   ipcRenderer.send('set-live-mode', 'normal');
 }
@@ -5438,12 +5448,14 @@ function handleScheduleItemClick(itemIndex, event) {
       // Switch to Bible tab and focus the verse(s) in the list
       switchTab('verses');
       selectedIndices = item.indices.slice();
+      if (item.indices.length > 0) anchorIndex = item.indices[0];
       // Scroll the verse list so the first verse is visible
       const verseListContainer = document.getElementById('verse-list');
       if (verseListContainer && item.indices.length > 0) {
         verseListContainer.scrollTop = Math.max(0, item.indices[0] * ITEM_HEIGHT - 80);
         // Re-render the virtual list at the new scroll position
         renderWindow(allVerses, verseListContainer.scrollTop, selectedIndices, handleVerseClick);
+        updateSearchBoxForVerse(item.indices[0]);
       }
       updateVerseDisplay();
     }
@@ -5532,6 +5544,16 @@ function handleScheduleVerseClick(itemIndex, verseIndexInGroup, event) {
   switchTab('verses');
   const selectedVerseIndices = item.selectedVerses.map(i => item.indices[i]);
   selectedIndices = selectedVerseIndices;
+  const clickedVerseIndex = item.indices[verseIndexInGroup];
+  if (Number.isInteger(clickedVerseIndex)) {
+    anchorIndex = clickedVerseIndex;
+    const verseListContainer = document.getElementById('verse-list');
+    if (verseListContainer) {
+      verseListContainer.scrollTop = Math.max(0, clickedVerseIndex * ITEM_HEIGHT - 80);
+      renderWindow(allVerses, verseListContainer.scrollTop, selectedIndices, handleVerseClick);
+    }
+    updateSearchBoxForVerse(clickedVerseIndex);
+  }
   
   // Display the selected verses in the Bible tab
   if (selectedVerseIndices.length > 0) {
