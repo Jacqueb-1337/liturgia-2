@@ -47,7 +47,8 @@ function normalizeService(service) {
     address,
     port: service.port,
     version: String((service.txt && service.txt.version) || ''),
-    url: `http://${address}:${service.port}/`
+    url: `http://${address}:${service.port}/`,
+    programStreamUrl: displayId === '0' ? `ws://${address}:${service.port}/program-stream` : null
   };
 }
 

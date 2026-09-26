@@ -4,6 +4,12 @@ const instanceList = document.getElementById('instance-list');
 const worshipStatus = document.getElementById('worship-status');
 const headerStatus = document.querySelector('.header-status');
 const preview = document.getElementById('program-preview');
+const previewContext = preview.getContext('2d');
+let programSocket = null;
+let selectedInstanceKey = '';
+let programFrame = null;
+let pendingProgramFrame = null;
+let decodingProgramFrame = false;
 const previewEmpty = document.getElementById('preview-empty');
 const previewState = document.getElementById('preview-state');
 const sceneCameraPreview = document.getElementById('scene-camera-preview');
@@ -36,12 +42,10 @@ function currentScene() {
 function applyScene() {
   const scene = currentScene();
   if (!scene) return;
-  const hasProgram = scene.programVisible && !!preview.src;
+  const hasProgram = scene.programVisible && !!programFrame;
   const hasCamera = scene.cameraVisible && !!cameraStream;
-  preview.hidden = !hasProgram;
-  sceneCameraPreview.hidden = !hasCamera;
-  sceneCameraPreview.classList.toggle('camera-pip', !!(hasCamera && scene.programVisible));
-  sceneCameraPreview.classList.toggle('camera-full', !!(hasCamera && !scene.programVisible));
+  preview.hidden = !hasProgram && !hasCamera;
+  sceneCameraPreview.hidden = true;
   previewEmpty.hidden = hasProgram || hasCamera;
   previewState.textContent = scene.name;
   if (!hasProgram && !hasCamera) {
@@ -50,6 +54,81 @@ function applyScene() {
       ? 'Worship’s Program output will appear here when it’s found on your network.'
       : 'Choose a camera on the Video Devices tab to preview this scene.';
   }
+}
+
+function drawContain(source, x, y, width, height) {
+  const sourceWidth = source.videoWidth || source.width;
+  const sourceHeight = source.videoHeight || source.height;
+  if (!sourceWidth || !sourceHeight) return;
+  const scale = Math.min(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  previewContext.drawImage(source, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function drawCover(source, x, y, width, height) {
+  const sourceWidth = source.videoWidth || source.width;
+  const sourceHeight = source.videoHeight || source.height;
+  if (!sourceWidth || !sourceHeight) return;
+  const scale = Math.max(width / sourceWidth, height / sourceHeight);
+  const cropWidth = width / scale;
+  const cropHeight = height / scale;
+  const cropX = (sourceWidth - cropWidth) / 2;
+  const cropY = (sourceHeight - cropHeight) / 2;
+  previewContext.drawImage(source, cropX, cropY, cropWidth, cropHeight, x, y, width, height);
+}
+
+function drawPreview() {
+  const scene = currentScene();
+  previewContext.fillStyle = '#000';
+  previewContext.fillRect(0, 0, preview.width, preview.height);
+  if (scene) {
+    const programActive = scene.programVisible && programFrame;
+    const cameraActive = scene.cameraVisible && cameraStream && sceneCameraPreview.readyState >= 2;
+    if (programActive) drawContain(programFrame, 0, 0, preview.width, preview.height);
+    else if (cameraActive) drawCover(sceneCameraPreview, 0, 0, preview.width, preview.height);
+    if (programActive && cameraActive) {
+      const width = Math.round(preview.width * 0.32);
+      const height = Math.round(width * 9 / 16);
+      const x = preview.width - width - Math.round(preview.width * 0.05);
+      const y = Math.round(preview.height * 0.05);
+      previewContext.save();
+      previewContext.shadowColor = 'rgba(0,0,0,.55)';
+      previewContext.shadowBlur = 24;
+      previewContext.fillStyle = '#fff';
+      previewContext.fillRect(x - 4, y - 4, width + 8, height + 8);
+      previewContext.restore();
+      drawCover(sceneCameraPreview, x, y, width, height);
+    }
+  }
+  requestAnimationFrame(drawPreview);
+}
+
+function acceptProgramFrame(blob) {
+  pendingProgramFrame = { blob, instanceKey: selectedInstanceKey };
+  if (decodingProgramFrame) return;
+  decodingProgramFrame = true;
+  const decodeLatest = async () => {
+    while (pendingProgramFrame) {
+      const pending = pendingProgramFrame;
+      pendingProgramFrame = null;
+      try {
+        const nextFrame = await createImageBitmap(pending.blob);
+        if (pending.instanceKey !== selectedInstanceKey) {
+          nextFrame.close();
+          continue;
+        }
+        const previousFrame = programFrame;
+        programFrame = nextFrame;
+        if (previousFrame) previousFrame.close();
+        applyScene();
+      } catch (error) {
+        console.warn('Could not decode a Worship Program frame:', error);
+      }
+    }
+    decodingProgramFrame = false;
+  };
+  void decodeLatest();
 }
 
 function renderScenes() {
@@ -94,15 +173,54 @@ async function selectScene(sceneId) {
 function connectToInstance(key) {
   const instance = instancesByKey.get(key);
   if (!instance) return;
-  preview.src = instance.url;
+  selectedInstanceKey = key;
+  if (programSocket) programSocket.close();
+  if (programFrame) programFrame.close();
+  programFrame = null;
   applyScene();
+  if (!instance.programStreamUrl) return;
+
+  const socket = new WebSocket(instance.programStreamUrl);
+  socket.binaryType = 'blob';
+  programSocket = socket;
+  socket.onmessage = (event) => {
+    if (programSocket !== socket) return;
+    if (event.data instanceof Blob) acceptProgramFrame(event.data);
+    else if (event.data instanceof ArrayBuffer) acceptProgramFrame(new Blob([event.data], { type: 'image/jpeg' }));
+  };
+  socket.onopen = () => {
+    if (programSocket === socket) worshipStatus.textContent = 'Liturgia Program connected';
+  };
+  socket.onerror = () => {
+    if (programSocket === socket) worshipStatus.textContent = 'Connecting to Liturgia Program';
+  };
+  socket.onclose = () => {
+    if (programSocket !== socket || selectedInstanceKey !== key) return;
+    programSocket = null;
+    worshipStatus.textContent = 'Reconnecting to Liturgia Program…';
+    window.setTimeout(() => {
+      if (selectedInstanceKey === key && instancesByKey.has(key)) connectToInstance(key);
+    }, 1500);
+  };
 }
 
 function renderInstances(items) {
   instancesByKey.clear();
   for (const item of items) instancesByKey.set(item.key, item);
-  const current = preview.src;
+  const current = selectedInstanceKey;
   const list = [...instancesByKey.values()];
+  if (selectedInstanceKey && !instancesByKey.has(selectedInstanceKey)) {
+    selectedInstanceKey = '';
+    if (programSocket) programSocket.close();
+    programSocket = null;
+    if (programFrame) programFrame.close();
+    programFrame = null;
+    applyScene();
+  }
+  if (!selectedInstanceKey) {
+    const program = list.find((instance) => instance.displayId === '0' && instance.programStreamUrl);
+    if (program) connectToInstance(program.key);
+  }
 
   headerStatus.classList.toggle('connected', list.length > 0);
   worshipStatus.textContent = list.length
@@ -127,7 +245,7 @@ function renderInstances(items) {
     meta.textContent = `Output ${outputName} · ${instance.address} · Liturgia ${instance.version || 'Worship'}`;
     const button = document.createElement('button');
     button.className = 'button secondary';
-    button.textContent = current === instance.url ? 'Connected' : 'Connect';
+    button.textContent = current === instance.key ? 'Connected' : 'Connect';
     button.addEventListener('click', () => connectToInstance(instance.key));
     row.append(title, meta, button);
     instanceList.append(row);
@@ -333,7 +451,10 @@ window.addEventListener('beforeunload', () => {
   cameraStream?.getTracks().forEach((track) => track.stop());
   audioStream?.getTracks().forEach((track) => track.stop());
   if (audioContext) audioContext.close();
+  if (programSocket) programSocket.close();
+  if (programFrame) programFrame.close();
 });
+requestAnimationFrame(drawPreview);
 refreshVideoDevices();
 refreshAudioDevices();
 loadStreamConfig();

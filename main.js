@@ -46,6 +46,7 @@ const crypto = require('crypto');
 const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib/offlineLicenseCache');
 const RemoteServer = require('./remote-server');
 const { ensureProgramFirewall } = require('./lib/streamFirewall');
+const { createProgramFramePublisher } = require('./lib/programFramePublisher');
 const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -3949,9 +3950,17 @@ function broadcastToAllNetDisplays(obj) {
 function startDisplayNetServer(displayId, port) {
   if (displayNetServers.has(displayId)) stopDisplayNetServer(displayId);
 
-  const ns = { server: null, clients: new Set(), port, lastPayload: null, lastMode: 'normal', lastError: null, allowedMediaPaths: new Map() };
+  const ns = { server: null, clients: new Set(), programClients: new Set(), framePublisher: null, port, lastPayload: null, lastMode: 'normal', lastError: null, allowedMediaPaths: new Map() };
   displayNetServers.set(displayId, ns);
 
+  if (displayId === 0) {
+    ns.framePublisher = createProgramFramePublisher({
+      getWindow: () => liveWindows.get(0),
+      getClients: () => ns.programClients,
+      encodeFrame: (jpeg) => encodeWsFrame(jpeg, 0x2),
+      onError: (error) => console.warn('[program-frame]', error.message)
+    });
+  }
   const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
   const obsRoot = path.join(__dirname, 'obs');
 
@@ -4065,8 +4074,9 @@ function startDisplayNetServer(displayId, port) {
   });
 
   server.on('upgrade', (req, socket, _head) => {
-    // Only accept WebSocket upgrades on the root path
-    if (req.url !== '/' && req.url !== '') { socket.destroy(); return; }
+    // Keep the Program frame stream separate from the existing state receiver.
+    const programStream = displayId === 0 && req.url === '/program-stream';
+    if (!programStream && req.url !== '/' && req.url !== '') { socket.destroy(); return; }
 
     const wsKey = req.headers['sec-websocket-key'];
     if (!wsKey) { socket.destroy(); return; }
@@ -4085,10 +4095,15 @@ function startDisplayNetServer(displayId, port) {
     ].join('\r\n'));
 
     socket.setKeepAlive(true, 30000);
-    ns.clients.add(socket);
+    if (programStream) {
+      ns.programClients.add(socket);
+      ns.framePublisher.start();
+    } else {
+      ns.clients.add(socket);
+    }
 
     // Immediately sync new client to current state
-    if (ns.lastPayload) {
+    if (!programStream && ns.lastPayload) {
       try {
         socket.write(encodeWsFrame(JSON.stringify({
           type: 'sync', payload: ns.lastPayload, mode: ns.lastMode
@@ -4096,10 +4111,15 @@ function startDisplayNetServer(displayId, port) {
       } catch (_) {}
     }
 
-    socket.on('close', () => ns.clients.delete(socket));
+    const removeClient = () => {
+      ns.clients.delete(socket);
+      ns.programClients.delete(socket);
+      if (!ns.programClients.size && ns.framePublisher) ns.framePublisher.stop();
+    };
+    socket.on('close', removeClient);
     socket.on('error', () => {
       try { socket.destroy(); } catch (_) {}
-      ns.clients.delete(socket);
+      removeClient();
     });
     socket.on('data', (buf) => handleWsInbound(socket, buf));
   });
@@ -4153,10 +4173,12 @@ function stopDisplayNetServer(displayId) {
       displayNetBonjour = null;
     }
   }
-  for (const socket of [...ns.clients]) {
+  if (ns.framePublisher) ns.framePublisher.stop();
+  for (const socket of new Set([...ns.clients, ...ns.programClients])) {
     try { socket.write(Buffer.from([0x88, 0x02, 0x03, 0xe8])); socket.destroy(); } catch (_) {}
   }
   ns.clients.clear();
+  ns.programClients.clear();
   if (ns.server) {
     try { ns.server.close(); } catch (_) {}
     try { if (ns.server.closeAllConnections) ns.server.closeAllConnections(); } catch (_) {}

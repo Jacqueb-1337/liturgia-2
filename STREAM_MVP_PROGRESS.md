@@ -41,3 +41,7 @@
 - Added FFmpeg runtime discovery with NVENC, Quick Sync, AMD AMF, and libx264 preference order; the normal setting stays Automatic.
 - Added tested RTMP/RTMPS URL validation and baseline H.264/AAC CBR output argument construction. This is still not connected to the compositor or Go Live control.
 - Camera and microphone IDs now persist in the local settings file alongside scenes and output settings. Stream keys remain DPAPI-protected by Electron safeStorage.
+### Program frame preview
+
+- Added an on-demand Program frame WebSocket from Worship's fullscreen Program window. Stream discovers and connects to Program automatically, then combines the Program feed and selected camera in a 1920x1080 canvas preview.
+- This first capture path uses Electron webContents.capturePage at up to 30 FPS and JPEG quality 82, with backpressure limits. It needs a real two-computer performance check before it can be treated as production-ready; direct shared-GPU frame transfer remains future work.
