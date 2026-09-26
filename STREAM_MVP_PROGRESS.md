@@ -66,3 +66,9 @@
 - Confirmed the Facebook ingest host accepts TCP connections on port 443 from the development computer.
 - Ran the real FFmpeg output manager locally with a generated video/audio sample. It produced a valid 4-second FLV containing H.264 video at 640x360 and AAC audio at 48 kHz. Temporary media files were removed.
 - No stream key was saved, and no video was sent to Facebook. A short ingest test is still needed to verify credentials and RTMPS publishing.
+
+### Facebook RTMPS ingest test
+
+- Sent a 10-second synthetic color-bar and silence test to the supplied Facebook RTMPS ingest endpoint using FFmpeg H.264/AAC output at 1080p30, 6,000 Kbps video, and 160 Kbps audio. FFmpeg sent 300 frames and exited with code 0.
+- The stream key was entered through a masked Windows prompt, was not saved, and was not added to the repository. Temporary test helper files were removed.
+- This verifies RTMPS ingest with FFmpeg and the target credentials. It does not verify Liturgia Stream?s Electron UI, camera, Worship capture, or Facebook?s viewer-facing broadcast state. Those still need an end-to-end test.
