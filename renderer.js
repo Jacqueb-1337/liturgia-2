@@ -6298,6 +6298,19 @@ function displaySelectedSong() {
   });
 }
 
+function scrollSelectedSongVerseIntoView() {
+  const songDisplay = document.getElementById('song-display');
+  if (!songDisplay || selectedSongVerseIndex === null) return;
+
+  const selectedVerse = songDisplay.querySelector(`[data-verse-index="${selectedSongVerseIndex}"]`);
+  if (!selectedVerse) return;
+
+  selectedVerse.scrollIntoView({
+    block: 'nearest',
+    inline: 'nearest'
+  });
+}
+
 function handleSongVerseClick(verseIndex) {
   selectedSongVerseIndex = verseIndex;
   displaySelectedSong();
@@ -6479,6 +6492,7 @@ function selectNextSongVerse() {
   }
   
   displaySelectedSong();
+  requestAnimationFrame(scrollSelectedSongVerseIntoView);
   updatePreviewFromSongVerse(selectedSongVerseIndex);
   
   // Blur any focused element to ensure global keyboard handler works properly
@@ -6499,6 +6513,7 @@ function selectPrevSongVerse() {
   }
   
   displaySelectedSong();
+  requestAnimationFrame(scrollSelectedSongVerseIntoView);
   updatePreviewFromSongVerse(selectedSongVerseIndex);
   
   // Blur any focused element to ensure global keyboard handler works properly
@@ -6541,16 +6556,18 @@ function selectSongVerseByNumber(verseNum) {
   
   // Find verse sections (sections labeled as "Verse")
   const verseSections = [];
-  song.lyrics.forEach((section, idx) => {
+  let flattenedIndex = 0;
+  song.lyrics.forEach((section) => {
     if (section.section.toLowerCase().includes('verse')) {
-      verseSections.push(idx);
+      verseSections.push(flattenedIndex);
     }
+    flattenedIndex += section.text.split(/\n\n+/).length;
   });
   
   if (verseNum >= 1 && verseNum <= verseSections.length) {
-    const sectionIdx = verseSections[verseNum - 1];
-    selectedSongVerseIndex = sectionIdx;
+    selectedSongVerseIndex = verseSections[verseNum - 1];
     displaySelectedSong();
+    requestAnimationFrame(scrollSelectedSongVerseIntoView);
     updatePreviewFromSongVerse(selectedSongVerseIndex);
   }
 }
@@ -6565,16 +6582,18 @@ function selectSongChorusByNumber(chorusNum) {
   
   // Find chorus sections
   const chorusSections = [];
-  song.lyrics.forEach((section, idx) => {
+  let flattenedIndex = 0;
+  song.lyrics.forEach((section) => {
     if (section.section.toLowerCase().includes('chorus')) {
-      chorusSections.push(idx);
+      chorusSections.push(flattenedIndex);
     }
+    flattenedIndex += section.text.split(/\n\n+/).length;
   });
   
   if (chorusNum >= 1 && chorusNum <= chorusSections.length) {
-    const sectionIdx = chorusSections[chorusNum - 1];
-    selectedSongVerseIndex = sectionIdx;
+    selectedSongVerseIndex = chorusSections[chorusNum - 1];
     displaySelectedSong();
+    requestAnimationFrame(scrollSelectedSongVerseIntoView);
     updatePreviewFromSongVerse(selectedSongVerseIndex);
   }
 }

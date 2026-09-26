@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.28 - 2026-09-25
+
+- fix: keep left and right song verse navigation scrolled to the selected verse
+- fix: make Alt+number verse and chorus shortcuts target the correct flattened lyric position
+- test: cover song keyboard navigation scrolling and numbered shortcut mapping
+
 ## 6.1.27 - 2026-09-25
 
 - fix: keep text inputs focusable after schedule confirmations and rerenders

@@ -3,7 +3,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 
-describe('schedule interaction safeguards', () => {
+describe('schedule and song interaction safeguards', () => {
   test('uses the app confirmation dialog instead of native confirm for schedule actions', () => {
     const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
 
@@ -26,5 +26,16 @@ describe('schedule interaction safeguards', () => {
     expect(css).toContain('.schedule-drag-handle');
     expect(css).toContain('.schedule-item.schedule-drop-before::before');
     expect(css).toContain('.schedule-item.schedule-drop-after::after');
+  });
+
+  test('keeps keyboard song navigation visible and maps numbered sections to flattened verse indices', () => {
+    const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+
+    expect(renderer).toContain('function scrollSelectedSongVerseIntoView()');
+    expect(renderer).toContain("selectedVerse.scrollIntoView({");
+    expect(renderer).toContain('requestAnimationFrame(scrollSelectedSongVerseIntoView);');
+    expect(renderer).toContain('verseSections.push(flattenedIndex);');
+    expect(renderer).toContain('chorusSections.push(flattenedIndex);');
+    expect(renderer).toContain("flattenedIndex += section.text.split(/\\n\\n+/).length;");
   });
 });
