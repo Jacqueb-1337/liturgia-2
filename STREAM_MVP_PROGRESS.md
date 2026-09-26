@@ -60,3 +60,9 @@
 ### Live health display
 
 - Added a persistent elapsed-time counter during LIVE and made resolution, encoder FPS, upload bitrate, and dropped-frame count visible under stream status. The counter resets on End Stream and continues through reconnects.
+
+### RTMPS readiness check
+
+- Confirmed the Facebook ingest host accepts TCP connections on port 443 from the development computer.
+- Ran the real FFmpeg output manager locally with a generated video/audio sample. It produced a valid 4-second FLV containing H.264 video at 640x360 and AAC audio at 48 kHz. Temporary media files were removed.
+- No stream key was saved, and no video was sent to Facebook. A short ingest test is still needed to verify credentials and RTMPS publishing.
