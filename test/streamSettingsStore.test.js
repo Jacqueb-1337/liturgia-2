@@ -60,6 +60,17 @@ describe('Liturgia Stream settings store', () => {
     expect(loaded.scenes).toHaveLength(2);
   });
 
+  test('persists camera and microphone selections without exposing stream keys', async () => {
+    await store.save({ destination: { name: 'Test', server: 'rtmps://example.test/live', streamKey: 'secret-device-key' } });
+    await store.saveDevices({ cameraId: 'camera-id', microphoneId: 'mic-id' });
+    const saved = JSON.parse(await fs.promises.readFile(path.join(directory, 'settings.json'), 'utf8'));
+    const loaded = await store.load();
+
+    expect(saved.devices).toEqual({ cameraId: 'camera-id', microphoneId: 'mic-id' });
+    expect(JSON.stringify(saved)).not.toContain('secret-device-key');
+    expect(loaded.devices).toEqual({ cameraId: 'camera-id', microphoneId: 'mic-id' });
+  });
+
   test('refuses to save a stream key if secure storage is unavailable', async () => {
     safeStorage.isEncryptionAvailable.mockReturnValue(false);
     await expect(store.save({

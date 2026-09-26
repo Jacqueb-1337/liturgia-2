@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('liturgiaStream', {
   getEncoderInfo: () => ipcRenderer.invoke('stream:encoder:info'),
   saveConfig: (config) => ipcRenderer.invoke('stream:config:save', config),
   saveScenes: (scenes, activeSceneId) => ipcRenderer.invoke('stream:scenes:save', scenes, activeSceneId),
+  saveDevices: (devices) => ipcRenderer.invoke('stream:devices:save', devices),
   onWorshipInstances: (callback) => {
     const listener = (_event, instances) => callback(instances);
     ipcRenderer.on('worship:instances', listener);

@@ -110,6 +110,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('stream:config:save', (_event, config) => settingsStore.save(config));
   ipcMain.handle('stream:scenes:save', (_event, scenes, activeSceneId) => settingsStore.saveScenes(scenes, activeSceneId));
+  ipcMain.handle('stream:devices:save', (_event, devices) => settingsStore.saveDevices(devices));
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'media');
   });

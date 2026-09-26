@@ -12,6 +12,15 @@ const sceneMessage = document.getElementById('scene-message');
 const instancesByKey = new Map();
 let scenes = [];
 let activeSceneId = 'camera-program';
+let selectedDevices = { cameraId: '', microphoneId: '' };
+async function saveDeviceSelections() {
+  try {
+    selectedDevices = await window.liturgiaStream.saveDevices(selectedDevices);
+  } catch (error) {
+    const message = document.getElementById('video-message');
+    if (message) message.textContent = `Could not save device selection: ${error.message}`;
+  }
+}
 
 for (const tab of tabs) {
   tab.addEventListener('click', () => {
@@ -138,7 +147,7 @@ async function refreshVideoDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const cameras = devices.filter((device) => device.kind === 'videoinput');
   const select = document.getElementById('video-device');
-  const previous = select.value || localStorage.getItem('liturgiaStream.cameraId') || '';
+  const previous = select.value || selectedDevices.cameraId || '';
   select.replaceChildren(new Option(cameras.length ? 'Choose a camera' : 'No camera found', ''));
   for (const device of cameras) select.add(new Option(device.label || 'Camera', device.deviceId));
   if (cameras.some((device) => device.deviceId === previous)) select.value = previous;
@@ -163,7 +172,8 @@ document.getElementById('enable-video').addEventListener('click', async () => {
   }
 });
 document.getElementById('video-device').addEventListener('change', async (event) => {
-  localStorage.setItem('liturgiaStream.cameraId', event.target.value);
+  selectedDevices.cameraId = event.target.value;
+  await saveDeviceSelections();
   if (!event.target.value) return;
   try {
     cameraStream?.getTracks().forEach((track) => track.stop());
@@ -187,7 +197,7 @@ async function refreshAudioDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices();
   const microphones = devices.filter((device) => device.kind === 'audioinput');
   const select = document.getElementById('audio-device');
-  const previous = select.value || localStorage.getItem('liturgiaStream.microphoneId') || '';
+  const previous = select.value || selectedDevices.microphoneId || '';
   select.replaceChildren(new Option(microphones.length ? 'Choose a microphone' : 'No microphone found', ''));
   for (const device of microphones) select.add(new Option(device.label || 'Microphone', device.deviceId));
   if (microphones.some((device) => device.deviceId === previous)) select.value = previous;
@@ -233,7 +243,8 @@ document.getElementById('enable-audio').addEventListener('click', async () => {
   }
 });
 document.getElementById('audio-device').addEventListener('change', async (event) => {
-  localStorage.setItem('liturgiaStream.microphoneId', event.target.value);
+  selectedDevices.microphoneId = event.target.value;
+  await saveDeviceSelections();
   if (!event.target.value) return;
   try {
     await startMicrophoneMeter(event.target.value);
@@ -266,6 +277,7 @@ async function loadEncoderInfo() {
 async function loadStreamConfig() {
   try {
     const config = await window.liturgiaStream.getConfig();
+    selectedDevices = config.devices || selectedDevices;
     scenes = Array.isArray(config.scenes) ? config.scenes : [];
     activeSceneId = config.activeSceneId || 'camera-program';
     renderScenes();

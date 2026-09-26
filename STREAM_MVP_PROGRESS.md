@@ -40,3 +40,4 @@
 4. Add persistent scenes and remaining audio controls, then run long-duration reliability tests.
 - Added FFmpeg runtime discovery with NVENC, Quick Sync, AMD AMF, and libx264 preference order; the normal setting stays Automatic.
 - Added tested RTMP/RTMPS URL validation and baseline H.264/AAC CBR output argument construction. This is still not connected to the compositor or Go Live control.
+- Camera and microphone IDs now persist in the local settings file alongside scenes and output settings. Stream keys remain DPAPI-protected by Electron safeStorage.

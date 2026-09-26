@@ -51,6 +51,7 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
       return {
         destination,
         output: { ...DEFAULT_CONFIG.output, ...(stored.output || {}) },
+        devices: { cameraId: String(stored.devices?.cameraId || ''), microphoneId: String(stored.devices?.microphoneId || '') },
         scenes: Array.isArray(stored.scenes) ? stored.scenes : DEFAULT_CONFIG.scenes,
         activeSceneId: stored.activeSceneId || DEFAULT_CONFIG.activeSceneId
       };
@@ -87,6 +88,16 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
       };
       await writeRaw(document);
       return { destination: { name, server, keySaved: true }, output };
+    },
+
+    async saveDevices(devices) {
+      const previous = await readRaw();
+      const selected = {
+        cameraId: String(devices?.cameraId || '').slice(0, 512),
+        microphoneId: String(devices?.microphoneId || '').slice(0, 512)
+      };
+      await writeRaw({ ...previous, devices: selected });
+      return selected;
     },
 
     async saveScenes(scenes, activeSceneId) {
