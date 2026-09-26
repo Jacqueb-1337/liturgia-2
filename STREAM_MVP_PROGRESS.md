@@ -21,12 +21,14 @@
 - Restricted the existing receiver's media endpoint to image/video paths recently included in the current Program payload.
 
 - Added destination and output preset storage in the Stream settings page. Stream keys are encrypted through Electron safeStorage (Windows DPAPI) and are never returned to the UI when loading settings.
+- Added persistent Camera, Camera + Liturgia, and Liturgia Fullscreen scenes that switch the Live preview and keep the selected scene.
 
 ### Current limits
 
 - The LAN output reuses the existing Network Display renderer, so Worship's existing style and output settings apply.
 - Remote Stream-side editing of Worship output settings/styles still needs an authenticated pairing and configuration protocol.
-- Stream does not yet compose scenes or send a stream. Go Live remains disabled until the RTMPS pipeline is implemented.
+- The three starter scenes switch the preview and persist their selection. Custom scene/source editing, transforms, and encoded output are still pending.
+- Go Live remains disabled until the RTMPS pipeline is implemented.
 - The media endpoint remains part of the legacy receiver; the allowlist narrows access but does not replace it with an authenticated media protocol.
 - Firewall behavior has unit coverage and static validation but still needs an interactive Windows/UAC and multi-computer smoke test.
 

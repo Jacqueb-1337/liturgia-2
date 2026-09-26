@@ -5,7 +5,13 @@ const path = require('path');
 
 const DEFAULT_CONFIG = {
   destination: null,
-  output: { width: 1920, height: 1080, fps: 30, videoBitrateKbps: 6000, audioBitrateKbps: 160, audioSampleRate: 48000 }
+  output: { width: 1920, height: 1080, fps: 30, videoBitrateKbps: 6000, audioBitrateKbps: 160, audioSampleRate: 48000 },
+  scenes: [
+    { id: 'camera', name: 'Camera', cameraVisible: true, programVisible: false },
+    { id: 'camera-program', name: 'Camera + Liturgia', cameraVisible: true, programVisible: true },
+    { id: 'program', name: 'Liturgia Fullscreen', cameraVisible: false, programVisible: true }
+  ],
+  activeSceneId: 'camera-program'
 };
 
 function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
@@ -18,6 +24,13 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
       if (error.code === 'ENOENT') return {};
       throw error;
     }
+  }
+
+  async function writeRaw(document) {
+    await fileSystem.promises.mkdir(userDataPath, { recursive: true });
+    const temporaryPath = filePath + '.tmp';
+    await fileSystem.promises.writeFile(temporaryPath, JSON.stringify(document, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await fileSystem.promises.rename(temporaryPath, filePath);
   }
 
   return {
@@ -37,7 +50,9 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
       }
       return {
         destination,
-        output: { ...DEFAULT_CONFIG.output, ...(stored.output || {}) }
+        output: { ...DEFAULT_CONFIG.output, ...(stored.output || {}) },
+        scenes: Array.isArray(stored.scenes) ? stored.scenes : DEFAULT_CONFIG.scenes,
+        activeSceneId: stored.activeSceneId || DEFAULT_CONFIG.activeSceneId
       };
     },
 
@@ -66,14 +81,27 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
         ? safeStorage.encryptString(streamKey).toString('base64')
         : existingEncryptedKey;
       const document = {
+        ...previous,
         destination: { name, server, encryptedKey },
         output
       };
-      await fileSystem.promises.mkdir(userDataPath, { recursive: true });
-      const temporaryPath = filePath + '.tmp';
-      await fileSystem.promises.writeFile(temporaryPath, JSON.stringify(document, null, 2), { encoding: 'utf8', mode: 0o600 });
-      await fileSystem.promises.rename(temporaryPath, filePath);
+      await writeRaw(document);
       return { destination: { name, server, keySaved: true }, output };
+    },
+
+    async saveScenes(scenes, activeSceneId) {
+      if (!Array.isArray(scenes) || !scenes.length) throw new Error('At least one scene is required.');
+      const normalized = scenes.slice(0, 20).map((scene, index) => ({
+        id: String(scene.id || `scene-${index + 1}`).slice(0, 64),
+        name: String(scene.name || `Scene ${index + 1}`).trim().slice(0, 48),
+        cameraVisible: scene.cameraVisible === true,
+        programVisible: scene.programVisible === true
+      }));
+      if (normalized.some((scene) => !scene.name)) throw new Error('Scene names cannot be blank.');
+      const selected = normalized.some((scene) => scene.id === activeSceneId) ? activeSceneId : normalized[0].id;
+      const previous = await readRaw();
+      await writeRaw({ ...previous, scenes: normalized, activeSceneId: selected });
+      return { scenes: normalized, activeSceneId: selected };
     }
   };
 }

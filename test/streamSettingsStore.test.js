@@ -46,6 +46,20 @@ describe('Liturgia Stream settings store', () => {
     expect(saved.destination.name).toBe('Updated');
   });
 
+  test('persists scene selection without changing encrypted destination data', async () => {
+    await store.save({ destination: { name: 'Test', server: 'rtmps://example.test/live', streamKey: 'keep-private' } });
+    await store.saveScenes([
+      { id: 'camera', name: 'Camera', cameraVisible: true, programVisible: false },
+      { id: 'program', name: 'Liturgia Fullscreen', cameraVisible: false, programVisible: true }
+    ], 'program');
+    const saved = JSON.parse(await fs.promises.readFile(path.join(directory, 'settings.json'), 'utf8'));
+    const loaded = await store.load();
+
+    expect(saved.destination.encryptedKey).toBe(Buffer.from('protected:keep-private').toString('base64'));
+    expect(loaded.activeSceneId).toBe('program');
+    expect(loaded.scenes).toHaveLength(2);
+  });
+
   test('refuses to save a stream key if secure storage is unavailable', async () => {
     safeStorage.isEncryptionAvailable.mockReturnValue(false);
     await expect(store.save({

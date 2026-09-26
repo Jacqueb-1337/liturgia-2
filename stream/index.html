@@ -36,6 +36,7 @@
               <p>Worship’s Program output will appear here when it’s found on your network.</p>
             </div>
             <iframe id="program-preview" title="Liturgia Program preview" allow="autoplay; fullscreen" hidden></iframe>
+            <video id="scene-camera-preview" autoplay muted playsinline hidden></video>
           </div>
         </div>
         <aside class="live-side">
@@ -54,8 +55,9 @@
     </section>
 
     <section class="page" id="page-scenes">
-      <div class="page-heading"><div><p class="eyebrow">PRODUCTION</p><h1>Scenes</h1><p class="muted">Choose what viewers see. Scene composition is coming next.</p></div></div>
-      <div class="empty-card"><div class="empty-icon">▣</div><h2>Scenes are next</h2><p>Your saved scenes will appear here. The MVP will include Camera, Camera + Liturgia, and Liturgia Fullscreen.</p></div>
+      <div class="page-heading"><div><p class="eyebrow">PRODUCTION</p><h1>Scenes</h1><p class="muted">Select a ready-to-use view for the service.</p></div></div>
+      <div id="scene-list" class="scene-list"></div>
+      <p id="scene-message" class="helper">Choose a scene. Select devices on the Video Devices and Audio Devices tabs.</p>
     </section>
 
     <section class="page" id="page-video">

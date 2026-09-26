@@ -6,7 +6,12 @@ const headerStatus = document.querySelector('.header-status');
 const preview = document.getElementById('program-preview');
 const previewEmpty = document.getElementById('preview-empty');
 const previewState = document.getElementById('preview-state');
+const sceneCameraPreview = document.getElementById('scene-camera-preview');
+const sceneList = document.getElementById('scene-list');
+const sceneMessage = document.getElementById('scene-message');
 const instancesByKey = new Map();
+let scenes = [];
+let activeSceneId = 'camera-program';
 
 for (const tab of tabs) {
   tab.addEventListener('click', () => {
@@ -15,13 +20,73 @@ for (const tab of tabs) {
   });
 }
 
+function currentScene() {
+  return scenes.find((scene) => scene.id === activeSceneId) || scenes[0] || null;
+}
+
+function applyScene() {
+  const scene = currentScene();
+  if (!scene) return;
+  const hasProgram = scene.programVisible && !!preview.src;
+  const hasCamera = scene.cameraVisible && !!cameraStream;
+  preview.hidden = !hasProgram;
+  sceneCameraPreview.hidden = !hasCamera;
+  sceneCameraPreview.classList.toggle('camera-pip', !!(hasCamera && scene.programVisible));
+  sceneCameraPreview.classList.toggle('camera-full', !!(hasCamera && !scene.programVisible));
+  previewEmpty.hidden = hasProgram || hasCamera;
+  previewState.textContent = scene.name;
+  if (!hasProgram && !hasCamera) {
+    previewEmpty.querySelector('h2').textContent = scene.programVisible ? 'Connect to Liturgia Worship' : 'Choose a camera';
+    previewEmpty.querySelector('p').textContent = scene.programVisible
+      ? 'Worship’s Program output will appear here when it’s found on your network.'
+      : 'Choose a camera on the Video Devices tab to preview this scene.';
+  }
+}
+
+function renderScenes() {
+  sceneList.replaceChildren();
+  for (const scene of scenes) {
+    const button = document.createElement('button');
+    button.className = 'scene-card button secondary';
+    button.classList.toggle('active', scene.id === activeSceneId);
+    button.setAttribute('aria-pressed', scene.id === activeSceneId ? 'true' : 'false');
+    const name = document.createElement('span');
+    name.className = 'scene-name';
+    name.textContent = scene.name;
+    const sources = document.createElement('span');
+    sources.className = 'scene-sources';
+    sources.textContent = [
+      scene.cameraVisible ? 'Camera' : '',
+      scene.programVisible ? 'Liturgia Program' : ''
+    ].filter(Boolean).join(' + ') || 'No sources';
+    button.append(name, sources);
+    button.addEventListener('click', () => selectScene(scene.id));
+    sceneList.append(button);
+  }
+  applyScene();
+}
+
+async function selectScene(sceneId) {
+  const selected = scenes.find((scene) => scene.id === sceneId);
+  if (!selected) return;
+  activeSceneId = sceneId;
+  renderScenes();
+  sceneMessage.textContent = `Previewing “${selected.name}”.`;
+  try {
+    const saved = await window.liturgiaStream.saveScenes(scenes, activeSceneId);
+    scenes = saved.scenes;
+    activeSceneId = saved.activeSceneId;
+    renderScenes();
+  } catch (error) {
+    sceneMessage.textContent = `Could not save scene: ${error.message}`;
+  }
+}
+
 function connectToInstance(key) {
   const instance = instancesByKey.get(key);
   if (!instance) return;
   preview.src = instance.url;
-  preview.hidden = false;
-  previewEmpty.hidden = true;
-  previewState.textContent = instance.name;
+  applyScene();
 }
 
 function renderInstances(items) {
@@ -89,6 +154,8 @@ document.getElementById('enable-video').addEventListener('click', async () => {
     await refreshVideoDevices();
     const video = document.getElementById('camera-preview');
     video.srcObject = cameraStream;
+    sceneCameraPreview.srcObject = cameraStream;
+    applyScene();
     video.hidden = false;
     document.getElementById('video-message').textContent = 'Camera preview is active. Select your camera above.';
   } catch (error) {
@@ -103,6 +170,8 @@ document.getElementById('video-device').addEventListener('change', async (event)
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: event.target.value } }, audio: false });
     const video = document.getElementById('camera-preview');
     video.srcObject = cameraStream;
+    sceneCameraPreview.srcObject = cameraStream;
+    applyScene();
     video.hidden = false;
     document.getElementById('video-message').textContent = 'Camera preview is active.';
   } catch (error) {
@@ -185,6 +254,9 @@ const saveDestinationButton = document.getElementById('save-destination');
 async function loadStreamConfig() {
   try {
     const config = await window.liturgiaStream.getConfig();
+    scenes = Array.isArray(config.scenes) ? config.scenes : [];
+    activeSceneId = config.activeSceneId || 'camera-program';
+    renderScenes();
     if (config.destination) {
       document.getElementById('destination-name').value = config.destination.name;
       document.getElementById('stream-server').value = config.destination.server;

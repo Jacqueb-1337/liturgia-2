@@ -77,6 +77,18 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .empty-card { max-width: 690px; padding: 40px; text-align: center; }
 .empty-card p { color: var(--muted); font-size: 13px; line-height: 1.6; }
 .empty-icon { margin-bottom: 18px; color: #83c7ff; font-size: 30px; }
+
+#scene-camera-preview { position: absolute; z-index: 2; background: #080909; }
+#scene-camera-preview.camera-pip { top: 5%; right: 5%; width: 32%; aspect-ratio: 16 / 9; object-fit: cover; border: 2px solid rgba(255,255,255,.85); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+#scene-camera-preview.camera-full { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#scene-camera-preview[hidden] { display: none; }
+.scene-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; max-width: 1000px; }
+.scene-card { display: flex; min-height: 105px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 9px; text-align: left; padding: 18px; }
+.scene-card.active { border-color: var(--accent); background: #102b3f; box-shadow: 0 0 0 1px var(--accent); }
+.scene-name { font-size: 15px; font-weight: 650; }
+.scene-sources { color: var(--muted); font-size: 12px; font-weight: 400; }
+#scene-message { margin-top: 16px; }
+
 @media (max-width: 1000px) {
   .live-layout { grid-template-columns: 1fr; }
   .live-side { grid-template-columns: 1fr 1fr; }
