@@ -93,6 +93,38 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 #scene-camera-preview.camera-pip { top: 5%; right: 5%; width: 32%; aspect-ratio: 16 / 9; object-fit: cover; border: 2px solid rgba(255,255,255,.85); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 #scene-camera-preview.camera-full { inset: 0; width: 100%; height: 100%; object-fit: cover; }
 #scene-camera-preview[hidden] { display: none; }
+
+.custom-editor { margin-top: 20px; }
+.editor-toolbar { display: flex; align-items: center; gap: 12px; margin: 0 0 15px; }
+.editor-toolbar label { font-size: 13px; font-weight: 600; }
+.editor-toolbar input { min-width: 190px; flex: 1; max-width: 350px; }
+.editor-toolbar input, .editor-panel input, .editor-panel select, .editor-panel textarea { color: var(--text); background: #17191a; border: 1px solid var(--border); border-radius: 5px; padding: 7px 9px; }
+.editor-layout { display: grid; grid-template-columns: 315px minmax(0, 1fr); gap: 16px; align-items: start; }
+.editor-panel, .editor-preview-panel { padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; }
+.editor-panel { max-height: min(75vh, 850px); overflow: auto; }
+.editor-panel h2 { margin: 5px 0 7px; }
+.editor-panel label { display: block; margin: 10px 0 5px; color: var(--muted); font-size: 12px; }
+.editor-panel > input, .editor-panel textarea { width: 100%; }
+.layer-list { display: grid; gap: 7px; margin: 13px 0 18px; }
+.layer-row { display: flex; align-items: center; gap: 5px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 6px; padding: 5px; }
+.layer-row.selected { border-color: var(--accent); }
+.layer-select { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; }
+.layer-row .button { padding: 6px 8px; }
+.add-layer-row { display: flex; gap: 7px; }
+.add-layer-row select { flex: 1; min-width: 0; }
+.editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.editor-fields label input { display: block; width: 100%; margin-top: 4px; }
+.layer-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 15px; }
+#choose-layer-image { margin-top: 12px; width: 100%; }
+.editor-preview-panel { min-width: 0; }
+.editor-preview-panel .card-label { padding: 0 0 12px; gap: 12px; }
+.editor-canvas-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #000; }
+.editor-canvas-wrap canvas, #editor-interaction { position: absolute; inset: 0; width: 100%; height: 100%; }
+#editor-interaction { touch-action: none; cursor: crosshair; }
+#editor-selection { position: absolute; outline: 2px solid #83c7ff; pointer-events: none; box-shadow: 0 0 0 1px #000; }
+.resize-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; background: var(--accent); border: 2px solid #fff; border-radius: 3px; }
+@media (max-width: 1050px) { .editor-layout { grid-template-columns: 1fr; } .editor-panel { max-height: none; } }
+
 .scene-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; max-width: 1000px; }
 .scene-card { display: flex; min-height: 105px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 9px; text-align: left; padding: 18px; }
 .scene-card.active { border-color: var(--accent); background: #102b3f; box-shadow: 0 0 0 1px var(--accent); }

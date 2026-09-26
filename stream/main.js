@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, session, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, session, safeStorage, dialog } = require('electron');
 const { createSettingsStore } = require('./settingsStore');
 const { executableCandidates, probeFirstAvailable, buildRtmpUrl } = require('./ffmpegRuntime');
 const { StreamOutputManager } = require('./outputManager');
@@ -8,6 +8,7 @@ const os = require('os');
 const net = require('net');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow = null;
 let bonjour = null;
@@ -177,6 +178,17 @@ app.whenReady().then(() => {
   ipcMain.handle('stream:config:save', (_event, config) => settingsStore.save(config));
   ipcMain.handle('stream:scenes:save', (_event, scenes, activeSceneId) => settingsStore.saveScenes(scenes, activeSceneId));
   ipcMain.handle('stream:devices:save', (_event, devices) => settingsStore.saveDevices(devices));
+  ipcMain.handle('stream:image:choose', async () => {
+    const selection = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }] });
+    return selection.canceled ? null : selection.filePaths[0];
+  });
+  ipcMain.handle('stream:image:read', async (_event, imagePath) => {
+    if (typeof imagePath !== 'string' || !/\.(png|jpe?g|webp|gif)$/i.test(imagePath)) throw new Error('Choose a supported image.');
+    const stat = await fs.promises.stat(imagePath);
+    if (stat.size > 12 * 1024 * 1024) throw new Error('Choose an image smaller than 12 MB.');
+    const mime = /\.png$/i.test(imagePath) ? 'image/png' : /\.webp$/i.test(imagePath) ? 'image/webp' : /\.gif$/i.test(imagePath) ? 'image/gif' : 'image/jpeg';
+    return `data:${mime};base64,${(await fs.promises.readFile(imagePath)).toString('base64')}`;
+  });
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'media');
   });

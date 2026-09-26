@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('liturgiaStream', {
     return () => ipcRenderer.removeListener('stream:output:status', listener);
   },
   saveScenes: (scenes, activeSceneId) => ipcRenderer.invoke('stream:scenes:save', scenes, activeSceneId),
+  chooseLayerImage: () => ipcRenderer.invoke('stream:image:choose'),
+  readLayerImage: (path) => ipcRenderer.invoke('stream:image:read', path),
   saveDevices: (devices) => ipcRenderer.invoke('stream:devices:save', devices),
   onWorshipInstances: (callback) => {
     const listener = (_event, instances) => callback(instances);

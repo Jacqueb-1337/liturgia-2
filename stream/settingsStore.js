@@ -121,12 +121,48 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
 
     async saveScenes(scenes, activeSceneId) {
       if (!Array.isArray(scenes) || !scenes.length) throw new Error('At least one scene is required.');
-      const normalized = scenes.slice(0, 20).map((scene, index) => ({
-        id: String(scene.id || `scene-${index + 1}`).slice(0, 64),
-        name: String(scene.name || `Scene ${index + 1}`).trim().slice(0, 48),
-        cameraVisible: scene.cameraVisible === true,
-        programVisible: scene.programVisible === true
-      }));
+      const bounded = (value, fallback, min, max) => {
+        const number = Number(value);
+        return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+      };
+      const normalized = scenes.slice(0, 20).map((scene, index) => {
+        const common = {
+          id: String(scene.id || `scene-${index + 1}`).slice(0, 64),
+          name: String(scene.name || `Scene ${index + 1}`).trim().slice(0, 48),
+          cameraVisible: scene.cameraVisible === true,
+          programVisible: scene.programVisible === true
+        };
+        if (scene.custom !== true) return common;
+        return {
+          ...common,
+          custom: true,
+          layers: (Array.isArray(scene.layers) ? scene.layers : []).slice(0, 20)
+            .filter((layer) => ['program', 'camera', 'image', 'text'].includes(layer?.type))
+            .map((layer, layerIndex) => ({
+              id: String(layer.id || `layer-${layerIndex + 1}`).slice(0, 64),
+              type: layer.type,
+              name: String(layer.name || layer.type).slice(0, 48),
+              x: bounded(layer.x, 0, -1920, 3840),
+              y: bounded(layer.y, 0, -1080, 2160),
+              width: bounded(layer.width, 960, 20, 3840),
+              height: bounded(layer.height, 540, 20, 2160),
+              cropLeft: bounded(layer.cropLeft, 0, 0, .95),
+              cropTop: bounded(layer.cropTop, 0, 0, .95),
+              cropRight: bounded(layer.cropRight, 0, 0, .95),
+              cropBottom: bounded(layer.cropBottom, 0, 0, .95),
+              panX: bounded(layer.panX, 0, -100, 100),
+              panY: bounded(layer.panY, 0, -100, 100),
+              zoom: bounded(layer.zoom, 1, 1, 5),
+              opacity: bounded(layer.opacity, 1, 0, 1),
+              visible: layer.visible !== false,
+              locked: layer.locked === true,
+              text: String(layer.text || '').slice(0, 2000),
+              fontSize: bounded(layer.fontSize, 72, 8, 300),
+              color: /^#[0-9a-f]{6}$/i.test(layer.color) ? layer.color : '#ffffff',
+              imagePath: typeof layer.imagePath === 'string' ? layer.imagePath.slice(0, 2048) : ''
+            }))
+        };
+      });
       if (normalized.some((scene) => !scene.name)) throw new Error('Scene names cannot be blank.');
       const selected = normalized.some((scene) => scene.id === activeSceneId) ? activeSceneId : normalized[0].id;
       const previous = await readRaw();

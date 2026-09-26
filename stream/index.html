@@ -57,9 +57,48 @@
     </section>
 
     <section class="page" id="page-scenes">
-      <div class="page-heading"><div><p class="eyebrow">PRODUCTION</p><h1>Scenes</h1><p class="muted">Select a ready-to-use view for the service.</p></div></div>
+      <div class="page-heading"><div><p class="eyebrow">PRODUCTION</p><h1>Scenes</h1><p class="muted">Choose a preset or arrange your own layers.</p></div><button class="button primary" id="create-custom-scene">+ Custom scene</button></div>
       <div id="scene-list" class="scene-list"></div>
-      <p id="scene-message" class="helper">Choose a scene. Select devices on the Video Devices and Audio Devices tabs.</p>
+      <p id="scene-message" class="helper" role="status">Choose a scene. Select devices on the Video Devices and Audio Devices tabs.</p>
+      <div id="custom-scene-editor" class="custom-editor" hidden>
+        <div class="editor-toolbar"><label for="custom-scene-name">Scene name</label><input id="custom-scene-name" maxlength="48"><button class="button secondary" id="remove-custom-scene">Delete scene</button></div>
+        <div class="editor-layout">
+          <div class="editor-panel">
+            <h2>Layers</h2><p class="helper">Top layers appear in front. Select one to edit it.</p>
+            <div id="layer-list" class="layer-list"></div>
+            <label for="add-layer-type">Add layer</label>
+            <div class="add-layer-row"><select id="add-layer-type"><option value="program">Liturgia Program</option><option value="camera">Camera</option><option value="image">Image</option><option value="text">Text</option></select><button class="button primary" id="add-layer">Add</button></div>
+            <div id="layer-properties" hidden>
+              <h2>Selected layer</h2>
+              <label for="layer-name">Name</label><input id="layer-name" maxlength="48">
+              <label for="layer-text" id="layer-text-label" hidden>Text</label><textarea id="layer-text" rows="3" maxlength="2000" hidden></textarea>
+              <button class="button secondary" id="choose-layer-image" hidden>Choose image…</button>
+              <div class="editor-fields">
+                <label>X <input data-layer-field="x" type="number" step="1"></label>
+                <label>Y <input data-layer-field="y" type="number" step="1"></label>
+                <label>Width <input data-layer-field="width" type="number" min="20" step="1"></label>
+                <label>Height <input data-layer-field="height" type="number" min="20" step="1"></label>
+                <label>Crop left % <input data-layer-field="cropLeft" type="number" min="0" max="95" step="1"></label>
+                <label>Crop top % <input data-layer-field="cropTop" type="number" min="0" max="95" step="1"></label>
+                <label>Crop right % <input data-layer-field="cropRight" type="number" min="0" max="95" step="1"></label>
+                <label>Crop bottom % <input data-layer-field="cropBottom" type="number" min="0" max="95" step="1"></label>
+                <label>Pan X % <input data-layer-field="panX" type="number" min="-100" max="100" step="1"></label>
+                <label>Pan Y % <input data-layer-field="panY" type="number" min="-100" max="100" step="1"></label>
+                <label>Zoom <input data-layer-field="zoom" type="number" min="1" max="5" step=".1"></label>
+                <label>Opacity % <input data-layer-field="opacity" type="number" min="0" max="100" step="1"></label>
+                <label id="layer-font-size-label" hidden>Text size <input data-layer-field="fontSize" type="number" min="8" max="300"></label>
+                <label id="layer-color-label" hidden>Text color <input id="layer-color" type="color"></label>
+              </div>
+              <div class="layer-actions"><button class="button secondary" id="layer-fit">Fit canvas</button><button class="button secondary" id="layer-center">Center</button><button class="button secondary" id="layer-remove">Remove layer</button></div>
+            </div>
+          </div>
+          <div class="editor-preview-panel">
+            <div class="card-label"><span>SCENE PREVIEW</span><span>Drag to move · corner to resize</span></div>
+            <div class="editor-canvas-wrap"><canvas id="scene-editor-preview" width="1920" height="1080" aria-label="Custom scene editor"></canvas><div id="editor-interaction" aria-label="Move and resize layers"><div id="editor-selection" hidden><span class="resize-handle"></span></div></div></div>
+            <p class="helper">The clean preview on the Live tab is the video sent to your destination. Selection outlines stay in this editor.</p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="page" id="page-appearance">

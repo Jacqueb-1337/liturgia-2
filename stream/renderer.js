@@ -15,6 +15,16 @@ const previewState = document.getElementById('preview-state');
 const sceneCameraPreview = document.getElementById('scene-camera-preview');
 const sceneList = document.getElementById('scene-list');
 const sceneMessage = document.getElementById('scene-message');
+const customEditor = document.getElementById('custom-scene-editor');
+const editorCanvas = document.getElementById('scene-editor-preview');
+const editorContext = editorCanvas.getContext('2d');
+const editorInteraction = document.getElementById('editor-interaction');
+const editorSelection = document.getElementById('editor-selection');
+const layerList = document.getElementById('layer-list');
+const layerProperties = document.getElementById('layer-properties');
+const imageCache = new Map();
+let selectedLayerId = '';
+let sceneSaveQueue = Promise.resolve();
 const instancesByKey = new Map();
 const worshipStyleTarget = document.getElementById('worship-style-target');
 const worshipStyleStatus = document.getElementById('worship-style-status');
@@ -47,68 +57,118 @@ function currentScene() {
   return scenes.find((scene) => scene.id === activeSceneId) || scenes[0] || null;
 }
 
+function sceneHasSource(scene, type) {
+  return scene?.custom ? scene.layers.some((layer) => layer.type === type && layer.visible) :
+    type === 'program' ? !!scene?.programVisible : type === 'camera' ? !!scene?.cameraVisible : false;
+}
+
+function selectedLayer() {
+  return currentScene()?.layers?.find((layer) => layer.id === selectedLayerId) || null;
+}
+
 function applyScene() {
   const scene = currentScene();
   if (!scene) return;
-  const hasProgram = scene.programVisible && !!programFrame;
-  const hasCamera = scene.cameraVisible && !!cameraStream;
-  preview.hidden = !hasProgram && !hasCamera;
+  const hasProgram = sceneHasSource(scene, 'program') && !!programFrame;
+  const hasCamera = sceneHasSource(scene, 'camera') && !!cameraStream;
+  const hasOther = scene.custom && scene.layers.some((layer) => layer.visible && (layer.type === 'text' || (layer.type === 'image' && imageCache.get(layer.imagePath)?.complete)));
+  preview.hidden = !hasProgram && !hasCamera && !hasOther;
   sceneCameraPreview.hidden = true;
-  previewEmpty.hidden = hasProgram || hasCamera;
+  previewEmpty.hidden = hasProgram || hasCamera || hasOther;
   previewState.textContent = scene.name;
-  if (!hasProgram && !hasCamera) {
-    previewEmpty.querySelector('h2').textContent = scene.programVisible ? 'Connect to Liturgia Worship' : 'Choose a camera';
-    previewEmpty.querySelector('p').textContent = scene.programVisible
+  if (!hasProgram && !hasCamera && !hasOther) {
+    const needsProgram = sceneHasSource(scene, 'program');
+    previewEmpty.querySelector('h2').textContent = needsProgram ? 'Connect to Liturgia Worship' : sceneHasSource(scene, 'camera') ? 'Choose a camera' : 'Add a layer';
+    previewEmpty.querySelector('p').textContent = needsProgram
       ? 'Worship’s Program output will appear here when it’s found on your network.'
-      : 'Choose a camera on the Video Devices tab to preview this scene.';
+      : sceneHasSource(scene, 'camera') ? 'Choose a camera on the Video Devices tab to preview this scene.' : 'Add a layer on the Scenes tab.';
   }
 }
 
-function drawContain(source, x, y, width, height) {
+function drawContain(ctx, source, x, y, width, height) {
   const sourceWidth = source.videoWidth || source.width;
   const sourceHeight = source.videoHeight || source.height;
   if (!sourceWidth || !sourceHeight) return;
   const scale = Math.min(width / sourceWidth, height / sourceHeight);
   const drawWidth = sourceWidth * scale;
   const drawHeight = sourceHeight * scale;
-  previewContext.drawImage(source, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+  ctx.drawImage(source, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
 }
 
-function drawCover(source, x, y, width, height) {
+function drawCover(ctx, source, x, y, width, height) {
   const sourceWidth = source.videoWidth || source.width;
   const sourceHeight = source.videoHeight || source.height;
   if (!sourceWidth || !sourceHeight) return;
   const scale = Math.max(width / sourceWidth, height / sourceHeight);
   const cropWidth = width / scale;
   const cropHeight = height / scale;
-  const cropX = (sourceWidth - cropWidth) / 2;
-  const cropY = (sourceHeight - cropHeight) / 2;
-  previewContext.drawImage(source, cropX, cropY, cropWidth, cropHeight, x, y, width, height);
+  ctx.drawImage(source, (sourceWidth - cropWidth) / 2, (sourceHeight - cropHeight) / 2, cropWidth, cropHeight, x, y, width, height);
+}
+
+function drawCustomLayer(ctx, layer) {
+  if (!layer.visible) return;
+  ctx.save();
+  ctx.globalAlpha = layer.opacity;
+  ctx.beginPath();
+  ctx.rect(layer.x, layer.y, layer.width, layer.height);
+  ctx.clip();
+  if (layer.type === 'text') {
+    ctx.fillStyle = layer.color;
+    ctx.font = `600 ${layer.fontSize}px "Segoe UI", sans-serif`;
+    ctx.textBaseline = 'top';
+    const lines = layer.text.split('\n');
+    lines.forEach((line, index) => ctx.fillText(line, layer.x + 12 - layer.panX * 5, layer.y + 12 - layer.panY * 5 + index * layer.fontSize * 1.2));
+  } else {
+    const source = layer.type === 'program' ? programFrame : layer.type === 'camera' ?
+      (cameraStream && sceneCameraPreview.readyState >= 2 ? sceneCameraPreview : null) : imageCache.get(layer.imagePath);
+    if (source && (layer.type !== 'image' || source.complete)) {
+      const sourceWidth = source.videoWidth || source.width;
+      const sourceHeight = source.videoHeight || source.height;
+      const left = Math.min(layer.cropLeft, .99 - layer.cropRight);
+      const top = Math.min(layer.cropTop, .99 - layer.cropBottom);
+      const remainingWidth = Math.max(1, sourceWidth * (1 - left - layer.cropRight));
+      const remainingHeight = Math.max(1, sourceHeight * (1 - top - layer.cropBottom));
+      const sampleWidth = Math.max(1, remainingWidth / layer.zoom);
+      const sampleHeight = Math.max(1, remainingHeight / layer.zoom);
+      const sampleX = sourceWidth * left + (remainingWidth - sampleWidth) * (.5 + layer.panX / 200);
+      const sampleY = sourceHeight * top + (remainingHeight - sampleHeight) * (.5 + layer.panY / 200);
+      ctx.drawImage(source, sampleX, sampleY, sampleWidth, sampleHeight, layer.x, layer.y, layer.width, layer.height);
+    }
+  }
+  ctx.restore();
+}
+
+function paintScene(ctx, scene) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 1920, 1080);
+  if (!scene) return;
+  if (scene.custom) {
+    for (const layer of scene.layers) drawCustomLayer(ctx, layer);
+    return;
+  }
+  const programActive = scene.programVisible && programFrame;
+  const cameraActive = scene.cameraVisible && cameraStream && sceneCameraPreview.readyState >= 2;
+  if (programActive) drawContain(ctx, programFrame, 0, 0, 1920, 1080);
+  else if (cameraActive) drawCover(ctx, sceneCameraPreview, 0, 0, 1920, 1080);
+  if (programActive && cameraActive) {
+    const width = Math.round(1920 * .32);
+    const height = Math.round(width * 9 / 16);
+    const x = 1920 - width - 96;
+    const y = 54;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.55)';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(x - 4, y - 4, width + 8, height + 8);
+    ctx.restore();
+    drawCover(ctx, sceneCameraPreview, x, y, width, height);
+  }
 }
 
 function drawPreview() {
   const scene = currentScene();
-  previewContext.fillStyle = '#000';
-  previewContext.fillRect(0, 0, preview.width, preview.height);
-  if (scene) {
-    const programActive = scene.programVisible && programFrame;
-    const cameraActive = scene.cameraVisible && cameraStream && sceneCameraPreview.readyState >= 2;
-    if (programActive) drawContain(programFrame, 0, 0, preview.width, preview.height);
-    else if (cameraActive) drawCover(sceneCameraPreview, 0, 0, preview.width, preview.height);
-    if (programActive && cameraActive) {
-      const width = Math.round(preview.width * 0.32);
-      const height = Math.round(width * 9 / 16);
-      const x = preview.width - width - Math.round(preview.width * 0.05);
-      const y = Math.round(preview.height * 0.05);
-      previewContext.save();
-      previewContext.shadowColor = 'rgba(0,0,0,.55)';
-      previewContext.shadowBlur = 24;
-      previewContext.fillStyle = '#fff';
-      previewContext.fillRect(x - 4, y - 4, width + 8, height + 8);
-      previewContext.restore();
-      drawCover(sceneCameraPreview, x, y, width, height);
-    }
-  }
+  paintScene(previewContext, scene);
+  if (scene?.custom && !customEditor.hidden) paintScene(editorContext, scene);
   requestAnimationFrame(drawPreview);
 }
 
@@ -151,15 +211,15 @@ function renderScenes() {
     name.textContent = scene.name;
     const sources = document.createElement('span');
     sources.className = 'scene-sources';
-    sources.textContent = [
-      scene.cameraVisible ? 'Camera' : '',
-      scene.programVisible ? 'Liturgia Program' : ''
-    ].filter(Boolean).join(' + ') || 'No sources';
+    sources.textContent = scene.custom
+      ? `${scene.layers.length} layer${scene.layers.length === 1 ? '' : 's'} · Custom`
+      : [scene.cameraVisible ? 'Camera' : '', scene.programVisible ? 'Liturgia Program' : ''].filter(Boolean).join(' + ') || 'No sources';
     button.append(name, sources);
     button.addEventListener('click', () => selectScene(scene.id));
     sceneList.append(button);
   }
   applyScene();
+  renderCustomEditor();
 }
 
 async function selectScene(sceneId) {
@@ -177,6 +237,256 @@ async function selectScene(sceneId) {
     sceneMessage.textContent = `Could not save scene: ${error.message}`;
   }
 }
+
+function newLayer(type) {
+  const base = { id: crypto.randomUUID(), type, name: { program: 'Liturgia Program', camera: 'Camera', image: 'Image', text: 'Text' }[type],
+    x: 0, y: 0, width: 1920, height: 1080, cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0,
+    panX: 0, panY: 0, zoom: 1, opacity: 1, visible: true, locked: false,
+    text: type === 'text' ? 'Your text' : '', fontSize: 72, color: '#ffffff', imagePath: '' };
+  if (type === 'camera') Object.assign(base, { x: 1150, y: 60, width: 640, height: 360 });
+  if (type === 'text') Object.assign(base, { x: 160, y: 820, width: 1600, height: 150 });
+  return base;
+}
+
+function persistScenes() {
+  // Serialize edits so an earlier disk write cannot overwrite a newer drag or field change.
+  const snapshot = JSON.parse(JSON.stringify(scenes));
+  const sceneId = activeSceneId;
+  sceneSaveQueue = sceneSaveQueue.catch(() => {}).then(async () => {
+    await window.liturgiaStream.saveScenes(snapshot, sceneId);
+    sceneMessage.textContent = 'Scene saved.';
+  }).catch((error) => { sceneMessage.textContent = `Could not save scene: ${error.message}`; });
+  return sceneSaveQueue;
+}
+
+function loadLayerImage(imagePath) {
+  if (!imagePath || imageCache.has(imagePath)) return;
+  const image = new Image();
+  imageCache.set(imagePath, image);
+  window.liturgiaStream.readLayerImage(imagePath).then((url) => { image.src = url; image.onload = applyScene; })
+    .catch((error) => { imageCache.delete(imagePath); sceneMessage.textContent = `Could not load image: ${error.message}`; });
+}
+
+function updateSelectionOutline() {
+  const layer = selectedLayer();
+  editorSelection.hidden = !layer || !layer.visible;
+  if (!layer || !layer.visible) return;
+  const scaleX = 100 / 1920, scaleY = 100 / 1080;
+  Object.assign(editorSelection.style, {
+    left: `${layer.x * scaleX}%`, top: `${layer.y * scaleY}%`,
+    width: `${layer.width * scaleX}%`, height: `${layer.height * scaleY}%`
+  });
+}
+
+function renderCustomEditor() {
+  const scene = currentScene();
+  customEditor.hidden = !scene?.custom;
+  if (!scene?.custom) return;
+  document.getElementById('custom-scene-name').value = scene.name;
+  if (!scene.layers.some((layer) => layer.id === selectedLayerId)) selectedLayerId = scene.layers.at(-1)?.id || '';
+  layerList.replaceChildren();
+  for (let index = scene.layers.length - 1; index >= 0; index--) {
+    const layer = scene.layers[index];
+    if (layer.type === 'image') loadLayerImage(layer.imagePath);
+    const row = document.createElement('div');
+    row.className = 'layer-row';
+    row.classList.toggle('selected', layer.id === selectedLayerId);
+    const select = document.createElement('button');
+    select.className = 'button secondary layer-select';
+    select.textContent = `${layer.visible ? '◉' : '○'} ${layer.name}`;
+    select.title = 'Select layer';
+    select.addEventListener('click', () => { selectedLayerId = layer.id; renderCustomEditor(); });
+    select.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      selectedLayerId = layer.id;
+      renderCustomEditor();
+      layerProperties.scrollIntoView({ block: 'nearest' });
+    });
+    const control = (caption, title, callback) => {
+      const button = document.createElement('button');
+      button.className = 'button secondary';
+      button.textContent = caption;
+      button.title = title;
+      button.setAttribute('aria-label', `${title} ${layer.name}`);
+      button.onclick = callback;
+      row.append(button);
+    };
+    row.append(select);
+    control(layer.visible ? '◉' : '○', 'Show or hide', () => {
+      layer.visible = !layer.visible; renderCustomEditor(); applyScene(); persistScenes();
+    });
+    control(layer.locked ? '🔒' : '◇', 'Lock or unlock', () => {
+      layer.locked = !layer.locked; renderCustomEditor(); persistScenes();
+    });
+    control('↑', 'Move forward', () => {
+      if (index === scene.layers.length - 1) return;
+      [scene.layers[index], scene.layers[index + 1]] = [scene.layers[index + 1], scene.layers[index]];
+      renderCustomEditor(); persistScenes();
+    });
+    control('↓', 'Move backward', () => {
+      if (index === 0) return;
+      [scene.layers[index], scene.layers[index - 1]] = [scene.layers[index - 1], scene.layers[index]];
+      renderCustomEditor(); persistScenes();
+    });
+    layerList.append(row);
+  }
+  const layer = selectedLayer();
+  layerProperties.hidden = !layer;
+  if (layer) {
+    document.getElementById('layer-name').value = layer.name;
+    document.getElementById('layer-text').value = layer.text;
+    for (const id of ['layer-text', 'layer-text-label', 'layer-font-size-label', 'layer-color-label']) document.getElementById(id).hidden = layer.type !== 'text';
+    document.getElementById('layer-color').value = layer.color;
+    document.getElementById('choose-layer-image').hidden = layer.type !== 'image';
+    for (const input of layerProperties.querySelectorAll('[data-layer-field]')) {
+      const key = input.dataset.layerField;
+      input.value = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom', 'opacity'].includes(key) ? Math.round(layer[key] * 100) : layer[key];
+    }
+  }
+  updateSelectionOutline();
+}
+
+document.getElementById('create-custom-scene').addEventListener('click', () => {
+  if (scenes.length >= 20) { sceneMessage.textContent = 'Maximum of 20 scenes reached.'; return; }
+  const scene = { id: crypto.randomUUID(), name: `Custom Scene ${scenes.filter((item) => item.custom).length + 1}`,
+    custom: true, cameraVisible: false, programVisible: false, layers: [newLayer('program')] };
+  scenes.push(scene);
+  activeSceneId = scene.id;
+  selectedLayerId = scene.layers[0].id;
+  renderScenes();
+  persistScenes();
+});
+document.getElementById('remove-custom-scene').addEventListener('click', () => {
+  const scene = currentScene();
+  if (!scene?.custom || !window.confirm(`Delete “${scene.name}”?`)) return;
+  scenes = scenes.filter((item) => item !== scene);
+  activeSceneId = scenes[0].id;
+  selectedLayerId = '';
+  renderScenes();
+  persistScenes();
+});
+document.getElementById('custom-scene-name').addEventListener('change', (event) => {
+  const scene = currentScene();
+  if (!scene?.custom) return;
+  scene.name = event.target.value.trim().slice(0, 48) || scene.name;
+  renderScenes(); persistScenes();
+});
+document.getElementById('add-layer').addEventListener('click', () => {
+  const scene = currentScene();
+  if (!scene?.custom || scene.layers.length >= 20) { sceneMessage.textContent = 'Maximum of 20 layers reached.'; return; }
+  const layer = newLayer(document.getElementById('add-layer-type').value);
+  scene.layers.push(layer);
+  selectedLayerId = layer.id;
+  renderScenes(); persistScenes();
+});
+document.getElementById('layer-name').addEventListener('change', (event) => {
+  const layer = selectedLayer();
+  if (!layer) return;
+  layer.name = event.target.value.trim().slice(0, 48) || layer.name;
+  renderCustomEditor(); persistScenes();
+});
+document.getElementById('layer-text').addEventListener('change', (event) => {
+  const layer = selectedLayer();
+  if (layer) { layer.text = event.target.value; persistScenes(); }
+});
+document.getElementById('layer-color').addEventListener('input', (event) => {
+  const layer = selectedLayer();
+  if (layer) { layer.color = event.target.value; persistScenes(); }
+});
+for (const input of layerProperties.querySelectorAll('[data-layer-field]')) {
+  input.addEventListener('change', () => {
+    const layer = selectedLayer();
+    if (!layer) return;
+    const field = input.dataset.layerField;
+    const value = Number(input.value);
+    if (!Number.isFinite(value)) return;
+    const bounds = {
+      x: [-1920, 3840], y: [-1080, 2160], width: [20, 3840], height: [20, 2160],
+      cropLeft: [0, .95], cropTop: [0, .95], cropRight: [0, .95], cropBottom: [0, .95],
+      panX: [-100, 100], panY: [-100, 100], zoom: [1, 5], opacity: [0, 1], fontSize: [8, 300]
+    };
+    const measured = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom', 'opacity'].includes(field) ? value / 100 : value;
+    layer[field] = Math.max(bounds[field][0], Math.min(bounds[field][1], measured));
+    renderCustomEditor(); persistScenes();
+  });
+}
+document.getElementById('layer-fit').onclick = () => {
+  const layer = selectedLayer(); if (!layer) return;
+  Object.assign(layer, { x: 0, y: 0, width: 1920, height: 1080 });
+  renderCustomEditor(); persistScenes();
+};
+document.getElementById('layer-center').onclick = () => {
+  const layer = selectedLayer(); if (!layer) return;
+  layer.x = Math.round((1920 - layer.width) / 2);
+  layer.y = Math.round((1080 - layer.height) / 2);
+  renderCustomEditor(); persistScenes();
+};
+document.getElementById('layer-remove').onclick = () => {
+  const scene = currentScene(); if (!scene?.custom) return;
+  scene.layers = scene.layers.filter((layer) => layer.id !== selectedLayerId);
+  selectedLayerId = scene.layers.at(-1)?.id || '';
+  renderScenes(); persistScenes();
+};
+document.getElementById('choose-layer-image').onclick = async () => {
+  const layer = selectedLayer(); if (!layer || layer.type !== 'image') return;
+  const imagePath = await window.liturgiaStream.chooseLayerImage();
+  if (!imagePath) return;
+  layer.imagePath = imagePath;
+  loadLayerImage(imagePath);
+  persistScenes();
+};
+
+let pointerDrag = null;
+function pointerCanvasPosition(event) {
+  const rect = editorInteraction.getBoundingClientRect();
+  return { x: (event.clientX - rect.left) * 1920 / rect.width, y: (event.clientY - rect.top) * 1080 / rect.height };
+}
+editorInteraction.addEventListener('pointerdown', (event) => {
+  const scene = currentScene();
+  if (!scene?.custom || event.button !== 0) return;
+  const { x, y } = pointerCanvasPosition(event);
+  const layer = [...scene.layers].reverse().find((item) => item.visible && !item.locked &&
+    x >= item.x && y >= item.y && x <= item.x + item.width && y <= item.y + item.height);
+  if (!layer) { selectedLayerId = ''; renderCustomEditor(); return; }
+  selectedLayerId = layer.id;
+  renderCustomEditor();
+  const resize = x >= layer.x + layer.width - 30 && y >= layer.y + layer.height - 30;
+  pointerDrag = { id: layer.id, x, y, original: { x: layer.x, y: layer.y, width: layer.width, height: layer.height }, resize };
+  editorInteraction.setPointerCapture(event.pointerId);
+});
+editorInteraction.addEventListener('pointermove', (event) => {
+  if (!pointerDrag) return;
+  const layer = selectedLayer();
+  if (!layer || layer.id !== pointerDrag.id) return;
+  const { x, y } = pointerCanvasPosition(event);
+  const dx = Math.round(x - pointerDrag.x), dy = Math.round(y - pointerDrag.y);
+  if (pointerDrag.resize) {
+    layer.width = Math.max(20, Math.min(3840, pointerDrag.original.width + dx));
+    layer.height = Math.max(20, Math.min(2160, pointerDrag.original.height + dy));
+  } else {
+    layer.x = Math.max(-1920, Math.min(3840, pointerDrag.original.x + dx));
+    layer.y = Math.max(-1080, Math.min(2160, pointerDrag.original.y + dy));
+  }
+  updateSelectionOutline();
+});
+function finishPointerDrag() {
+  if (!pointerDrag) return;
+  pointerDrag = null;
+  renderCustomEditor();
+  persistScenes();
+}
+editorInteraction.addEventListener('pointerup', finishPointerDrag);
+editorInteraction.addEventListener('pointercancel', finishPointerDrag);
+editorInteraction.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+  const scene = currentScene(); if (!scene?.custom) return;
+  const { x, y } = pointerCanvasPosition(event);
+  const layer = [...scene.layers].reverse().find((item) => item.visible && x >= item.x && y >= item.y && x <= item.x + item.width && y <= item.y + item.height);
+  if (!layer) return;
+  selectedLayerId = layer.id;
+  renderCustomEditor();
+  layerProperties.scrollIntoView({ block: 'nearest' });
+});
 
 function showWorshipStyle() {
   const css = worshipStyles?.[worshipStyleTarget.value] || '';
@@ -606,8 +916,8 @@ async function startOutputRecorder() {
   if (outputMediaRecorder && outputMediaRecorder.state === 'recording') return;
   const scene = currentScene();
   if (!scene) throw new Error('Choose a scene before going live.');
-  if (scene.cameraVisible && !cameraStream) await ensureCameraReady();
-  if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  if (sceneHasSource(scene, 'camera') && !cameraStream) await ensureCameraReady();
+  if (sceneHasSource(scene, 'program') && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
   if (selectedDevices.microphoneId) await ensureMicrophoneReady();
 
   outputCanvasStream = preview.captureStream(currentOutputConfig.fps);
@@ -723,17 +1033,17 @@ async function checkLiveReadiness() {
   const config = await window.liturgiaStream.getConfig();
   if (!config.destination?.keySaved) throw new Error('Save an RTMP or RTMPS destination and stream key first.');
   const scene = currentScene();
-  if (!scene || (!scene.cameraVisible && !scene.programVisible)) throw new Error('Choose a scene with a video source.');
-  if (scene.cameraVisible && !selectedDevices.cameraId) {
+  if (!scene || (scene.custom ? !scene.layers.some((layer) => layer.visible) : !scene.cameraVisible && !scene.programVisible)) throw new Error('Choose a scene with a visible source.');
+  if (sceneHasSource(scene, 'camera') && !selectedDevices.cameraId) {
     throw new Error('This scene needs a camera. Select one on Video Devices, or choose Liturgia Fullscreen on Scenes.');
   }
-  if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  if (sceneHasSource(scene, 'program') && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
   return config;
 }
 
 async function startLiveStream(config) {
   const scene = currentScene();
-  if (scene.cameraVisible) await ensureCameraReady();
+  if (sceneHasSource(scene, 'camera')) await ensureCameraReady();
   if (selectedDevices.microphoneId) await ensureMicrophoneReady();
   currentOutputConfig = { ...currentOutputConfig, ...(config.output || {}) };
   outputActive = true;
