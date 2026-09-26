@@ -174,6 +174,65 @@ document.getElementById('audio-device').addEventListener('change', async (event)
   }
 });
 
+const presetOutput = {
+  '720p30': { width: 1280, height: 720, fps: 30 },
+  '1080p30': { width: 1920, height: 1080, fps: 30 },
+  '1080p60': { width: 1920, height: 1080, fps: 60 }
+};
+const destinationStatus = document.getElementById('destination-status');
+const saveDestinationButton = document.getElementById('save-destination');
+
+async function loadStreamConfig() {
+  try {
+    const config = await window.liturgiaStream.getConfig();
+    if (config.destination) {
+      document.getElementById('destination-name').value = config.destination.name;
+      document.getElementById('stream-server').value = config.destination.server;
+      document.getElementById('stream-key').placeholder = config.destination.keySaved ? 'Saved securely · leave blank to keep' : 'Enter your stream key';
+      destinationStatus.textContent = config.destination.keySaved
+        ? 'Destination saved securely on this computer.'
+        : 'Your saved key could not be opened. Enter it again to replace it.';
+    }
+    const output = config.output || {};
+    const preset = Object.entries(presetOutput).find(([, value]) =>
+      value.width === output.width && value.height === output.height && value.fps === output.fps
+    );
+    if (preset) document.getElementById('output-preset').value = preset[0];
+    if (Number.isFinite(output.videoBitrateKbps)) document.getElementById('video-bitrate').value = output.videoBitrateKbps;
+    if (Number.isFinite(output.audioBitrateKbps)) document.getElementById('audio-bitrate').value = output.audioBitrateKbps;
+  } catch (error) {
+    destinationStatus.textContent = `Could not load saved settings: ${error.message}`;
+  }
+}
+
+saveDestinationButton.addEventListener('click', async () => {
+  saveDestinationButton.disabled = true;
+  destinationStatus.textContent = 'Saving securely…';
+  const preset = presetOutput[document.getElementById('output-preset').value] || presetOutput['1080p30'];
+  try {
+    const config = await window.liturgiaStream.saveConfig({
+      destination: {
+        name: document.getElementById('destination-name').value,
+        server: document.getElementById('stream-server').value,
+        streamKey: document.getElementById('stream-key').value
+      },
+      output: {
+        ...preset,
+        videoBitrateKbps: Number(document.getElementById('video-bitrate').value) || 6000,
+        audioBitrateKbps: Number(document.getElementById('audio-bitrate').value) || 160,
+        audioSampleRate: 48000
+      }
+    });
+    document.getElementById('stream-key').value = '';
+    document.getElementById('stream-key').placeholder = 'Saved securely · leave blank to keep';
+    destinationStatus.textContent = `“${config.destination.name}” saved securely on this computer.`;
+  } catch (error) {
+    destinationStatus.textContent = error.message;
+  } finally {
+    saveDestinationButton.disabled = false;
+  }
+});
+
 window.addEventListener('beforeunload', () => {
   cameraStream?.getTracks().forEach((track) => track.stop());
   audioStream?.getTracks().forEach((track) => track.stop());
@@ -181,3 +240,4 @@ window.addEventListener('beforeunload', () => {
 });
 refreshVideoDevices();
 refreshAudioDevices();
+loadStreamConfig();

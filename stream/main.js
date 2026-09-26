@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, session } = require('electron');
+const { app, BrowserWindow, ipcMain, session, safeStorage } = require('electron');
+const { createSettingsStore } = require('./settingsStore');
 
 const { Bonjour } = require('bonjour-service');
 const os = require('os');
@@ -9,6 +10,7 @@ let mainWindow = null;
 let bonjour = null;
 let browser = null;
 const discovered = new Map();
+let settingsStore = null;
 
 function publishDiscovery() {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -81,6 +83,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  settingsStore = createSettingsStore(app.getPath('userData'), safeStorage);
+  ipcMain.handle('stream:config:get', () => settingsStore.load());
+  ipcMain.handle('stream:config:save', (_event, config) => settingsStore.save(config));
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'media');
   });

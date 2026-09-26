@@ -69,13 +69,15 @@
     </section>
 
     <section class="page" id="page-stream">
-      <div class="page-heading"><div><p class="eyebrow">DESTINATION</p><h1>Stream Setup</h1><p class="muted">Add your RTMP or RTMPS destination once. Credentials will be stored securely in a later setup milestone.</p></div></div>
+      <div class="page-heading"><div><p class="eyebrow">DESTINATION</p><h1>Stream Setup</h1><p class="muted">Save one RTMP or RTMPS destination. Your stream key is protected by Windows secure storage.</p></div></div>
       <div class="device-card form-card">
         <label for="destination-name">Destination name</label><input id="destination-name" placeholder="Church YouTube">
-        <label for="stream-server">RTMP or RTMPS server</label><input id="stream-server" placeholder="rtmps://example.com/live">
-        <label for="stream-key">Stream key</label><input id="stream-key" type="password" autocomplete="off" placeholder="Enter your stream key">
-        <div class="inline-fields"><div><label for="resolution">Resolution</label><select id="resolution"><option>1920 × 1080</option><option>1280 × 720</option></select></div><div><label for="frame-rate">Frame rate</label><select id="frame-rate"><option>30 FPS</option><option>60 FPS</option></select></div></div>
-        <button class="button primary" disabled title="The RTMP encoder is the next MVP milestone">Save destination</button>
+        <label for="stream-server">RTMP or RTMPS server</label><input id="stream-server" placeholder="rtmps://example.com/live" inputmode="url">
+        <label for="stream-key">Stream key</label><input id="stream-key" type="password" autocomplete="new-password" placeholder="Enter your stream key">
+        <div class="inline-fields"><div><label for="output-preset">Stream quality</label><select id="output-preset"><option value="1080p30">1080p30</option><option value="720p30">720p30</option><option value="1080p60">1080p60</option></select></div><div><label for="video-bitrate">Video bitrate (Kbps)</label><input id="video-bitrate" type="number" min="1000" max="20000" value="6000"></div></div>
+        <div class="inline-fields"><div><label for="audio-bitrate">Audio bitrate (Kbps)</label><input id="audio-bitrate" type="number" min="64" max="320" value="160"></div><div><label>Audio format</label><input value="AAC · 48 kHz" disabled></div></div>
+        <button class="button primary" id="save-destination">Save destination</button>
+        <p id="destination-status" class="helper" role="status">Enter your destination once and it will be ready for next Sunday.</p>
       </div>
     </section>
   </main>
