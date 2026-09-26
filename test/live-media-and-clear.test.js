@@ -19,6 +19,12 @@ describe('live clear, media, and transition regressions', () => {
     expect(liveHtml).toContain('if (data && data._outputMode) return;');
   });
 
+  test('Clear restore keeps per-display style overrides such as safe area', () => {
+    expect(renderer).toContain("_displayStyleOverrides: getPerDisplayStyleOverrides(type) || undefined");
+    expect(renderer).toContain("_outputMode: 'clear'");
+    expect(renderer).toContain("_outputMode: 'normal'");
+  });
+
   test('Clear never replaces the canonical styled presentation', () => {
     expect(liveHtml).toContain('function createLiveClearPresentation(content)');
     expect(liveHtml).toContain('if (renderContent_content && !renderContent_content.clearPresentation)');

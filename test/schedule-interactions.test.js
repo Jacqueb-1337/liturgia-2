@@ -38,4 +38,14 @@ describe('schedule and song interaction safeguards', () => {
     expect(renderer).toContain('chorusSections.push(flattenedIndex);');
     expect(renderer).toContain("flattenedIndex += section.text.split(/\\n\\n+/).length;");
   });
+
+  test('schedule Bible verse clicks sync the Bible list and search reference', () => {
+    const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+
+    expect(renderer).toContain('const clickedVerseIndex = item.indices[verseIndexInGroup];');
+    expect(renderer).toContain('anchorIndex = clickedVerseIndex;');
+    expect(renderer).toContain('verseListContainer.scrollTop = Math.max(0, clickedVerseIndex * ITEM_HEIGHT - 80);');
+    expect(renderer).toContain('updateSearchBoxForVerse(clickedVerseIndex);');
+    expect(renderer).toContain('updateSearchBoxForVerse(item.indices[0]);');
+  });
 });
