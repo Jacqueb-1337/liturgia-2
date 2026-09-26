@@ -45,3 +45,10 @@
 
 - Added an on-demand Program frame WebSocket from Worship's fullscreen Program window. Stream discovers and connects to Program automatically, then combines the Program feed and selected camera in a 1920x1080 canvas preview.
 - This first capture path uses Electron webContents.capturePage at up to 30 FPS and JPEG quality 82, with backpressure limits. It needs a real two-computer performance check before it can be treated as production-ready; direct shared-GPU frame transfer remains future work.
+
+### FFmpeg output prototype
+
+- Connected the Go Live and End Stream controls to FFmpeg using the composited 1920x1080 canvas and selected microphone. Chromium supplies an intermediate WebM stream; FFmpeg transcodes it to the configured H.264/AAC profile and sends RTMP or RTMPS.
+- Added live FFmpeg progress reporting, requested reconnect delays, hardware encoder fallback, graceful stop, and output capture cleanup. Disabled background throttling for the Stream window during capture.
+- Validation: Stream package syntax check and five focused Jest suites passed (26 tests).
+- This is an integration prototype. A real RTMPS service, prolonged stream, encoder throughput, reconnect behavior against a service that preserves sessions, and two-computer Worship capture still need testing. FFmpeg is detected at runtime and is not yet packaged with the installer; the Chromium WebM intermediate encode also needs latency and performance benchmarking.

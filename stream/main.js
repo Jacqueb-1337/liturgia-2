@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, session, safeStorage } = require('electron');
 const { createSettingsStore } = require('./settingsStore');
-const { executableCandidates, probeFirstAvailable } = require('./ffmpegRuntime');
+const { executableCandidates, probeFirstAvailable, buildRtmpUrl } = require('./ffmpegRuntime');
+const { StreamOutputManager } = require('./outputManager');
 
 const { Bonjour } = require('bonjour-service');
 const os = require('os');
@@ -13,6 +14,8 @@ let browser = null;
 const discovered = new Map();
 let settingsStore = null;
 let encoderProbe = null;
+let outputManager = null;
+let quitAfterOutputStopped = false;
 
 function getEncoderInfo() {
   if (!encoderProbe) {
@@ -90,7 +93,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      backgroundThrottling: false
     }
   });
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -99,7 +103,25 @@ function createWindow() {
 
 app.whenReady().then(() => {
   settingsStore = createSettingsStore(app.getPath('userData'), safeStorage);
+  outputManager = new StreamOutputManager();
+  outputManager.on('status', (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('stream:output:status', status);
+  });
   ipcMain.handle('stream:config:get', () => settingsStore.load());
+  ipcMain.handle('stream:output:start', async () => {
+    const [destination, config, runtime] = await Promise.all([
+      settingsStore.getDestinationCredentials(),
+      settingsStore.load(),
+      getEncoderInfo()
+    ]);
+    return outputManager.start({
+      runtime,
+      output: config.output,
+      outputUrl: buildRtmpUrl(destination.server, destination.streamKey)
+    });
+  });
+  ipcMain.handle('stream:output:chunk', (_event, data) => outputManager.writeChunk(data));
+  ipcMain.handle('stream:output:stop', () => outputManager.stop());
   ipcMain.handle('stream:encoder:info', async () => {
     const info = await getEncoderInfo();
     return {
@@ -128,7 +150,15 @@ app.whenReady().then(() => {
   startDiscovery();
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (!quitAfterOutputStopped && outputManager && !['idle', 'stopped'].includes(outputManager.state)) {
+    event.preventDefault();
+    void outputManager.stop().finally(() => {
+      quitAfterOutputStopped = true;
+      app.quit();
+    });
+    return;
+  }
   if (browser) browser.stop();
   if (bonjour) bonjour.destroy();
 });

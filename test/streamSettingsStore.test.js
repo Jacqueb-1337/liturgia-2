@@ -37,6 +37,15 @@ describe('Liturgia Stream settings store', () => {
     expect(loaded.destination).toEqual({ name: 'Church YouTube', server: 'rtmps://example.test/live', keySaved: true });
   });
 
+  test('makes destination credentials available only to the main process', async () => {
+    await store.save({ destination: { name: 'Test', server: 'rtmps://example.test/live', streamKey: 'main-only-secret' } });
+    await expect(store.getDestinationCredentials()).resolves.toEqual({
+      name: 'Test', server: 'rtmps://example.test/live', streamKey: 'main-only-secret'
+    });
+    const fileText = await fs.promises.readFile(path.join(directory, 'settings.json'), 'utf8');
+    expect(fileText).not.toContain('main-only-secret');
+  });
+
   test('keeps an existing encrypted key when editing the destination without re-entering it', async () => {
     await store.save({ destination: { name: 'Test', server: 'rtmp://example.test/live', streamKey: 'retain-me' } });
     await store.save({ destination: { name: 'Updated', server: 'rtmps://example.test/live', streamKey: '' } });

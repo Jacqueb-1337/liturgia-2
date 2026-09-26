@@ -5,6 +5,7 @@ const {
   executableCandidates,
   buildRtmpUrl,
   buildOutputArgs,
+  buildWebmOutputArgs,
   runEncoderProbe,
   probeFirstAvailable
 } = require('../stream/ffmpegRuntime');
@@ -84,5 +85,25 @@ describe('Liturgia Stream FFmpeg runtime', () => {
       '-g', '60', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-f', 'flv',
       'rtmps://example/live/key'
     ]));
+  });
+
+  test('maps the browser-composited WebM input to H.264/AAC RTMPS output', () => {
+    const args = buildWebmOutputArgs({
+      width: 1920, height: 1080, fps: 30,
+      videoBitrateKbps: 6000, audioBitrateKbps: 160, audioSampleRate: 48000,
+      encoder: 'h264_nvenc', outputUrl: 'rtmps://example/live/key'
+    });
+    expect(args.slice(args.indexOf('-f'), args.indexOf('-f') + 4)).toEqual(['-f', 'webm', '-i', 'pipe:0']);
+    expect(args).toEqual(expect.arrayContaining([
+      '-map', '0:v:0', '-map', '0:a:0', '-c:v', 'h264_nvenc',
+      '-preset', 'p4', '-b:v', '6000k', '-maxrate', '6000k',
+      '-g', '60', '-bf', '0', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
+      '-f', 'flv', 'rtmps://example/live/key'
+    ]));
+  });
+
+  test('requires an output destination for browser-composited input', () => {
+    expect(() => buildWebmOutputArgs()).toThrow('output URL is required');
   });
 });

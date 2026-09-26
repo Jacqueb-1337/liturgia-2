@@ -447,6 +447,198 @@ saveDestinationButton.addEventListener('click', async () => {
   }
 });
 
+let outputActive = false;
+let userStoppingOutput = false;
+let outputAudioContext = null;
+let outputCanvasStream = null;
+let outputComposedStream = null;
+let outputMediaRecorder = null;
+let outputReconnectPreparation = Promise.resolve();
+let outputPendingWrites = new Set();
+let outputStartedAt = 0;
+let currentOutputConfig = { width: 1920, height: 1080, fps: 30, videoBitrateKbps: 6000, audioBitrateKbps: 160, audioSampleRate: 48000 };
+const goLiveButton = document.getElementById('go-live');
+const streamStatusLabel = document.getElementById('stream-status-label');
+const streamStatusDetail = document.getElementById('stream-status-detail');
+const largeStatusDot = document.querySelector('.large-dot');
+
+async function ensureCameraReady() {
+  if (cameraStream) return;
+  if (!selectedDevices.cameraId) throw new Error('Choose a camera on the Video Devices tab first.');
+  cameraStream = await navigator.mediaDevices.getUserMedia({
+    video: { deviceId: { exact: selectedDevices.cameraId } },
+    audio: false
+  });
+  document.getElementById('camera-preview').srcObject = cameraStream;
+  sceneCameraPreview.srcObject = cameraStream;
+  applyScene();
+}
+
+async function ensureMicrophoneReady() {
+  if (audioStream) return;
+  if (!selectedDevices.microphoneId) throw new Error('Choose a microphone on the Audio Devices tab first.');
+  await startMicrophoneMeter(selectedDevices.microphoneId);
+}
+
+function cleanupOutputCapture() {
+  outputComposedStream?.getTracks().forEach((track) => track.stop());
+  outputComposedStream = null;
+  if (outputCanvasStream) outputCanvasStream.getTracks().forEach((track) => track.stop());
+  outputCanvasStream = null;
+  if (outputAudioContext) outputAudioContext.close();
+  outputAudioContext = null;
+  outputMediaRecorder = null;
+}
+
+async function stopOutputRecorder() {
+  const recorder = outputMediaRecorder;
+  if (recorder && recorder.state !== 'inactive') {
+    await new Promise((resolve) => {
+      recorder.addEventListener('stop', resolve, { once: true });
+      try { recorder.stop(); } catch (_) { resolve(); }
+    });
+  }
+  await Promise.allSettled([...outputPendingWrites]);
+  cleanupOutputCapture();
+}
+
+async function startOutputRecorder() {
+  if (outputMediaRecorder && outputMediaRecorder.state === 'recording') return;
+  const scene = currentScene();
+  if (!scene) throw new Error('Choose a scene before going live.');
+  if (scene.cameraVisible && !cameraStream) await ensureCameraReady();
+  if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  await ensureMicrophoneReady();
+
+  outputCanvasStream = preview.captureStream(currentOutputConfig.fps);
+  outputAudioContext = new AudioContext({ sampleRate: currentOutputConfig.audioSampleRate });
+  await outputAudioContext.resume();
+  const destination = outputAudioContext.createMediaStreamDestination();
+  outputAudioContext.createMediaStreamSource(audioStream).connect(destination);
+  outputComposedStream = new MediaStream([
+    ...outputCanvasStream.getVideoTracks(),
+    ...destination.stream.getAudioTracks()
+  ]);
+  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+    ? 'video/webm;codecs=vp8,opus'
+    : 'video/webm';
+  const recorder = new MediaRecorder(outputComposedStream, {
+    mimeType,
+    videoBitsPerSecond: Math.max(2500000, currentOutputConfig.videoBitrateKbps * 1000),
+    audioBitsPerSecond: currentOutputConfig.audioBitrateKbps * 1000
+  });
+  outputMediaRecorder = recorder;
+  recorder.ondataavailable = (event) => {
+    if (!event.data || !event.data.size || !outputActive) return;
+    const write = event.data.arrayBuffer()
+      .then((data) => window.liturgiaStream.sendOutputChunk(data))
+      .catch((error) => {
+        if (outputActive && !userStoppingOutput) streamStatusDetail.textContent = error.message;
+      });
+    outputPendingWrites.add(write);
+    write.finally(() => outputPendingWrites.delete(write));
+  };
+  recorder.onerror = (event) => {
+    streamStatusDetail.textContent = event.error?.message || 'The local video input stopped.';
+  };
+  recorder.start(100);
+}
+
+async function handleOutputStatus(status) {
+  if (status.state === 'awaiting-input') {
+    try {
+      await outputReconnectPreparation;
+      if (outputActive && !userStoppingOutput) await startOutputRecorder();
+    } catch (error) {
+      streamStatusDetail.textContent = error.message;
+      await stopLiveStream();
+    }
+    streamStatusLabel.textContent = 'Connecting…';
+  } else if (status.state === 'live') {
+    outputStartedAt ||= Date.now();
+    streamStatusLabel.textContent = 'LIVE';
+    largeStatusDot.classList.add('live');
+    const fps = Number.isFinite(status.fps) ? `${Math.round(status.fps)} FPS` : 'Sending video';
+    const bitrate = status.bitrate ? ` · ${status.bitrate}` : '';
+    streamStatusDetail.textContent = `${fps}${bitrate}`;
+  } else if (status.state === 'reconnecting') {
+    streamStatusLabel.textContent = 'Connection lost';
+    largeStatusDot.classList.remove('live');
+    const delay = status.retryInMs ? ` Retrying in ${Math.ceil(status.retryInMs / 1000)} seconds.` : ' Retrying now.';
+    streamStatusDetail.textContent = `Reconnecting…${delay}`;
+    outputReconnectPreparation = stopOutputRecorder();
+  } else if (status.state === 'stopping') {
+    streamStatusLabel.textContent = 'Ending stream…';
+  } else if (status.state === 'stopped') {
+    outputActive = false;
+    userStoppingOutput = false;
+    outputStartedAt = 0;
+    largeStatusDot.classList.remove('live');
+    streamStatusLabel.textContent = 'Not streaming';
+    streamStatusDetail.textContent = 'Your settings are saved for next time.';
+    goLiveButton.textContent = 'Go Live';
+    goLiveButton.disabled = false;
+  } else if (status.state === 'connecting') {
+    streamStatusLabel.textContent = 'Starting…';
+    streamStatusDetail.textContent = status.message || 'Starting the stream encoder.';
+  }
+  if (outputActive && status.state !== 'stopped') {
+    goLiveButton.textContent = 'End Stream';
+    goLiveButton.disabled = false;
+  }
+}
+
+async function stopLiveStream() {
+  if (!outputActive) return;
+  userStoppingOutput = true;
+  goLiveButton.disabled = true;
+  await stopOutputRecorder();
+  await window.liturgiaStream.stopOutput();
+}
+
+async function startLiveStream() {
+  const config = await window.liturgiaStream.getConfig();
+  if (!config.destination?.keySaved) throw new Error('Save an RTMP or RTMPS destination and stream key first.');
+  const scene = currentScene();
+  if (!scene || (!scene.cameraVisible && !scene.programVisible)) throw new Error('Choose a scene with a video source.');
+  if (scene.cameraVisible) await ensureCameraReady();
+  if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  await ensureMicrophoneReady();
+  currentOutputConfig = { ...currentOutputConfig, ...(config.output || {}) };
+  outputActive = true;
+  goLiveButton.textContent = 'Starting…';
+  goLiveButton.disabled = true;
+  streamStatusDetail.textContent = 'Connecting to your streaming destination…';
+  try {
+    await window.liturgiaStream.startOutput();
+  } catch (error) {
+    outputActive = false;
+    goLiveButton.textContent = 'Go Live';
+    goLiveButton.disabled = false;
+    throw error;
+  }
+}
+
+goLiveButton.addEventListener('click', async () => {
+  if (outputActive) {
+    if (!window.confirm('End the current stream?')) return;
+    try { await stopLiveStream(); }
+    catch (error) { streamStatusDetail.textContent = error.message; }
+    return;
+  }
+  if (!window.confirm('Start streaming now?')) return;
+  goLiveButton.disabled = true;
+  try {
+    await startLiveStream();
+  } catch (error) {
+    streamStatusLabel.textContent = 'Not streaming';
+    streamStatusDetail.textContent = error.message;
+    goLiveButton.textContent = 'Go Live';
+    goLiveButton.disabled = false;
+  }
+});
+window.liturgiaStream.onOutputStatus((status) => { void handleOutputStatus(status); });
+
 window.addEventListener('beforeunload', () => {
   cameraStream?.getTracks().forEach((track) => track.stop());
   audioStream?.getTracks().forEach((track) => track.stop());

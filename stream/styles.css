@@ -63,6 +63,7 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .instance-row .button { align-self: stretch; }
 .offline-state { display: flex; align-items: center; gap: 9px; font-size: 13px; }
 .large-dot { width: 10px; height: 10px; background: #8c9294; }
+.large-dot.live { background: #e54949; box-shadow: 0 0 10px rgba(229,73,73,.5); }
 .helper { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .service-card .helper { margin: 11px 0 0; text-align: center; }
 .device-card { max-width: 690px; padding: 23px; }

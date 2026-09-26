@@ -90,6 +90,25 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
       return { destination: { name, server, keySaved: true }, output };
     },
 
+    async getDestinationCredentials() {
+      const stored = await readRaw();
+      const destination = stored.destination || {};
+      if (typeof destination.encryptedKey !== 'string' || !safeStorage.isEncryptionAvailable()) {
+        throw new Error('Save a destination and stream key before going live.');
+      }
+      let streamKey;
+      try {
+        streamKey = safeStorage.decryptString(Buffer.from(destination.encryptedKey, 'base64'));
+      } catch (_) {
+        throw new Error('The saved stream key cannot be opened. Enter it again in Stream Setup.');
+      }
+      return {
+        name: String(destination.name || ''),
+        server: String(destination.server || ''),
+        streamKey
+      };
+    },
+
     async saveDevices(devices) {
       const previous = await readRaw();
       const selected = {

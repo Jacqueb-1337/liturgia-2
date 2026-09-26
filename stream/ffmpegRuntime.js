@@ -105,6 +105,53 @@ function buildOutputArgs(options) {
   return args;
 }
 
+function buildWebmOutputArgs(options = {}) {
+  const width = Number(options.width) || 1920;
+  const height = Number(options.height) || 1080;
+  const fps = Number(options.fps) || 30;
+  const videoBitrate = Number(options.videoBitrateKbps) || 6000;
+  const audioBitrate = Number(options.audioBitrateKbps) || 160;
+  const sampleRate = Number(options.audioSampleRate) || 48000;
+  const encoder = options.encoder || 'libx264';
+  const outputUrl = String(options.outputUrl || '');
+  if (!outputUrl) throw new Error('An RTMP or RTMPS output URL is required.');
+  if (![width, height, fps, videoBitrate, audioBitrate, sampleRate].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error('Output resolution, frame rate, and bitrates must be positive numbers.');
+  }
+  const args = [
+    '-hide_banner', '-loglevel', 'warning',
+    '-progress', 'pipe:2', '-stats_period', '1',
+    '-fflags', '+genpts', '-thread_queue_size', '512',
+    '-f', 'webm', '-i', 'pipe:0',
+    '-map', '0:v:0', '-map', '0:a:0',
+    '-vf', `scale=${width}:${height}:flags=bicubic`,
+    '-r', String(fps),
+    '-c:v', encoder
+  ];
+  if (encoder === 'h264_nvenc') args.push('-preset', 'p4', '-tune', 'll');
+  else if (encoder === 'h264_qsv') args.push('-preset', 'medium');
+  else if (encoder === 'h264_amf') args.push('-quality', 'speed');
+  else args.push('-preset', 'veryfast', '-tune', 'zerolatency');
+  args.push(
+    '-b:v', `${videoBitrate}k`,
+    '-minrate', `${videoBitrate}k`,
+    '-maxrate', `${videoBitrate}k`,
+    '-bufsize', `${videoBitrate * 2}k`,
+    '-g', String(Math.max(1, Math.round(fps * 2))),
+    '-keyint_min', String(Math.max(1, Math.round(fps * 2))),
+    '-bf', '0',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', `${audioBitrate}k`,
+    '-ar', String(sampleRate),
+    '-ac', '2',
+    '-rw_timeout', '15000000',
+    '-f', 'flv',
+    outputUrl
+  );
+  return args;
+}
+
 function probeFirstAvailable(candidates, execFileImpl = execFile) {
   return new Promise(async (resolve) => {
     for (const candidate of candidates) {
@@ -131,6 +178,7 @@ module.exports = {
   executableCandidates,
   buildRtmpUrl,
   buildOutputArgs,
+  buildWebmOutputArgs,
   runEncoderProbe,
   probeFirstAvailable
 };
