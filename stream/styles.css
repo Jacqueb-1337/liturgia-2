@@ -100,3 +100,7 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
   .live-layout { grid-template-columns: 1fr; }
   .live-side { grid-template-columns: 1fr 1fr; }
 }
+
+.stream-elapsed { margin: 8px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; }
+
+.stream-elapsed { margin: 8px 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; }

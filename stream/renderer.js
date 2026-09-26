@@ -456,11 +456,22 @@ let outputMediaRecorder = null;
 let outputReconnectPreparation = Promise.resolve();
 let outputPendingWrites = new Set();
 let outputStartedAt = 0;
+let outputClockTimer = null;
 let currentOutputConfig = { width: 1920, height: 1080, fps: 30, videoBitrateKbps: 6000, audioBitrateKbps: 160, audioSampleRate: 48000 };
 const goLiveButton = document.getElementById('go-live');
 const streamStatusLabel = document.getElementById('stream-status-label');
 const streamStatusDetail = document.getElementById('stream-status-detail');
 const largeStatusDot = document.querySelector('.large-dot');
+const streamElapsed = document.getElementById('stream-elapsed');
+
+function updateStreamElapsed() {
+  if (!outputStartedAt) return;
+  const seconds = Math.floor((Date.now() - outputStartedAt) / 1000);
+  const hours = String(Math.floor(seconds / 3600)).padStart(2, '0');
+  const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+  const remainder = String(seconds % 60).padStart(2, '0');
+  streamElapsed.textContent = `Duration ${hours}:${minutes}:${remainder}`;
+}
 
 async function ensureCameraReady() {
   if (cameraStream) return;
@@ -555,12 +566,19 @@ async function handleOutputStatus(status) {
     }
     streamStatusLabel.textContent = 'Connecting…';
   } else if (status.state === 'live') {
-    outputStartedAt ||= Date.now();
+    if (!outputStartedAt) {
+      outputStartedAt = Date.now();
+      streamElapsed.hidden = false;
+      updateStreamElapsed();
+      outputClockTimer = window.setInterval(updateStreamElapsed, 1000);
+    }
     streamStatusLabel.textContent = 'LIVE';
     largeStatusDot.classList.add('live');
     const fps = Number.isFinite(status.fps) ? `${Math.round(status.fps)} FPS` : 'Sending video';
     const bitrate = status.bitrate ? ` · ${status.bitrate}` : '';
-    streamStatusDetail.textContent = `${fps}${bitrate}`;
+    const dropped = Number.isFinite(status.droppedFrames) ? ` ? ${status.droppedFrames} dropped` : ``;
+    const resolution = `${currentOutputConfig.width}?${currentOutputConfig.height}`;
+    streamStatusDetail.textContent = `${resolution} ? ${fps}${bitrate}${dropped}`;
   } else if (status.state === 'reconnecting') {
     streamStatusLabel.textContent = 'Connection lost';
     largeStatusDot.classList.remove('live');
@@ -573,6 +591,10 @@ async function handleOutputStatus(status) {
     outputActive = false;
     userStoppingOutput = false;
     outputStartedAt = 0;
+    if (outputClockTimer !== null) window.clearInterval(outputClockTimer);
+    outputClockTimer = null;
+    streamElapsed.hidden = true;
+    streamElapsed.textContent = 'Duration 00:00:00';
     largeStatusDot.classList.remove('live');
     streamStatusLabel.textContent = 'Not streaming';
     streamStatusDetail.textContent = 'Your settings are saved for next time.';

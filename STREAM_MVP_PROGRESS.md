@@ -52,3 +52,11 @@
 - Added live FFmpeg progress reporting, requested reconnect delays, hardware encoder fallback, graceful stop, and output capture cleanup. Disabled background throttling for the Stream window during capture.
 - Validation: Stream package syntax check and five focused Jest suites passed (26 tests).
 - This is an integration prototype. A real RTMPS service, prolonged stream, encoder throughput, reconnect behavior against a service that preserves sessions, and two-computer Worship capture still need testing. FFmpeg is detected at runtime and is not yet packaged with the installer; the Chromium WebM intermediate encode also needs latency and performance benchmarking.
+
+### Live health display
+
+- Added a persistent elapsed-time counter during LIVE and made resolution, encoder FPS, upload bitrate, and dropped-frame count visible under stream status. The counter resets on End Stream and continues through reconnects.
+
+### Live health display
+
+- Added a persistent elapsed-time counter during LIVE and made resolution, encoder FPS, upload bitrate, and dropped-frame count visible under stream status. The counter resets on End Stream and continues through reconnects.
