@@ -15,6 +15,7 @@
   <nav class="tabs" aria-label="Main sections">
     <button class="tab active" data-page="live">Live</button>
     <button class="tab" data-page="scenes">Scenes</button>
+    <button class="tab" data-page="appearance">Worship Styles</button>
     <button class="tab" data-page="video">Video Devices</button>
     <button class="tab" data-page="audio">Audio Devices</button>
     <button class="tab" data-page="stream">Stream Setup</button>
@@ -61,13 +62,38 @@
       <p id="scene-message" class="helper">Choose a scene. Select devices on the Video Devices and Audio Devices tabs.</p>
     </section>
 
+    <section class="page" id="page-appearance">
+      <div class="page-heading"><div><p class="eyebrow">WORSHIP OUTPUT</p><h1>Worship Styles</h1><p class="muted">Edit the connected Worship presentation from Stream. Changes appear live and remain saved in Worship.</p></div></div>
+      <div class="device-card form-card">
+        <p id="worship-style-status" class="helper" role="status">Looking for a Worship output that supports style editing…</p>
+        <label for="worship-style-target">Element</label>
+        <select id="worship-style-target">
+          <option value="verseText">Verse text</option>
+          <option value="verseNumber">Verse number</option>
+          <option value="verseReference">Scripture reference</option>
+          <option value="verseSubscript">Verse subscript</option>
+          <option value="songText">Song lyrics</option>
+          <option value="songTitle">Song title</option>
+          <option value="songReference">Song reference</option>
+          <option value="global">Whole slide</option>
+        </select>
+        <div class="inline-fields">
+          <div><label for="worship-style-color">Text color</label><input id="worship-style-color" type="color" value="#ffffff"></div>
+          <div><label for="worship-style-size">Font size (px)</label><input id="worship-style-size" type="number" min="8" max="300" placeholder="Use Worship default"></div>
+        </div>
+        <label for="worship-style-font">Font</label><select id="worship-style-font"><option value="">Use Worship default</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Segoe UI">Segoe UI</option></select>
+        <details class="encoder-details"><summary>More style options (CSS)</summary><p class="helper">Use the same CSS declarations as Worship’s style editor for position, shadows, stroke, background and layout.</p><textarea id="worship-style-css" rows="7" spellcheck="false" placeholder="color: #ffffff; font-size: 60px;"></textarea></details>
+        <div class="style-actions"><button class="button primary" id="save-worship-style">Apply to Worship</button><button class="button secondary" id="reset-worship-style">Reset element</button></div>
+      </div>
+    </section>
+
     <section class="page" id="page-video">
       <div class="page-heading"><div><p class="eyebrow">INPUTS</p><h1>Video Devices</h1><p class="muted">Choose a camera or capture card for your service.</p></div><button class="button secondary" id="refresh-video">Refresh devices</button></div>
       <div class="device-card"><label for="video-device">Camera or capture card</label><select id="video-device"><option value="">No camera selected</option></select><p id="video-message" class="helper">Allow camera access to list available devices.</p><video id="camera-preview" autoplay muted playsinline hidden></video><button class="button secondary" id="enable-video">Check camera access</button></div>
     </section>
 
     <section class="page" id="page-audio">
-      <div class="page-heading"><div><p class="eyebrow">INPUTS</p><h1>Audio Devices</h1><p class="muted">Choose a microphone. System and capture-card audio will be added in the encoder milestone.</p></div><button class="button secondary" id="refresh-audio">Refresh devices</button></div>
+      <div class="page-heading"><div><p class="eyebrow">INPUTS</p><h1>Audio Devices</h1><p class="muted">Choose a microphone. If none is selected, Liturgia streams with silent audio.</p></div><button class="button secondary" id="refresh-audio">Refresh devices</button></div>
       <div class="device-card"><label for="audio-device">Microphone</label><select id="audio-device"><option value="">No microphone selected</option></select><p id="audio-message" class="helper">Allow microphone access to list available devices.</p><div class="meter" aria-label="Microphone level"><span id="audio-level"></span></div><button class="button secondary" id="enable-audio">Check microphone access</button></div>
     </section>
 

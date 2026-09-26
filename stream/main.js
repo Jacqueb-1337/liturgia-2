@@ -6,12 +6,14 @@ const { StreamOutputManager } = require('./outputManager');
 const { Bonjour } = require('bonjour-service');
 const os = require('os');
 const net = require('net');
+const http = require('http');
 const path = require('path');
 
 let mainWindow = null;
 let bonjour = null;
 let browser = null;
 const discovered = new Map();
+const publicInstances = () => [...discovered.values()].map(({ styleToken, ...instance }) => instance);
 let settingsStore = null;
 let encoderProbe = null;
 let outputManager = null;
@@ -31,7 +33,7 @@ function getEncoderInfo() {
 
 function publishDiscovery() {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('worship:instances', [...discovered.values()]);
+    mainWindow.webContents.send('worship:instances', publicInstances());
   }
 }
 
@@ -51,8 +53,49 @@ function normalizeService(service) {
     port: service.port,
     version: String((service.txt && service.txt.version) || ''),
     url: `http://${address}:${service.port}/`,
-    programStreamUrl: displayId === '0' ? `ws://${address}:${service.port}/program-stream` : null
+    programStreamUrl: displayId === '0' ? `ws://${address}:${service.port}/program-stream` : null,
+    styleAvailable: displayId === '0' && !!service.txt?.styleToken,
+    styleToken: displayId === '0' ? String(service.txt?.styleToken || '') : ''
   };
+}
+
+function requestWorshipStyles(key, method, styles) {
+  const instance = discovered.get(key);
+  if (!instance?.styleToken || instance.displayId !== '0') {
+    return Promise.reject(new Error('This Worship instance does not support LAN style editing.'));
+  }
+  const body = styles ? JSON.stringify(styles) : '';
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: instance.address,
+      port: instance.port,
+      path: '/program-styles',
+      method,
+      timeout: 5000,
+      headers: {
+        'X-Liturgia-Stream-Token': instance.styleToken,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, (response) => {
+      let result = '';
+      response.on('data', (chunk) => {
+        result += chunk;
+        if (result.length > 32768) response.destroy(new Error('Worship style response is too large.'));
+      });
+      response.on('end', () => {
+        try {
+          const parsed = JSON.parse(result);
+          if (response.statusCode !== 200) throw new Error(parsed.error || 'Could not edit Worship styles.');
+          resolve(parsed.styles);
+        } catch (error) { reject(error); }
+      });
+      response.on('error', reject);
+    });
+    request.on('timeout', () => request.destroy(new Error('Worship did not respond.')));
+    request.on('error', reject);
+    request.end(body);
+  });
 }
 
 function startDiscovery() {
@@ -139,13 +182,15 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('worship:discover', () => {
     startDiscovery();
-    return [...discovered.values()];
+    return publicInstances();
   });
   ipcMain.handle('worship:refresh', () => {
     if (browser) browser.update();
-    return [...discovered.values()];
+    return publicInstances();
   });
-  ipcMain.handle('worship:instances', () => [...discovered.values()]);
+  ipcMain.handle('worship:instances', () => publicInstances());
+  ipcMain.handle('worship:styles:get', (_event, key) => requestWorshipStyles(key, 'GET'));
+  ipcMain.handle('worship:styles:save', (_event, key, styles) => requestWorshipStyles(key, 'PUT', styles));
   createWindow();
   startDiscovery();
 });

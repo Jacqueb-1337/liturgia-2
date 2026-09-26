@@ -80,6 +80,9 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .encoder-row strong { color: var(--text); font-weight: 600; }
 .encoder-details { margin: 0 0 15px; color: var(--muted); font-size: 12px; }
 .encoder-details summary { cursor: pointer; }
+#worship-style-css { width: 100%; margin: 8px 0; padding: 10px; color: var(--text); background: #17191a; border: 1px solid var(--border); border-radius: 5px; font: 13px/1.5 Consolas, monospace; resize: vertical; }
+#worship-style-color { padding: 3px; cursor: pointer; }
+.style-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .encoder-details .helper { margin: 8px 0 0; }
 .inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .empty-card { max-width: 690px; padding: 40px; text-align: center; }

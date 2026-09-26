@@ -47,6 +47,7 @@ const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib
 const RemoteServer = require('./remote-server');
 const { ensureProgramFirewall } = require('./lib/streamFirewall');
 const { createProgramFramePublisher, selectProgramWindow } = require('./lib/programFramePublisher');
+const { decodeProgramStyles, applyProgramStylePatch } = require('./lib/programStyles');
 const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -259,6 +260,7 @@ let programCaptureDisplayId = null;
 // Per-display network display servers
 // Map<displayId, {server, clients:Set, port, lastPayload, lastMode, lastError}>
 const displayNetServers = new Map();
+const programStyleToken = crypto.randomBytes(32).toString('hex');
 let streamProgramFirewallStatus = { success: false, active: null, message: 'Windows network access has not been checked.' };
 let displayNetBonjour = null;
 const displayNetBonjourServices = new Map();
@@ -3980,6 +3982,45 @@ function startDisplayNetServer(displayId, port) {
       searchParams = u.searchParams;
     } catch (_) {}
 
+    if (displayId === 0 && pathname === '/program-styles') {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      if (req.headers['x-liturgia-stream-token'] !== programStyleToken) {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'Worship style access denied' })); return;
+      }
+      if (req.method === 'GET') {
+        fs.promises.readFile(settingsPath, 'utf8')
+          .then((raw) => JSON.parse(raw))
+          .catch(() => ({}))
+          .then((stored) => res.end(JSON.stringify({ styles: decodeProgramStyles(stored.previewStyles) })));
+        return;
+      }
+      if (req.method !== 'PUT') {
+        res.writeHead(405); res.end(JSON.stringify({ error: 'Method not allowed' })); return;
+      }
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 16384) req.destroy();
+      });
+      req.on('end', async () => {
+        try {
+          const patch = JSON.parse(body);
+          const stored = await fs.promises.readFile(settingsPath, 'utf8')
+            .then(JSON.parse).catch(() => ({}));
+          const styles = applyProgramStylePatch(stored.previewStyles, patch);
+          await applySettingsPatch({ previewStyles: styles });
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('styles-updated', styles);
+          }
+          res.end(JSON.stringify({ styles: decodeProgramStyles(styles) }));
+        } catch (error) {
+          res.writeHead(400); res.end(JSON.stringify({ error: error.message }));
+        }
+      });
+      return;
+    }
+
     if (pathname === '/' || pathname === '/index.html') {
       fs.readFile(receiverHtmlPath, 'utf8', (err, data) => {
         if (err) { res.writeHead(404); res.end('Receiver page not found'); return; }
@@ -4153,7 +4194,7 @@ function startDisplayNetServer(displayId, port) {
         name: displayId === 0 ? 'Liturgia Worship Program' : `Liturgia Worship Display ${displayId}`,
         type: 'liturgia-display',
         port,
-        txt: { displayId: String(displayId), version: app.getVersion(), protocol: '1' }
+        txt: { displayId: String(displayId), version: app.getVersion(), protocol: '1', ...(displayId === 0 ? { styleToken: programStyleToken } : {}) }
       });
       service.on('error', (error) => console.warn('[network-display] mDNS publish failed:', error.message));
       displayNetBonjourServices.set(displayId, service);

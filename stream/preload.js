@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('liturgiaStream', {
   discoverWorship: () => ipcRenderer.invoke('worship:discover'),
   refreshWorship: () => ipcRenderer.invoke('worship:refresh'),
   getWorshipInstances: () => ipcRenderer.invoke('worship:instances'),
+  getWorshipStyles: (key) => ipcRenderer.invoke('worship:styles:get', key),
+  saveWorshipStyles: (key, styles) => ipcRenderer.invoke('worship:styles:save', key, styles),
   getConfig: () => ipcRenderer.invoke('stream:config:get'),
   getEncoderInfo: () => ipcRenderer.invoke('stream:encoder:info'),
   saveConfig: (config) => ipcRenderer.invoke('stream:config:save', config),

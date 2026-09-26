@@ -16,6 +16,14 @@ const sceneCameraPreview = document.getElementById('scene-camera-preview');
 const sceneList = document.getElementById('scene-list');
 const sceneMessage = document.getElementById('scene-message');
 const instancesByKey = new Map();
+const worshipStyleTarget = document.getElementById('worship-style-target');
+const worshipStyleStatus = document.getElementById('worship-style-status');
+const worshipStyleCss = document.getElementById('worship-style-css');
+const worshipStyleColor = document.getElementById('worship-style-color');
+const worshipStyleSize = document.getElementById('worship-style-size');
+const worshipStyleFont = document.getElementById('worship-style-font');
+let worshipStyles = null;
+let worshipStyleInstanceKey = '';
 let scenes = [];
 let activeSceneId = 'camera-program';
 let selectedDevices = { cameraId: '', microphoneId: '' };
@@ -170,10 +178,82 @@ async function selectScene(sceneId) {
   }
 }
 
+function showWorshipStyle() {
+  const css = worshipStyles?.[worshipStyleTarget.value] || '';
+  worshipStyleCss.value = css;
+  const style = document.createElement('div').style;
+  style.cssText = css;
+  const color = style.getPropertyValue('color').trim();
+  worshipStyleColor.value = /^#[0-9a-f]{6}$/i.test(color) ? color : '#ffffff';
+  const size = style.getPropertyValue('font-size').trim().match(/^(\d+)px$/);
+  worshipStyleSize.value = size ? size[1] : '';
+  const font = style.getPropertyValue('font-family').replaceAll('"', '').trim();
+  worshipStyleFont.value = [...worshipStyleFont.options].some((option) => option.value === font) ? font : '';
+}
+
+async function loadWorshipStyles(key) {
+  const instance = instancesByKey.get(key);
+  if (!instance?.styleAvailable) {
+    worshipStyles = null;
+    worshipStyleStatus.textContent = 'This Worship output does not support LAN style editing. Start Worship from the current source version.';
+    return;
+  }
+  worshipStyleInstanceKey = key;
+  worshipStyleStatus.textContent = 'Loading Worship styles…';
+  try {
+    const styles = await window.liturgiaStream.getWorshipStyles(key);
+    if (worshipStyleInstanceKey !== key) return;
+    worshipStyles = styles;
+    showWorshipStyle();
+    worshipStyleStatus.textContent = 'Connected. Changes will update the live Worship output.';
+  } catch (error) {
+    worshipStyleStatus.textContent = `Could not load Worship styles: ${error.message}`;
+  }
+}
+
+function updateWorshipStyleCss() {
+  const style = document.createElement('div').style;
+  style.cssText = worshipStyleCss.value;
+  style.setProperty('color', worshipStyleColor.value);
+  if (worshipStyleSize.value) style.setProperty('font-size', `${worshipStyleSize.value}px`);
+  else style.removeProperty('font-size');
+  if (worshipStyleFont.value) style.setProperty('font-family', worshipStyleFont.value);
+  else style.removeProperty('font-family');
+  worshipStyleCss.value = style.cssText;
+}
+
+worshipStyleTarget.addEventListener('change', showWorshipStyle);
+for (const control of [worshipStyleColor, worshipStyleSize, worshipStyleFont]) {
+  control.addEventListener('change', updateWorshipStyleCss);
+}
+async function saveWorshipStyle(css) {
+  if (!worshipStyleInstanceKey || !worshipStyles) {
+    worshipStyleStatus.textContent = 'Connect to Liturgia Worship first.';
+    return;
+  }
+  worshipStyleStatus.textContent = 'Applying style to Worship…';
+  try {
+    worshipStyles = await window.liturgiaStream.saveWorshipStyles(worshipStyleInstanceKey, {
+      [worshipStyleTarget.value]: css
+    });
+    showWorshipStyle();
+    worshipStyleStatus.textContent = 'Style applied and saved in Worship.';
+  } catch (error) {
+    worshipStyleStatus.textContent = `Could not apply style: ${error.message}`;
+  }
+}
+document.getElementById('save-worship-style').addEventListener('click', () => {
+  void saveWorshipStyle(worshipStyleCss.value);
+});
+document.getElementById('reset-worship-style').addEventListener('click', () => {
+  void saveWorshipStyle('');
+});
+
 function connectToInstance(key) {
   const instance = instancesByKey.get(key);
   if (!instance) return;
   selectedInstanceKey = key;
+  if (worshipStyleInstanceKey !== key) void loadWorshipStyles(key);
   headerStatus.classList.remove('connected');
   worshipStatus.textContent = 'Connecting to Liturgia Program';
   if (programSocket) programSocket.close();
@@ -456,6 +536,7 @@ saveDestinationButton.addEventListener('click', async () => {
 let outputActive = false;
 let userStoppingOutput = false;
 let outputAudioContext = null;
+let outputSilentSource = null;
 let outputCanvasStream = null;
 let outputComposedStream = null;
 let outputMediaRecorder = null;
@@ -502,6 +583,8 @@ function cleanupOutputCapture() {
   outputComposedStream = null;
   if (outputCanvasStream) outputCanvasStream.getTracks().forEach((track) => track.stop());
   outputCanvasStream = null;
+  if (outputSilentSource) outputSilentSource.stop();
+  outputSilentSource = null;
   if (outputAudioContext) outputAudioContext.close();
   outputAudioContext = null;
   outputMediaRecorder = null;
@@ -525,13 +608,21 @@ async function startOutputRecorder() {
   if (!scene) throw new Error('Choose a scene before going live.');
   if (scene.cameraVisible && !cameraStream) await ensureCameraReady();
   if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
-  await ensureMicrophoneReady();
+  if (selectedDevices.microphoneId) await ensureMicrophoneReady();
 
   outputCanvasStream = preview.captureStream(currentOutputConfig.fps);
   outputAudioContext = new AudioContext({ sampleRate: currentOutputConfig.audioSampleRate });
   await outputAudioContext.resume();
   const destination = outputAudioContext.createMediaStreamDestination();
-  outputAudioContext.createMediaStreamSource(audioStream).connect(destination);
+  if (audioStream) {
+    outputAudioContext.createMediaStreamSource(audioStream).connect(destination);
+  } else {
+    outputSilentSource = outputAudioContext.createConstantSource();
+    const silence = outputAudioContext.createGain();
+    silence.gain.value = 0;
+    outputSilentSource.connect(silence).connect(destination);
+    outputSilentSource.start();
+  }
   outputComposedStream = new MediaStream([
     ...outputCanvasStream.getVideoTracks(),
     ...destination.stream.getAudioTracks()
@@ -589,7 +680,11 @@ async function handleOutputStatus(status) {
     streamStatusLabel.textContent = 'Connection lost';
     largeStatusDot.classList.remove('live');
     const delay = status.retryInMs ? ` Retrying in ${Math.ceil(status.retryInMs / 1000)} seconds.` : ' Retrying now.';
-    streamStatusDetail.textContent = `Reconnecting…${delay}`;
+    const rejected = /Error opening output|Error opening output files|IO error: End of file/i.test(status.error || '');
+    if (rejected) streamStatusLabel.textContent = 'Destination disconnected';
+    streamStatusDetail.textContent = rejected
+      ? `The streaming service closed the connection. Check that your stream key and broadcast session are current.${delay}`
+      : `Reconnecting…${delay}`;
     outputReconnectPreparation = stopOutputRecorder();
   } else if (status.state === 'stopping') {
     streamStatusLabel.textContent = 'Ending stream…';
@@ -624,14 +719,22 @@ async function stopLiveStream() {
   await window.liturgiaStream.stopOutput();
 }
 
-async function startLiveStream() {
+async function checkLiveReadiness() {
   const config = await window.liturgiaStream.getConfig();
   if (!config.destination?.keySaved) throw new Error('Save an RTMP or RTMPS destination and stream key first.');
   const scene = currentScene();
   if (!scene || (!scene.cameraVisible && !scene.programVisible)) throw new Error('Choose a scene with a video source.');
-  if (scene.cameraVisible) await ensureCameraReady();
+  if (scene.cameraVisible && !selectedDevices.cameraId) {
+    throw new Error('This scene needs a camera. Select one on Video Devices, or choose Liturgia Fullscreen on Scenes.');
+  }
   if (scene.programVisible && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
-  await ensureMicrophoneReady();
+  return config;
+}
+
+async function startLiveStream(config) {
+  const scene = currentScene();
+  if (scene.cameraVisible) await ensureCameraReady();
+  if (selectedDevices.microphoneId) await ensureMicrophoneReady();
   currentOutputConfig = { ...currentOutputConfig, ...(config.output || {}) };
   outputActive = true;
   goLiveButton.textContent = 'Starting…';
@@ -654,10 +757,17 @@ goLiveButton.addEventListener('click', async () => {
     catch (error) { streamStatusDetail.textContent = error.message; }
     return;
   }
+  let config;
+  try {
+    config = await checkLiveReadiness();
+  } catch (error) {
+    streamStatusDetail.textContent = error.message;
+    return;
+  }
   if (!window.confirm('Start streaming now?')) return;
   goLiveButton.disabled = true;
   try {
-    await startLiveStream();
+    await startLiveStream(config);
   } catch (error) {
     streamStatusLabel.textContent = 'Not streaming';
     streamStatusDetail.textContent = error.message;
