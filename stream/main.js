@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, session, safeStorage } = require('electron');
 const { createSettingsStore } = require('./settingsStore');
+const { executableCandidates, probeFirstAvailable } = require('./ffmpegRuntime');
 
 const { Bonjour } = require('bonjour-service');
 const os = require('os');
@@ -11,6 +12,19 @@ let bonjour = null;
 let browser = null;
 const discovered = new Map();
 let settingsStore = null;
+let encoderProbe = null;
+
+function getEncoderInfo() {
+  if (!encoderProbe) {
+    encoderProbe = probeFirstAvailable(executableCandidates({
+      platform: process.platform,
+      configuredPath: process.env.LITURGIA_FFMPEG_PATH,
+      resourcesPath: process.resourcesPath,
+      appPath: __dirname
+    }));
+  }
+  return encoderProbe;
+}
 
 function publishDiscovery() {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -85,6 +99,15 @@ function createWindow() {
 app.whenReady().then(() => {
   settingsStore = createSettingsStore(app.getPath('userData'), safeStorage);
   ipcMain.handle('stream:config:get', () => settingsStore.load());
+  ipcMain.handle('stream:encoder:info', async () => {
+    const info = await getEncoderInfo();
+    return {
+      available: info.available,
+      encoder: info.encoder ? info.encoder.label : null,
+      supported: info.supported.map((item) => item.label),
+      error: info.error
+    };
+  });
   ipcMain.handle('stream:config:save', (_event, config) => settingsStore.save(config));
   ipcMain.handle('stream:scenes:save', (_event, scenes, activeSceneId) => settingsStore.saveScenes(scenes, activeSceneId));
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {

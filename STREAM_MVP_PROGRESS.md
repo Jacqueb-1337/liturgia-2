@@ -38,3 +38,5 @@
 2. Compose Liturgia Program and camera sources into the preview with scene switching.
 3. Add RTMPS/H.264/AAC output, reconnect behavior, and protected destination storage.
 4. Add persistent scenes and remaining audio controls, then run long-duration reliability tests.
+- Added FFmpeg runtime discovery with NVENC, Quick Sync, AMD AMF, and libx264 preference order; the normal setting stays Automatic.
+- Added tested RTMP/RTMPS URL validation and baseline H.264/AAC CBR output argument construction. This is still not connected to the compositor or Go Live control.

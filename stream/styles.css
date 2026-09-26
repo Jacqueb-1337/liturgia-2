@@ -73,6 +73,11 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .meter { height: 8px; margin: 0 0 19px; border-radius: 99px; background: #111; overflow: hidden; }
 .meter span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--green); transition: width .08s linear; }
 .form-card { display: grid; }
+.encoder-row { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 9px; color: var(--muted); font-size: 13px; }
+.encoder-row strong { color: var(--text); font-weight: 600; }
+.encoder-details { margin: 0 0 15px; color: var(--muted); font-size: 12px; }
+.encoder-details summary { cursor: pointer; }
+.encoder-details .helper { margin: 8px 0 0; }
 .inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .empty-card { max-width: 690px; padding: 40px; text-align: center; }
 .empty-card p { color: var(--muted); font-size: 13px; line-height: 1.6; }

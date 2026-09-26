@@ -251,6 +251,18 @@ const presetOutput = {
 const destinationStatus = document.getElementById('destination-status');
 const saveDestinationButton = document.getElementById('save-destination');
 
+async function loadEncoderInfo() {
+  const infoElement = document.getElementById('encoder-info');
+  try {
+    const info = await window.liturgiaStream.getEncoderInfo();
+    infoElement.textContent = info.available
+      ? `Available in FFmpeg: ${info.supported.join(', ')}. Actual device availability is checked when streaming starts.`
+      : info.error;
+  } catch (error) {
+    infoElement.textContent = `Encoder detection failed: ${error.message}`;
+  }
+}
+
 async function loadStreamConfig() {
   try {
     const config = await window.liturgiaStream.getConfig();
@@ -313,3 +325,4 @@ window.addEventListener('beforeunload', () => {
 refreshVideoDevices();
 refreshAudioDevices();
 loadStreamConfig();
+loadEncoderInfo();

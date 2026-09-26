@@ -78,6 +78,8 @@
         <label for="stream-key">Stream key</label><input id="stream-key" type="password" autocomplete="new-password" placeholder="Enter your stream key">
         <div class="inline-fields"><div><label for="output-preset">Stream quality</label><select id="output-preset"><option value="1080p30">1080p30</option><option value="720p30">720p30</option><option value="1080p60">1080p60</option></select></div><div><label for="video-bitrate">Video bitrate (Kbps)</label><input id="video-bitrate" type="number" min="1000" max="20000" value="6000"></div></div>
         <div class="inline-fields"><div><label for="audio-bitrate">Audio bitrate (Kbps)</label><input id="audio-bitrate" type="number" min="64" max="320" value="160"></div><div><label>Audio format</label><input value="AAC · 48 kHz" disabled></div></div>
+        <div class="encoder-row"><span>Encoder</span><strong>Automatic</strong></div>
+        <details class="encoder-details"><summary>Advanced encoder details</summary><p id="encoder-info" class="helper">Checking FFmpeg encoders…</p></details>
         <button class="button primary" id="save-destination">Save destination</button>
         <p id="destination-status" class="helper" role="status">Enter your destination once and it will be ready for next Sunday.</p>
       </div>
