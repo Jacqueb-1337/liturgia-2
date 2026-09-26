@@ -95,6 +95,10 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 #scene-camera-preview[hidden] { display: none; }
 
 
+.layer-context-menu { position: fixed; z-index: 30; display: grid; min-width: 178px; padding: 5px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 12px 28px rgba(0,0,0,.45); }
+.layer-context-menu button { width: 100%; padding: 8px 10px; border: 0; border-radius: 4px; color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+.layer-context-menu button:hover, .layer-context-menu button:focus { background: #394146; }
+
 .worship-defaults { margin-top: 18px; padding: 11px; border: 1px solid var(--border); border-radius: 6px; }
 .worship-defaults summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .worship-default-form { display: grid; gap: 7px; padding-top: 10px; }

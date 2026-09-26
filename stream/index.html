@@ -88,7 +88,7 @@
                 <label id="layer-font-size-label" hidden>Text size <input data-layer-field="fontSize" type="number" min="8" max="300"></label>
                 <label id="layer-color-label" hidden>Text color <input id="layer-color" type="color"></label>
               </div>
-              <div class="layer-actions"><button class="button secondary" id="layer-fit">Fit canvas</button><button class="button secondary" id="layer-center">Center</button><button class="button secondary" id="layer-remove">Remove layer</button></div>
+              <div class="layer-actions"><button class="button secondary" id="layer-fit">Fit canvas</button><button class="button secondary" id="layer-center">Center</button><button class="button secondary" id="layer-duplicate">Duplicate</button><button class="button secondary" id="layer-remove">Remove layer</button></div>
               <h2 id="layer-appearance-heading" hidden>Source appearance</h2>
               <p id="layer-appearance-note" class="helper" hidden>These adjustments affect only this layer, even when another layer uses the same Worship output.</p>
               <div id="layer-appearance-fields" class="editor-fields" hidden>
@@ -157,6 +157,7 @@
       </div>
     </section>
   </main>
+  <div id="layer-context-menu" class="layer-context-menu" role="menu" hidden><button role="menuitem" data-menu-action="edit">Edit source</button><button role="menuitem" data-menu-action="duplicate">Duplicate layer</button><button role="menuitem" data-menu-action="fit">Fit canvas</button><button role="menuitem" data-menu-action="remove">Remove layer</button></div>
   <script src="renderer.js"></script>
 </body>
 </html>

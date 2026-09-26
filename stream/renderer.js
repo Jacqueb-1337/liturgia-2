@@ -294,7 +294,7 @@ function renderCustomEditor() {
       event.preventDefault();
       selectedLayerId = layer.id;
       renderCustomEditor();
-      layerProperties.scrollIntoView({ block: 'nearest' });
+      showLayerMenu(event);
     });
     const control = (caption, title, callback) => {
       const button = document.createElement('button');
@@ -424,6 +424,17 @@ document.getElementById('layer-center').onclick = () => {
   layer.y = Math.round((1080 - layer.height) / 2);
   renderCustomEditor(); persistScenes();
 };
+function duplicateSelectedLayer() {
+  const scene = currentScene(), layer = selectedLayer();
+  if (!scene?.custom || !layer) return;
+  if (scene.layers.length >= 20) { sceneMessage.textContent = 'Maximum of 20 layers reached.'; return; }
+  const copy = { ...layer, id: crypto.randomUUID(), name: `${layer.name} copy`.slice(0, 48),
+    x: Math.min(3840, layer.x + 40), y: Math.min(2160, layer.y + 40) };
+  scene.layers.splice(scene.layers.indexOf(layer) + 1, 0, copy);
+  selectedLayerId = copy.id;
+  renderScenes(); persistScenes();
+}
+document.getElementById('layer-duplicate').onclick = duplicateSelectedLayer;
 document.getElementById('layer-remove').onclick = () => {
   const scene = currentScene(); if (!scene?.custom) return;
   scene.layers = scene.layers.filter((layer) => layer.id !== selectedLayerId);
@@ -490,8 +501,28 @@ editorInteraction.addEventListener('contextmenu', (event) => {
   if (!layer) return;
   selectedLayerId = layer.id;
   renderCustomEditor();
-  layerProperties.scrollIntoView({ block: 'nearest' });
+  showLayerMenu(event);
 });
+
+const layerMenu = document.getElementById('layer-context-menu');
+function showLayerMenu(event) {
+  layerMenu.hidden = false;
+  layerMenu.style.left = `${Math.min(event.clientX, window.innerWidth - layerMenu.offsetWidth - 8)}px`;
+  layerMenu.style.top = `${Math.min(event.clientY, window.innerHeight - layerMenu.offsetHeight - 8)}px`;
+  layerMenu.querySelector('[data-menu-action="edit"]').focus();
+}
+layerMenu.addEventListener('click', (event) => {
+  const action = event.target.closest('[data-menu-action]')?.dataset.menuAction;
+  layerMenu.hidden = true;
+  if (action === 'edit') layerProperties.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  if (action === 'duplicate') duplicateSelectedLayer();
+  if (action === 'fit') document.getElementById('layer-fit').click();
+  if (action === 'remove') document.getElementById('layer-remove').click();
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!layerMenu.contains(event.target)) layerMenu.hidden = true;
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') layerMenu.hidden = true; });
 
 function showWorshipStyle() {
   const css = worshipStyles?.[worshipStyleTarget.value] || '';
