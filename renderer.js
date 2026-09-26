@@ -776,6 +776,7 @@ function buildBrowserRemoteState() {
     verseMeta: { verseCounts: dynamicBibleMeta.verseCounts, bookNames: dynamicBibleMeta.bookNames },
     verseRefs: allVerses.map((verse, index) => ({ index, key: verse.key })),
     previewStyles: { ...previewStyles },
+    presentationModes: { live: !!liveMode, clear: !!clearMode, black: !!blackMode },
     lastUpdated: Date.now()
   };
   state.remoteCanvases = getRemoteCanvasSnapshots();
@@ -840,11 +841,17 @@ function buildRelayAllScheduleItems() {
     } else if (item.type === 'song') {
       const song = item.songIndex !== undefined ? allSongs[item.songIndex] : null;
       const label = song ? song.title : 'Unknown Song';
-      const subItems = song && song.lyrics ? song.lyrics.map((section, si) => ({
-        label: section.section || ('Section ' + (si + 1)),
-        sectionIndex: si,
-        preview: section.text ? section.text.split('\n')[0].substring(0, 60) : ''
-      })) : [];
+      let lyricIndex = 0;
+      const subItems = song && song.lyrics ? song.lyrics.map((section, si) => {
+        const firstLyricIndex = lyricIndex;
+        lyricIndex += String(section.text || '').split(/\n\n+/).filter(Boolean).length || 1;
+        return {
+          label: section.section || ('Section ' + (si + 1)),
+          sectionIndex: si,
+          lyricIndex: firstLyricIndex,
+          preview: section.text ? section.text.split('\n')[0].substring(0, 60) : ''
+        };
+      }) : [];
       return { index: idx, label, type: 'song', songIndex: item.songIndex, subItems };
     } else if (item.type === 'media') {
       const media = item.mediaIndex !== undefined ? allMedia[item.mediaIndex] : null;
@@ -11512,18 +11519,26 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           await handleSongVerseDoubleClick(selectedSongVerseIndex);
         } else if (!liveMode) {
           // No selection but live mode is off - just turn it on
-          toggleLive(true);
+          await toggleLive(true);
         }
+        await pushBrowserRemoteState();
         break;
         
+      case 'SET_LIVE_MODE':
+        await toggleLive(data && data.enabled !== false);
+        await pushBrowserRemoteState();
+        break;
+
       case 'CLEAR_LIVE':
         // Toggle clear mode (show background only)
         toggleClear();
+        await pushBrowserRemoteState();
         break;
       
       case 'BLACK_SCREEN':
         // Toggle black screen
         toggleBlack();
+        await pushBrowserRemoteState();
         break;
         
       case 'NEXT_VERSE':
@@ -11590,12 +11605,21 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
             } else if (schedItem.type === 'song') {
               if (currentTab !== 'songs') switchTab('songs');
               selectedSongIndices = [schedItem.songIndex];
-              selectedSongVerseIndex = typeof data.subItemIndex === 'number' ? data.subItemIndex : 0;
+              let targetVerseIndex = 0;
+              if (typeof data.subItemIndex === 'number') {
+                const song = allSongs[schedItem.songIndex];
+                const sections = song && Array.isArray(song.lyrics) ? song.lyrics : [];
+                for (let sectionIndex = 0; sectionIndex < data.subItemIndex && sectionIndex < sections.length; sectionIndex++) {
+                  targetVerseIndex += String(sections[sectionIndex].text || '').split(/\n\n+/).filter(Boolean).length || 1;
+                }
+              }
+              selectedSongVerseIndex = targetVerseIndex;
               if (!liveMode) await toggleLive(true);
               await updateLiveFromSongVerse(selectedSongVerseIndex);
             }
           }
         }
+        await pushBrowserRemoteState();
         break;
 
       case 'REORDER_SCHEDULE':

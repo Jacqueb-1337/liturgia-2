@@ -140,7 +140,13 @@
         message('This device was revoked.', true);
       }
     }
-    function render() { renderLive(); renderMobileCanvasDock(); renderBooks(); renderVerseResults(); renderSongs(); renderSchedule(); renderBible(); }
+    function renderPresentationModes() {
+      const modes = state.presentationModes || {};
+      document.querySelectorAll('[data-command="CLEAR_LIVE"]').forEach((button) => button.classList.toggle('active', !!modes.clear));
+      document.querySelectorAll('[data-command="BLACK_SCREEN"]').forEach((button) => button.classList.toggle('active', !!modes.black));
+      document.querySelectorAll('[data-command="GO_LIVE"]').forEach((button) => button.classList.toggle('active', !!modes.live && !modes.clear && !modes.black));
+    }
+    function render() { renderLive(); renderPresentationModes(); renderMobileCanvasDock(); renderBooks(); renderVerseResults(); renderSongs(); renderSchedule(); renderBible(); }
     function renderLive() { const bible=(state.bible||[])[0],song=(state.songs||[])[0]; const schedule=state.scheduling||{}; let kicker='Live display',title='Nothing is live',body='Select a verse, song, or schedule item to send it live.'; if (song) { kicker=song.section||'Song';title=song.title||'Song';body=song.text||''; } else if (bible) { kicker=`${bible.book||''} ${bible.chapter||''}:${bible.startVerse||''}`;title=bible.text||'Bible verse';body=''; } ['preview','live'].forEach((pane) => { el(`${pane}-kicker`).textContent=kicker; el(`${pane}-title`).textContent=title; el(`${pane}-text`).textContent=body; }); el('live-status').textContent=state.lastUpdated?'Live state synced':'Waiting for state';el('live-schedule').textContent=schedule.hasSchedule?`${schedule.currentItem===null?'—':schedule.currentItem+1} / ${schedule.totalItems}`:'No schedule'; }
     let mobileCanvasExpanded = null;
     function describeMobileCanvas(fields, emptyLabel) { const bible=(fields?.bible||[])[0],song=(fields?.songs||[])[0]; if(song)return { kicker:song.section||'Song', title:song.title||'Song', body:song.text||'' }; if(bible)return { kicker:`${bible.book||''} ${bible.chapter||''}:${bible.startVerse||''}`, title:bible.text||'Bible verse', body:'' }; return { kicker:emptyLabel, title:emptyLabel==='Preview'?'Nothing selected':'Nothing is live', body:'' }; }
@@ -155,7 +161,7 @@
     function showSongEditor(song=null){if(!canGrant('songs.edit'))return;el('song-editor').classList.remove('hidden');el('song-editor-heading').textContent=song?'Edit song':'New song';el('song-editor').dataset.index=song?String(song.index):'';el('song-editor-title').value=song?song.title||'':'';el('song-editor-author').value=song?song.author||'':'';el('song-editor-hymnal').value=song?song.hymnal||'':'';el('song-editor-page').value=song?song.page||'':'';el('song-editor-lyrics').value=song?lyricsForEditor(song):'';el('song-editor-delete').classList.toggle('hidden',!song);el('song-editor-status').textContent='';el('song-editor-title').focus()}
     function hideSongEditor(){el('song-editor').classList.add('hidden');el('song-editor-status').textContent=''}
     function showSongActions(song){const existing=document.getElementById('remote-song-actions-menu');if(existing)existing.remove();const menu=document.createElement('div');menu.id='remote-song-actions-menu';menu.className='remote-song-actions-menu';[['Edit song',()=>showSongEditor(song)],['Add to schedule',()=>command('ADD_SONG_TO_SCHEDULE',{songIndex:song.index})],['Delete song',()=>{if(confirm(`Delete ${song.title||'this song'}?`))command('DELETE_SONG',{songIndex:song.index})}]].forEach(([label,action])=>{const button=document.createElement('button');button.className='button ghost';button.textContent=label;button.disabled=label==='Add to schedule'?!canGrant('schedule.edit'):!canGrant('songs.edit');button.onclick=()=>{action();menu.remove()};menu.appendChild(button)});document.body.appendChild(menu);setTimeout(()=>document.addEventListener('pointerdown',(event)=>{if(!menu.contains(event.target))menu.remove()},{once:true}),0)}
-    function renderSongs() { const all=state.allSongs||[],query=el('song-search').value.trim().toLowerCase();const songs=all.filter((song)=>!query||`${song.title||''} ${song.author||''}`.toLowerCase().includes(query)).slice(0,150);el('song-count').textContent=`${all.length} songs`;const list=el('song-list');list.replaceChildren();if(!songs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=all.length?'No matching songs.':'Song access is unavailable.';list.appendChild(empty);return}songs.forEach((song)=>{const row=document.createElement('div');row.className='list-item'+(selectedSong===song.index?' selected':'');const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=song.title||'Untitled';const author=document.createElement('div');author.className='item-meta';author.textContent=song.author||'';details.append(title,author);const button=document.createElement('button');button.className='button small';button.textContent='View';button.disabled=!canGrant('songs.view');button.onclick=()=>{selectedSong=song.index;if(canGrant('songs.view'))command('SELECT_SONG',{songIndex:song.index});renderSongs();renderSongDetail(song)};const more=document.createElement('button');more.className='button small ghost';more.textContent='⋯';more.title='Song actions';more.disabled=!canGrant('songs.edit');more.onclick=(event)=>{event.stopPropagation();showSongActions(song)};row.append(details,button,more);list.appendChild(row)});const current=all.find((song)=>song.index===selectedSong);if(current)renderSongDetail(current); }
+    function renderSongs() { const all=state.allSongs||[],query=el('song-search').value.trim().toLowerCase();const songs=all.filter((song)=>!query||`${song.title||''} ${song.author||''}`.toLowerCase().includes(query)).slice(0,150);el('song-count').textContent=`${all.length} songs`;const list=el('song-list');list.replaceChildren();if(!songs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=all.length?'No matching songs.':'Song access is unavailable.';list.appendChild(empty);return}songs.forEach((song)=>{const row=document.createElement('div');row.className='list-item'+(selectedSong===song.index?' selected':'');const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=song.title||'Untitled';const author=document.createElement('div');author.className='item-meta';author.textContent=song.author||'';details.append(title,author);const button=document.createElement('button');button.className='button small';button.textContent='View';button.disabled=!canGrant('songs.view');button.onclick=()=>{selectedSong=song.index;if(canGrant('songs.view'))command('SELECT_SONG',{songIndex:song.index});renderSongs();renderSongDetail(song)};const more=document.createElement('button');more.className='button small ghost';more.textContent='⋯';more.title='Song actions';more.disabled=!(canGrant('songs.edit')||canGrant('schedule.edit'));more.onclick=(event)=>{event.stopPropagation();showSongActions(song)};row.append(details,button,more);list.appendChild(row)});const current=all.find((song)=>song.index===selectedSong);if(current)renderSongDetail(current); }
     function renderSongDetail(song){
       el('song-detail').classList.remove('hidden');
       el('song-title').textContent=song.title||'Untitled';
@@ -180,12 +186,101 @@
       const edit=document.createElement('button');
       edit.className='button ghost'; edit.textContent='Edit song'; edit.disabled=!canGrant('songs.edit'); edit.onclick=()=>showSongEditor(song); actions.appendChild(edit);
     }
-    function renderSchedule(){const items=state.allScheduleItems||[],list=el('schedule-list'),wide=el('wide-schedule-list');el('schedule-count').textContent=`${items.length} items`;list.replaceChildren();wide.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='No schedule items available.';list.appendChild(empty);wide.appendChild(empty.cloneNode(true));return}items.forEach((item,index)=>{const row=document.createElement('div');row.className='list-item';const head=document.createElement('div');head.className='schedule-head';const number=document.createElement('span');number.className='schedule-index';number.textContent=String(index+1);const details=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=item.label||'Schedule item';const meta=document.createElement('div');meta.className='item-meta';meta.textContent=item.type||'';details.append(title,meta);head.append(number,details);const actions=document.createElement('div');actions.className='item-actions';const live=document.createElement('button');live.className='button small good';live.textContent='Live';live.disabled=!can('schedule','change');live.onclick=()=>command('GO_LIVE_SCHEDULE_ITEM',{scheduleIndex:item.index});actions.appendChild(live);if(can('schedule','change')){[['↑',index-1],['↓',index+1]].forEach(([label,to])=>{const move=document.createElement('button');move.className='button small ghost';move.textContent=label;move.disabled=to<0||to>=items.length;move.onclick=()=>command('REORDER_SCHEDULE',{from:index,to});actions.appendChild(move)})}row.append(head,actions);list.appendChild(row);const wideItem=document.createElement('button');wideItem.className='desktop-schedule-item'+((state.scheduling||{}).currentItem===item.index?' active':'');wideItem.textContent=`${index+1}. ${item.label||'Schedule item'}`;wideItem.disabled=!can('schedule','change');wideItem.onclick=()=>command('GO_LIVE_SCHEDULE_ITEM',{scheduleIndex:item.index});wide.appendChild(wideItem)})}
+    function navigateScheduleItem(item) {
+      if (!item) return;
+      if (item.type === 'verses') {
+        const first = (item.subItems || [])[0];
+        const reference = first && parseMobileReference(first.label);
+        if (!reference || !canGrant('verses.select')) return;
+        openPage('verses');
+        el('mobile-verse-reference').value = first.label || '';
+        command('LOOKUP_VERSES', reference);
+        command('SELECT_VERSE', reference);
+      } else if (item.type === 'song' && Number.isInteger(item.songIndex) && canGrant('songs.view')) {
+        selectedSong = item.songIndex;
+        openPage('songs');
+        command('SELECT_SONG', { songIndex: item.songIndex });
+        renderSongs();
+      }
+    }
+
+    function renderSchedule() {
+      const items = state.allScheduleItems || [], list = el('schedule-list'), wide = el('wide-schedule-list');
+      el('schedule-count').textContent = `${items.length} items`;
+      list.replaceChildren();
+      wide.replaceChildren();
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'No schedule items available.';
+        list.appendChild(empty);
+        wide.appendChild(empty.cloneNode(true));
+        return;
+      }
+      items.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'list-item';
+        const head = document.createElement('div');
+        head.className = 'schedule-head';
+        head.tabIndex = 0;
+        head.onclick = () => navigateScheduleItem(item);
+        head.onkeydown = (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            navigateScheduleItem(item);
+          }
+        };
+        const number = document.createElement('span');
+        number.className = 'schedule-index';
+        number.textContent = String(index + 1);
+        const details = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'item-title';
+        title.textContent = item.label || 'Schedule item';
+        const meta = document.createElement('div');
+        meta.className = 'item-meta';
+        meta.textContent = item.type || '';
+        details.append(title, meta);
+        head.append(number, details);
+        const actions = document.createElement('div');
+        actions.className = 'item-actions';
+        const live = document.createElement('button');
+        live.className = 'button small good';
+        live.textContent = 'Live';
+        live.disabled = !canGrant('schedule.goLive');
+        live.onclick = (event) => {
+          event.stopPropagation();
+          command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index });
+        };
+        actions.appendChild(live);
+        if (canGrant('schedule.edit')) {
+          [['↑', index - 1], ['↓', index + 1]].forEach(([label, to]) => {
+            const move = document.createElement('button');
+            move.className = 'button small ghost';
+            move.textContent = label;
+            move.disabled = to < 0 || to >= items.length;
+            move.onclick = (event) => {
+              event.stopPropagation();
+              command('REORDER_SCHEDULE', { from: index, to });
+            };
+            actions.appendChild(move);
+          });
+        }
+        row.append(head, actions);
+        list.appendChild(row);
+        const wideItem = document.createElement('button');
+        wideItem.className = 'desktop-schedule-item' + ((state.scheduling || {}).currentItem === item.index ? ' active' : '');
+        wideItem.textContent = `${index + 1}. ${item.label || 'Schedule item'}`;
+        wideItem.disabled = !(item.type === 'verses' ? canGrant('verses.select') : canGrant('songs.view'));
+        wideItem.onclick = () => navigateScheduleItem(item);
+        wide.appendChild(wideItem);
+      });
+    }
     function renderBible(){const info=state.bibleInfo||{},select=el('bible-version'),available=info.available||[];if(select.dataset.values===JSON.stringify(available))return;select.replaceChildren();available.forEach((value)=>{const option=document.createElement('option');option.value=value;option.textContent=value;option.selected=value===info.current;select.appendChild(option)});select.dataset.values=JSON.stringify(available);}
     function showAccountRole(user){if(!canGrant('accounts.manageRoles')||user.isOwner)return;editingAccount=user;el('account-role-editor').classList.remove('hidden');el('account-role-editor-title').textContent=`Edit ${user.email}`;el('account-role-select').value=user.role||'guest';const box=el('account-permissions');box.replaceChildren();ACCOUNT_PERMISSIONS.forEach(([group,...entries])=>{const heading=document.createElement('h3');heading.textContent=group;box.appendChild(heading);entries.forEach(([key,label])=>{const name=document.createElement('label');name.textContent=label;name.htmlFor=`account-permission-${key}`;const select=document.createElement('select');select.id=`account-permission-${key}`;[['inherit','/ Unchanged (use role)'],['allow','✓ Allow'],['deny','× Deny']].forEach(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;select.appendChild(option)});select.value=(user.overrides&&user.overrides[key])||'inherit';box.append(name,select)})});}
     function hideAccountRole(){editingAccount=null;el('account-role-editor').classList.add('hidden');}
     function renderAccountAccess(){const list=el('account-remote-list');list.replaceChildren();const users=(accountRoster&&accountRoster.users)||[];el('account-remote-status').textContent=users.length?`Root account: ${accountRoster.ownerEmail}. Delegated addresses use the roles below.`:'No account access is available.';users.forEach((user)=>{const row=document.createElement('div');row.className='list-item';const info=document.createElement('div');const title=document.createElement('div');title.className='item-title';title.textContent=user.email;const meta=document.createElement('div');meta.className='item-meta';meta.textContent=user.isOwner?'Force-op — full access':`${user.role||'guest'} role`;info.append(title,meta);const actions=document.createElement('div');actions.className='item-actions';if(!user.isOwner&&canGrant('accounts.manageRoles')){const edit=document.createElement('button');edit.className='button small';edit.textContent='Edit role';edit.onclick=()=>showAccountRole(user);const reset=document.createElement('button');reset.className='button small ghost';reset.textContent='Reset';reset.disabled=!user.id;reset.onclick=()=>command('ACCOUNT_RESET_ROLE',{id:user.id});actions.append(edit,reset)}if(!user.isOwner&&canGrant('accounts.manageDelegates')){const remove=document.createElement('button');remove.className='button small danger';remove.textContent='Remove email';remove.onclick=()=>{if(confirm(`Remove ${user.email} from this Liturgia account?`))command('ACCOUNT_UPDATE_DELEGATE',{action:'remove',email:user.email})};actions.appendChild(remove)}row.append(info,actions);list.appendChild(row)});}
-    window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();deferredInstallPrompt=event;el('install-pwa').classList.remove('hidden')});el('install-pwa').addEventListener('click',async()=>{if(!deferredInstallPrompt)return;deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;el('install-pwa').classList.add('hidden')});document.querySelectorAll('.nav button[data-page]').forEach((button)=>button.addEventListener('click',()=>openPage(button.dataset.page)));document.querySelectorAll('[data-command]').forEach((button)=>button.addEventListener('click',()=>command(button.dataset.command)));el('login-submit').addEventListener('click',authenticate);el('login-password').addEventListener('keydown',(event)=>{if(event.key==='Enter')authenticate()});el('send-magic-link').addEventListener('click',sendMagicLink);el('verse-select').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined}));el('verse-live').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined,goLive:true}));el('verse-add-schedule').addEventListener('click',()=>command('ADD_TO_SCHEDULE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value)}));el('song-search').addEventListener('input',renderSongs);el('song-refresh').addEventListener('click',()=>command('REQUEST_STATE'));el('song-add').addEventListener('click',()=>showSongEditor());el('song-import').addEventListener('click',()=>el('song-import-file').click());el('song-import-file').addEventListener('change',async()=>{const file=el('song-import-file').files[0];if(!file)return;try{const parsed=JSON.parse(await file.text());const songs=Array.isArray(parsed)?parsed:(Array.isArray(parsed.songs)?parsed.songs:[]);if(!songs.length)throw new Error('No Liturgia songs found in this file.');command('IMPORT_SONGS',{songs});setTimeout(()=>command('REQUEST_STATE'),500)}catch(error){alert(error.message||'Could not import that song file.')}finally{el('song-import-file').value=''}});el('song-editor-close').addEventListener('click',hideSongEditor);el('song-editor-save').addEventListener('click',()=>{const title=el('song-editor-title').value.trim(),lyrics=el('song-editor-lyrics').value.trim();if(!title||!lyrics){el('song-editor-status').textContent='A title and lyrics are required.';return}const index=el('song-editor').dataset.index;command('UPSERT_SONG',{songIndex:index===''?undefined:Number(index),title,author:el('song-editor-author').value,hymnal:el('song-editor-hymnal').value,page:el('song-editor-page').value,lyrics});el('song-editor-status').textContent='Saving…';setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},450)});el('song-editor-delete').addEventListener('click',()=>{const index=Number(el('song-editor').dataset.index);if(!Number.isInteger(index)||!confirm('Delete this song?'))return;command('DELETE_SONG',{songIndex:index});setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},350)});el('bible-apply').addEventListener('click',()=>command('SET_BIBLE_TRANSLATION',{bible:el('bible-version').value}));el('account-add-delegate-remote').addEventListener('click',()=>{const email=el('account-delegate-email-remote').value.trim();if(email)command('ACCOUNT_UPDATE_DELEGATE',{action:'add',email})});el('account-role-cancel').addEventListener('click',hideAccountRole);el('account-role-save').addEventListener('click',()=>{if(!editingAccount)return;const permissionOverrides={};ACCOUNT_PERMISSIONS.forEach(([, ...entries])=>entries.forEach(([key])=>permissionOverrides[key]=el(`account-permission-${key}`).value));command('ACCOUNT_SAVE_ROLE',{id:editingAccount.id||undefined,email:editingAccount.email,role:el('account-role-select').value,permissionOverrides});hideAccountRole()});boot();
+    window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();deferredInstallPrompt=event;el('install-pwa').classList.remove('hidden')});el('install-pwa').addEventListener('click',async()=>{if(!deferredInstallPrompt)return;deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;el('install-pwa').classList.add('hidden')});document.querySelectorAll('.nav button[data-page]').forEach((button)=>button.addEventListener('click',()=>openPage(button.dataset.page)));document.querySelectorAll('[data-command]').forEach((button)=>button.addEventListener('click',()=>{const cmd=button.dataset.command;if(cmd==='GO_LIVE'){const preview=state.preview||{};const contentType=(preview.songs||[]).length?'song':(preview.bible||[]).length?'verse':(selectedSong!==null?'song':'verse');command(cmd,{contentType})}else command(cmd)}));el('login-submit').addEventListener('click',authenticate);el('login-password').addEventListener('keydown',(event)=>{if(event.key==='Enter')authenticate()});el('send-magic-link').addEventListener('click',sendMagicLink);el('verse-select').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined}));el('verse-live').addEventListener('click',()=>command('SELECT_VERSE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value),verseEnd:Number(el('verse-end').value)||undefined,goLive:true}));el('verse-add-schedule').addEventListener('click',()=>command('ADD_TO_SCHEDULE',{book:el('verse-book').value,chapter:Number(el('verse-chapter').value),verse:Number(el('verse-start').value)}));el('song-search').addEventListener('input',renderSongs);el('song-refresh').addEventListener('click',()=>command('REQUEST_STATE'));el('song-add').addEventListener('click',()=>showSongEditor());el('song-import').addEventListener('click',()=>el('song-import-file').click());el('song-import-file').addEventListener('change',async()=>{const file=el('song-import-file').files[0];if(!file)return;try{const parsed=JSON.parse(await file.text());const songs=Array.isArray(parsed)?parsed:(Array.isArray(parsed.songs)?parsed.songs:[]);if(!songs.length)throw new Error('No Liturgia songs found in this file.');command('IMPORT_SONGS',{songs});setTimeout(()=>command('REQUEST_STATE'),500)}catch(error){alert(error.message||'Could not import that song file.')}finally{el('song-import-file').value=''}});el('song-editor-close').addEventListener('click',hideSongEditor);el('song-editor-save').addEventListener('click',()=>{const title=el('song-editor-title').value.trim(),lyrics=el('song-editor-lyrics').value.trim();if(!title||!lyrics){el('song-editor-status').textContent='A title and lyrics are required.';return}const index=el('song-editor').dataset.index;command('UPSERT_SONG',{songIndex:index===''?undefined:Number(index),title,author:el('song-editor-author').value,hymnal:el('song-editor-hymnal').value,page:el('song-editor-page').value,lyrics});el('song-editor-status').textContent='Saving…';setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},450)});el('song-editor-delete').addEventListener('click',()=>{const index=Number(el('song-editor').dataset.index);if(!Number.isInteger(index)||!confirm('Delete this song?'))return;command('DELETE_SONG',{songIndex:index});setTimeout(()=>{command('REQUEST_STATE');hideSongEditor()},350)});el('bible-apply').addEventListener('click',()=>command('SET_BIBLE_TRANSLATION',{bible:el('bible-version').value}));el('account-add-delegate-remote').addEventListener('click',()=>{const email=el('account-delegate-email-remote').value.trim();if(email)command('ACCOUNT_UPDATE_DELEGATE',{action:'add',email})});el('account-role-cancel').addEventListener('click',hideAccountRole);el('account-role-save').addEventListener('click',()=>{if(!editingAccount)return;const permissionOverrides={};ACCOUNT_PERMISSIONS.forEach(([, ...entries])=>entries.forEach(([key])=>permissionOverrides[key]=el(`account-permission-${key}`).value));command('ACCOUNT_SAVE_ROLE',{id:editingAccount.id||undefined,email:editingAccount.email,role:el('account-role-select').value,permissionOverrides});hideAccountRole()});boot();
   </script>
   <script>
     document.querySelectorAll('[data-mobile-canvas]').forEach((button) => button.addEventListener('click', () => toggleMobileCanvas(button.dataset.mobileCanvas)));
@@ -224,8 +319,22 @@
       let draggedScheduleIndex = null;
       let selectedDesktopReference = null;
       let selectedDesktopSongIndex = null;
+      let selectedDesktopSongVerseIndex = 0;
       let desktopSongVerseViewMode = 'full';
+      let desktopActiveTab = 'verses';
       const desktopLayoutStorageKey = 'liturgia-remote-desktop-layout-v2';
+
+      function goLiveDesktopSelection() {
+        if (desktopActiveTab === 'songs' && selectedDesktopSongIndex !== null) {
+          command('DISPLAY_SONG_VERSE', { songIndex: selectedDesktopSongIndex, verseIndex: selectedDesktopSongVerseIndex });
+          return;
+        }
+        if (desktopActiveTab === 'verses' && selectedDesktopReference) {
+          command('SELECT_VERSE', { ...selectedDesktopReference, goLive: true });
+          return;
+        }
+        command('GO_LIVE', { contentType: desktopActiveTab === 'songs' ? 'song' : 'verse' });
+      }
 
       function saveDesktopLayout(doc) {
         const schedule = doc.getElementById('schedule-sidebar');
@@ -262,7 +371,9 @@
       function installPointerDrag(doc, node, payload) {
         if (!node || node.dataset.remotePointerDrag) return;
         node.dataset.remotePointerDrag = 'true';
-        node.style.touchAction = 'none';
+        // Preserve normal one-finger scrolling. A long press still captures the
+        // pointer for drag/reorder once the hold timer activates.
+        node.style.touchAction = 'pan-y';
         node.addEventListener('click', (event) => {
           if (node.dataset.remoteSuppressClick !== 'true') return;
           delete node.dataset.remoteSuppressClick;
@@ -413,7 +524,7 @@
       }
 
       function ensureDesktopControls(doc) {
-        if (!doc.getElementById('remote-controls-style')) { const style = doc.createElement('style'); style.id = 'remote-controls-style'; style.textContent = '.remote-desktop-action,.remote-schedule-actions button,.remote-song-row,.remote-song-section,.remote-song-more{background:#f5f5f5;border:1px solid #ccc;border-radius:4px;color:#333;cursor:pointer}.remote-desktop-action,.remote-schedule-actions button{height:32px;padding:0 10px}.remote-schedule-actions{display:flex;gap:4px;margin-left:6px}.remote-song-line{display:flex;border-bottom:1px solid #ccc}.remote-song-row{display:block;flex:1;min-width:0;padding:8px 10px;border-width:0;text-align:left}.remote-song-more{width:34px;border-width:0 0 0 1px;font-size:19px}.remote-song-row:hover,.remote-song-line:hover{background:#eaf4fc}.remote-song-section{display:block;width:100%;margin:10px 0 0;padding:8px 10px;text-align:left;white-space:pre-wrap}.remote-song-section.selected{border-color:#0078d4;background:#eaf4fc}.remote-song-menu{position:fixed;z-index:9999;display:grid;min-width:160px;padding:4px;background:#fff;border:1px solid #aaa;box-shadow:0 4px 16px #0003}.remote-song-menu button{text-align:left;padding:8px;border:0;background:transparent;cursor:pointer}.remote-song-menu button:hover{background:#eaf4fc}.remote-touch-dragging{opacity:.55!important;outline:2px solid #0078d4!important}.remote-drop-target{box-shadow:inset 0 -3px #0078d4}.remote-song-editor-modal{position:fixed;z-index:10000;inset:0;display:none;align-items:center;justify-content:center;background:#0008}.remote-song-editor-modal.open{display:flex}.remote-song-editor-panel{width:min(760px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;padding:18px;background:#fff;color:#222;box-shadow:0 16px 48px #0008}.remote-song-editor-heading,.remote-song-editor-actions,.remote-song-editor-pair{display:flex;gap:10px;align-items:center}.remote-song-editor-heading{justify-content:space-between}.remote-song-editor-heading h2{margin:0}.remote-song-editor-panel label{display:grid;gap:5px;margin-top:10px}.remote-song-editor-panel input,.remote-song-editor-panel textarea{box-sizing:border-box;width:100%;padding:8px}.remote-song-editor-pair>label{flex:1}.remote-song-editor-actions{justify-content:flex-end;margin-top:14px}.remote-song-editor-actions [data-delete]{color:#fff;background:#c42b1c}body.dark-theme .remote-desktop-action,body.dark-theme .remote-schedule-actions button,body.dark-theme .remote-song-row,body.dark-theme .remote-song-section,body.dark-theme .remote-song-more{background:#2a2a2a;border-color:#444;color:#eee}body.dark-theme .remote-song-row:hover{background:#333}body.dark-theme .remote-song-menu,body.dark-theme .remote-song-editor-panel{background:#222;color:#eee}body.dark-theme .remote-song-menu button{color:#eee}'; doc.head.appendChild(style); }
+        if (!doc.getElementById('remote-controls-style')) { const style = doc.createElement('style'); style.id = 'remote-controls-style'; style.textContent = '.remote-desktop-action,.remote-schedule-actions button,.remote-song-row,.remote-song-section,.remote-song-more{background:#f5f5f5;border:1px solid #ccc;border-radius:4px;color:#333;cursor:pointer}.remote-desktop-action,.remote-schedule-actions button{height:32px;padding:0 10px}.remote-schedule-actions{display:flex;gap:4px;margin-left:6px}.remote-song-line{display:flex;border-bottom:1px solid #ccc}.remote-song-row{display:block;flex:1;min-width:0;padding:8px 10px;border-width:0;text-align:left}.remote-song-more{width:34px;border-width:0 0 0 1px;font-size:19px}.remote-song-row:hover,.remote-song-line:hover{background:#eaf4fc}.remote-song-section{display:block;width:100%;margin:10px 0 0;padding:8px 10px;text-align:left;white-space:pre-wrap}.remote-song-section.selected{border-color:#0078d4;background:#eaf4fc}.remote-song-menu{position:fixed;z-index:9999;display:grid;min-width:160px;padding:4px;background:#fff;border:1px solid #aaa;box-shadow:0 4px 16px #0003}.remote-song-menu button{text-align:left;padding:8px;border:0;background:transparent;cursor:pointer}.remote-song-menu button:hover{background:#eaf4fc}.remote-touch-dragging{opacity:.55!important;outline:2px solid #0078d4!important}.remote-drop-target{box-shadow:inset 0 -3px #0078d4}.remote-song-editor-modal{position:fixed;z-index:10000;inset:0;display:none;align-items:center;justify-content:center;background:#0008}.remote-song-editor-modal.open{display:flex}.remote-song-editor-panel{width:min(760px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;padding:18px;background:#fff;color:#222;box-shadow:0 16px 48px #0008}.remote-song-editor-heading,.remote-song-editor-actions,.remote-song-editor-pair{display:flex;gap:10px;align-items:center}.remote-song-editor-heading{justify-content:space-between}.remote-song-editor-heading h2{margin:0}.remote-song-editor-panel label{display:grid;gap:5px;margin-top:10px}.remote-song-editor-panel input,.remote-song-editor-panel textarea{box-sizing:border-box;width:100%;padding:8px}.remote-song-editor-pair>label{flex:1}.remote-song-editor-actions{justify-content:flex-end;margin-top:14px}.remote-song-editor-actions [data-delete]{color:#fff;background:#c42b1c} #schedule-list,#verse-list,#song-virtual-list,#song-display{touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}body.dark-theme .remote-desktop-action,body.dark-theme .remote-schedule-actions button,body.dark-theme .remote-song-row,body.dark-theme .remote-song-section,body.dark-theme .remote-song-more{background:#2a2a2a;border-color:#444;color:#eee}body.dark-theme .remote-song-row:hover{background:#333}body.dark-theme .remote-song-menu,body.dark-theme .remote-song-editor-panel{background:#222;color:#eee}body.dark-theme .remote-song-menu button{color:#eee}'; doc.head.appendChild(style); }
         const shellWindow = doc.defaultView;
         const books = (state.verseMeta && state.verseMeta.bookNames) || [];
         if (shellWindow && typeof shellWindow.updateSearchBox === 'function') {
@@ -424,16 +535,13 @@
             onReferenceSelected: (reference) => {
               selectedDesktopReference = { book: reference.book, chapter: reference.chapter, verse: reference.verse, verseEnd: reference.verseEnd || undefined };
               command('LOOKUP_VERSES', selectedDesktopReference);
+              command('SELECT_VERSE', selectedDesktopReference);
             },
             onNavigate: (direction) => command(direction === 'prev' ? 'PREV_VERSE' : 'NEXT_VERSE'),
-            onEnter: () => {
-              if (!selectedDesktopReference) return;
-              command('LOOKUP_VERSES', selectedDesktopReference);
-              command('SELECT_VERSE', { ...selectedDesktopReference, goLive: true });
-            },
+            onEnter: goLiveDesktopSelection,
             onToggleLive: (enabled) => {
-              if (enabled && selectedDesktopReference) command('SELECT_VERSE', { ...selectedDesktopReference, goLive: true });
-              else if (!enabled) command('CLEAR_LIVE');
+              if (enabled) goLiveDesktopSelection();
+              else command('SET_LIVE_MODE', { enabled: false, contentType: desktopActiveTab === 'songs' ? 'song' : 'verse' });
             },
             onToggleClear: () => command('CLEAR_LIVE'),
             onToggleBlack: () => command('BLACK_SCREEN'),
@@ -442,14 +550,16 @@
           });
           const controlPermissions = {
             Widget: canGrant('presentation.goLiveSongs'),
-            'Go Live': canGrant('presentation.goLiveVerses'),
-            Live: canGrant('presentation.goLiveVerses'),
+            'Go Live': canGrant('presentation.goLiveVerses') || canGrant('presentation.goLiveSongs'),
+            Live: canGrant('presentation.goLiveVerses') || canGrant('presentation.goLiveSongs'),
             Clear: canGrant('presentation.clear'),
             Black: canGrant('presentation.black')
           };
+          const modes = state.presentationModes || {};
           doc.querySelectorAll('#control-buttons-container button').forEach((button) => {
             const label = button.textContent.trim();
             if (label in controlPermissions) button.disabled = !controlPermissions[label];
+            button.classList.toggle('active', (label === 'Live' && !!modes.live) || (label === 'Clear' && !!modes.clear) || (label === 'Black' && !!modes.black));
           });
           doc.querySelectorAll('#dual-btn-container button').forEach((button) => { button.disabled = !canGrant('bible.changeTranslation'); });
         }
@@ -470,6 +580,28 @@
         }
       }
 
+      function navigateDesktopScheduleItem(doc, item, subItem = null) {
+        if (!item) return;
+        if (item.type === 'verses') {
+          const target = subItem || (item.subItems || [])[0];
+          const reference = target && parseReference(target.label);
+          if (!reference || !canGrant('verses.select')) return;
+          selectedDesktopReference = reference;
+          activateTab('verses');
+          command('LOOKUP_VERSES', reference);
+          command('SELECT_VERSE', reference);
+        } else if (item.type === 'song' && Number.isInteger(item.songIndex) && canGrant('songs.view')) {
+          selectedDesktopSongIndex = item.songIndex;
+          selectedDesktopSongVerseIndex = subItem && Number.isInteger(subItem.lyricIndex) ? subItem.lyricIndex : 0;
+          activateTab('songs');
+          command('SELECT_SONG', { songIndex: item.songIndex });
+          if (subItem) {
+            command('SELECT_SONG_VERSE', { songIndex: item.songIndex, verseIndex: selectedDesktopSongVerseIndex });
+          }
+          renderDesktopSongs(doc);
+        }
+      }
+
       function renderDesktopSchedule(doc) {
         const list = doc.getElementById('schedule-list'); if (!list) return;
         const items = state.allScheduleItems || [], schedule = state.scheduling || {}; list.replaceChildren();
@@ -483,12 +615,20 @@
           row.addEventListener('drop', (event) => { event.preventDefault(); let payload = null; try { payload = JSON.parse(event.dataTransfer.getData('text/plain')); } catch (_) {} if (!payload) return; if (payload.type === 'schedule' && payload.index !== index) command('REORDER_SCHEDULE', { from: payload.index, to: index }); if (payload.type === 'song') command('ADD_SONG_TO_SCHEDULE', { songIndex: payload.songIndex }); if (payload.type === 'verse') command('ADD_TO_SCHEDULE', payload.reference); });
           installPointerDrag(doc, row, { type: 'schedule', index });
           const header = doc.createElement('div'); header.className = 'schedule-item-header' + (schedule.currentItem === item.index ? ' selected' : '');
+          header.tabIndex = 0;
+          header.onclick = () => navigateDesktopScheduleItem(doc, item);
+          header.onkeydown = (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              navigateDesktopScheduleItem(doc, item);
+            }
+          };
           if (expandable) { const arrow = doc.createElement('button'); arrow.className = 'expand-arrow' + (expanded ? ' expanded' : ''); arrow.textContent = '▶'; arrow.title = expanded ? 'Collapse nested items' : 'Expand nested items'; arrow.onclick = (event) => { event.stopPropagation(); if (expanded) expandedScheduleItems.delete(item.index); else expandedScheduleItems.add(item.index); renderDesktopSchedule(doc); }; header.appendChild(arrow); }
           const text = doc.createElement('span'); text.className = 'schedule-item-text'; text.textContent = item.label || `Schedule item ${index + 1}`; header.appendChild(text);
           const actions = doc.createElement('div'); actions.className = 'remote-schedule-actions';
           [['Live', () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index }), !canGrant('schedule.goLive')], ['×', () => { if (confirm(`Remove ${item.label || 'this item'} from the schedule?`)) command('DELETE_SCHEDULE_ITEM', { scheduleIndex: index }); }, !canGrant('schedule.edit')]].forEach(([label, click, disabled]) => { const button = doc.createElement('button'); button.textContent = label; button.disabled = disabled; button.onclick = (event) => { event.stopPropagation(); click(); }; actions.appendChild(button); });
           header.appendChild(actions); row.appendChild(header);
-          if (expandable && expanded) { const nested = doc.createElement('div'); nested.className = 'schedule-item-verses expanded'; const selected = selectedScheduleSubItems.get(item.index) || new Set(); subItems.forEach((subItem, subIndex) => { const child = doc.createElement('button'); child.className = 'schedule-verse-item' + (selected.has(subIndex) ? ' selected' : ''); child.textContent = subItem.label || `Item ${subIndex + 1}`; child.onclick = () => { selectedScheduleSubItems.set(item.index, new Set([subIndex])); if (item.type === 'verses') { const reference = parseReference(subItem.label); if (reference) { command('LOOKUP_VERSES', reference); command('SELECT_VERSE', reference); } } else if (item.type === 'song') command('SELECT_SONG_VERSE', { songIndex: item.songIndex, verseIndex: subIndex }); renderDesktopSchedule(doc); }; child.ondblclick = () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index, subItemIndex: subIndex }); nested.appendChild(child); }); row.appendChild(nested); }
+          if (expandable && expanded) { const nested = doc.createElement('div'); nested.className = 'schedule-item-verses expanded'; const selected = selectedScheduleSubItems.get(item.index) || new Set(); subItems.forEach((subItem, subIndex) => { const child = doc.createElement('button'); child.className = 'schedule-verse-item' + (selected.has(subIndex) ? ' selected' : ''); child.textContent = subItem.label || `Item ${subIndex + 1}`; child.onclick = () => { selectedScheduleSubItems.set(item.index, new Set([subIndex])); navigateDesktopScheduleItem(doc, item, subItem); renderDesktopSchedule(doc); }; child.ondblclick = () => command('GO_LIVE_SCHEDULE_ITEM', { scheduleIndex: item.index, subItemIndex: subIndex, lyricIndex: Number.isInteger(subItem.lyricIndex) ? subItem.lyricIndex : undefined }); nested.appendChild(child); }); row.appendChild(nested); }
           list.appendChild(row);
         });
       }
@@ -505,10 +645,10 @@
             const sectionHeading = doc.createElement('h3'); sectionHeading.textContent = section.section || 'Verse'; display.appendChild(sectionHeading);
             String(section.text || '').split(/\n\n+/).forEach((verse, sectionVerseIndex, verses) => {
               const currentVerseIndex = verseIndex++;
-              const part = doc.createElement('button'); part.className = 'remote-song-section';
+              const part = doc.createElement('button'); part.className = 'remote-song-section' + (selectedDesktopSongIndex === song.index && selectedDesktopSongVerseIndex === currentVerseIndex ? ' selected' : '');
               part.textContent = desktopSongVerseViewMode === 'blocks' ? `${section.section || 'Verse'}${verses.length > 1 ? ` ${sectionVerseIndex + 1}` : ''}: ${verse.split('\n')[0].slice(0, 70)}` : verse;
-              part.onclick = () => command('SELECT_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex });
-              part.ondblclick = () => command('DISPLAY_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex });
+              part.onclick = () => { selectedDesktopSongIndex = song.index; selectedDesktopSongVerseIndex = currentVerseIndex; command('SELECT_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); renderDesktopSongs(doc); };
+              part.ondblclick = () => { selectedDesktopSongIndex = song.index; selectedDesktopSongVerseIndex = currentVerseIndex; command('DISPLAY_SONG_VERSE', { songIndex: song.index, verseIndex: currentVerseIndex }); };
               display.appendChild(part);
             });
           });
@@ -519,8 +659,8 @@
           const button = doc.createElement('button'); button.className = 'remote-song-row'; button.textContent = song.title || 'Untitled'; button.draggable = canGrant('schedule.edit');
           button.addEventListener('dragstart', (event) => { event.dataTransfer.effectAllowed = 'copy'; event.dataTransfer.setData('text/plain', JSON.stringify({ type: 'song', songIndex: song.index })); });
           installPointerDrag(doc, button, { type: 'song', songIndex: song.index });
-          button.onclick = () => { selectedDesktopSongIndex = song.index; command('SELECT_SONG', { songIndex: song.index }); renderSong(song); };
-          const more = doc.createElement('button'); more.className = 'remote-song-more'; more.textContent = '⋯'; more.title = 'Song actions'; more.disabled = !canGrant('songs.edit'); more.onclick = (event) => { event.stopPropagation(); showDesktopSongMenu(doc, more, song); };
+          button.onclick = () => { selectedDesktopSongIndex = song.index; selectedDesktopSongVerseIndex = 0; command('SELECT_SONG', { songIndex: song.index }); renderSong(song); };
+          const more = doc.createElement('button'); more.className = 'remote-song-more'; more.textContent = '⋯'; more.title = 'Song actions'; more.disabled = !(canGrant('songs.edit') || canGrant('schedule.edit')); more.onclick = (event) => { event.stopPropagation(); showDesktopSongMenu(doc, more, song); };
           line.append(button, more); list.appendChild(line);
         });
         const selectedSong = all.find((song) => song.index === selectedDesktopSongIndex);
@@ -649,6 +789,7 @@
 
       function activateTab(tab) {
         const doc = shellDocument(); if (!doc) return;
+        desktopActiveTab = tab;
         doc.querySelectorAll('.bottom-tab').forEach((button) => { const active = button.dataset.tab === tab; button.classList.toggle('active', active); button.style.borderBottom = active ? '2px solid #0078d4' : 'none'; });
         [['verses', 'verses-tab-content'], ['songs', 'songs-tab-content'], ['media', 'media-tab-content']].forEach(([name, id]) => { const pane = doc.getElementById(id); if (pane) pane.style.display = name === tab ? 'flex' : 'none'; });
       }
@@ -690,7 +831,23 @@
         bind('verse-resizer', (event) => { const top = doc.getElementById('top-section'), panel = doc.getElementById('verse-panel'); if (!top || !panel) return; const bottomHeight = doc.defaultView.innerHeight - event.clientY; const topHeight = event.clientY - 8; if (bottomHeight > 30 && topHeight > 50) { top.style.flex = `0 0 ${topHeight}px`; panel.style.flex = `0 0 ${bottomHeight}px`; } });
       }
 
-      shell.addEventListener('load', () => { const doc = shellDocument(); if (!doc) return; ready = true; restoreDesktopLayout(doc); doc.querySelectorAll('.bottom-tab').forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab))); const styleOverlay = doc.getElementById('preview-edit-overlay'); if (styleOverlay) styleOverlay.addEventListener('click', openRemoteStyleEditor); enableResizers(doc); activateTab('verses'); renderDesktop(); });
+      shell.addEventListener('load', () => {
+        const doc = shellDocument(); if (!doc) return;
+        ready = true;
+        restoreDesktopLayout(doc);
+        // These desktop-only surfaces do not have Browser Remote commands yet.
+        // Hide them rather than leaving controls that silently do nothing.
+        const mediaTab = doc.querySelector('.bottom-tab[data-tab="media"]');
+        if (mediaTab) mediaTab.style.display = 'none';
+        const dualControls = doc.getElementById('dual-btn-container');
+        if (dualControls) dualControls.style.display = 'none';
+        doc.querySelectorAll('.bottom-tab').forEach((button) => button.addEventListener('click', () => activateTab(button.dataset.tab)));
+        const styleOverlay = doc.getElementById('preview-edit-overlay');
+        if (styleOverlay) styleOverlay.addEventListener('click', openRemoteStyleEditor);
+        enableResizers(doc);
+        activateTab('verses');
+        renderDesktop();
+      });
       window.addEventListener('message', (event) => {
         if (event.origin !== location.origin || !event.data) return;
         if ((event.data.type === 'LITURGIA_REMOTE_STYLE_CLOSE' || event.data.type === 'LITURGIA_REMOTE_STYLES_SAVE') && event.source !== remoteStyleEditorWindow) return;

@@ -72,4 +72,28 @@ describe('browser remote parity safeguards', () => {
     expect(renderer).toContain('function scheduleBrowserRemoteCanvasRefresh(delay = 250)');
     expect(renderer).toContain('This path bypasses the normal desktop song-live handler.');
   });
+
+  test('desktop remote keeps touch scrolling, schedule navigation, and presentation controls wired', () => {
+    const browser = fs.readFileSync(path.join(root, 'remote-browser.html'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'remote-desktop.css'), 'utf8');
+    const renderer = fs.readFileSync(path.join(root, 'renderer.js'), 'utf8');
+    const server = fs.readFileSync(path.join(root, 'remote-server.js'), 'utf8');
+
+    expect(browser).toContain("node.style.touchAction = 'pan-y'");
+    expect(browser).toContain('#schedule-list,#verse-list,#song-virtual-list,#song-display{touch-action:pan-y');
+    expect(css).toContain('touch-action: pan-y;');
+    expect(browser).toContain('function navigateScheduleItem(item)');
+    expect(browser).toContain('function navigateDesktopScheduleItem(doc, item, subItem = null)');
+    expect(browser).toContain("activateTab('verses')");
+    expect(browser).toContain("activateTab('songs')");
+    expect(browser).toContain('function goLiveDesktopSelection()');
+    expect(browser).toContain("command('SET_LIVE_MODE', { enabled: false");
+    expect(browser).toContain('selectedDesktopSongVerseIndex');
+    expect(renderer).toContain("case 'SET_LIVE_MODE':");
+    expect(renderer).toContain('presentationModes: { live: !!liveMode, clear: !!clearMode, black: !!blackMode }');
+    expect(renderer).toContain('lyricIndex: firstLyricIndex');
+    expect(server).toContain("command === 'GO_LIVE' || command === 'SET_LIVE_MODE'");
+    expect(browser).toContain("const mediaTab = doc.querySelector('.bottom-tab[data-tab=\"media\"]')");
+    expect(browser).toContain("const dualControls = doc.getElementById('dual-btn-container')");
+  });
 });

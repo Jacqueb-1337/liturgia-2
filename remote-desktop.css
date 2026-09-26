@@ -86,6 +86,8 @@ button, input, select, textarea { font-family: inherit; }
   height: 100vh;
   border: 0;
   background: #fff;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 #desktop-shell.hidden { display: none; }

@@ -1331,7 +1331,7 @@ window.addEventListener('pagehide', () => _postToRemoteOwner({ type: 'LITURGIA_R
       ACCOUNT_RESET_ROLE: 'accounts.manageRoles',
       ACCOUNT_UPDATE_DELEGATE: 'accounts.manageDelegates'
     };
-    if (command === 'GO_LIVE') return data && data.contentType === 'song' ? 'presentation.goLiveSongs' : 'presentation.goLiveVerses';
+    if (command === 'GO_LIVE' || command === 'SET_LIVE_MODE') return data && data.contentType === 'song' ? 'presentation.goLiveSongs' : 'presentation.goLiveVerses';
     if (command === 'SELECT_VERSE' && data && data.goLive) return 'presentation.goLiveVerses';
     return permissions[command] || null;
   }
