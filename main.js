@@ -46,7 +46,7 @@ const crypto = require('crypto');
 const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib/offlineLicenseCache');
 const RemoteServer = require('./remote-server');
 const { ensureProgramFirewall } = require('./lib/streamFirewall');
-const { createProgramFramePublisher } = require('./lib/programFramePublisher');
+const { createProgramFramePublisher, selectProgramWindow } = require('./lib/programFramePublisher');
 const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -255,6 +255,7 @@ let initialWindowX = 100;
 let initialWindowY = 100;
 let defaultBible = 'en_kjv.json'; // Default Bible
 const liveWindows = new Map(); // keyed by display id
+let programCaptureDisplayId = null;
 // Per-display network display servers
 // Map<displayId, {server, clients:Set, port, lastPayload, lastMode, lastError}>
 const displayNetServers = new Map();
@@ -3597,6 +3598,7 @@ function createLiveWindowForDisplay(display) {
   win._liveReady = false;
   win._livePending = null; // buffers the last update-content payload before ready
   liveWindows.set(display.id, win);
+  if (programCaptureDisplayId === null) programCaptureDisplayId = display.id;
   win.loadFile('live.html');
   win.once('ready-to-show', () => { win.show(); });
   win.on('closed', () => { liveWindows.delete(display.id); });
@@ -3630,6 +3632,10 @@ ipcMain.handle('create-live-window', async () => {
     const fallbackId = settings.defaultDisplay || (displays[0] ? displays[0].id : null);
     targetIds = fallbackId ? [fallbackId] : [];
   }
+  const preferredId = Number(settings.defaultDisplay);
+  const captureId = targetIds.find(id => Number(id) > 0 && Number(id) === preferredId)
+    ?? targetIds.find(id => Number(id) > 0);
+  programCaptureDisplayId = captureId == null ? null : Number(captureId);
   for (const id of targetIds) {
     if (id <= 0) continue; // 0 = network-only entry, no physical window
     const display = displays.find(d => d.id == id) || displays[0];
@@ -3772,6 +3778,7 @@ ipcMain.handle('set-live-display', async (event, displayId) => {
   // Open a new live window on the requested display
   const displays = screen.getAllDisplays();
   const display = displays.find(d => d.id == displayId) || displays[0];
+  if (display) programCaptureDisplayId = display.id;
   if (display) {
     createLiveWindowForDisplay(display);
     // Persist the chosen display as default using atomic write
@@ -3955,7 +3962,7 @@ function startDisplayNetServer(displayId, port) {
 
   if (displayId === 0) {
     ns.framePublisher = createProgramFramePublisher({
-      getWindow: () => liveWindows.get(0),
+      getWindow: () => selectProgramWindow(liveWindows, programCaptureDisplayId),
       getClients: () => ns.programClients,
       encodeFrame: (jpeg) => encodeWsFrame(jpeg, 0x2),
       onError: (error) => console.warn('[program-frame]', error.message)

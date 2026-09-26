@@ -1,4 +1,4 @@
-const { createProgramFramePublisher } = require('../lib/programFramePublisher');
+const { createProgramFramePublisher, selectProgramWindow } = require('../lib/programFramePublisher');
 
 describe('Program frame publisher', () => {
   let capturePage;
@@ -68,6 +68,20 @@ describe('Program frame publisher', () => {
     publisher.stop();
     expect(clearIntervalImpl).toHaveBeenCalledTimes(1);
     expect(publisher.isRunning()).toBe(false);
+  });
+
+  test('captures a live physical display when Program uses the logical network output', async () => {
+    const other = { isDestroyed: () => false };
+    const windows = new Map([[123, window], [456, other]]);
+    expect(selectProgramWindow(windows, 456)).toBe(other);
+
+    const publisher = createPublisher({ getWindow: () => selectProgramWindow(windows, 0) });
+    await publisher.captureOnce();
+    expect(capturePage).toHaveBeenCalledTimes(1);
+    expect(client.write).toHaveBeenCalledWith(Buffer.from('frame:jpeg:82'));
+
+    window.isDestroyed = () => true;
+    expect(selectProgramWindow(windows, 123)).toBe(other);
   });
 
   test('does not start capture while the Program window is loading', async () => {
