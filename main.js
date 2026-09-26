@@ -3971,7 +3971,7 @@ function startDisplayNetServer(displayId, port) {
     });
   }
   const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
-  const streamReceiverBridgePath = path.join(__dirname, 'stream', 'receiverBridge.js');
+  const streamReceiverBridgePath = path.join(__dirname, 'lib', 'streamReceiverBridge.js');
   const obsRoot = path.join(__dirname, 'obs');
 
   const server = http.createServer((req, res) => {
