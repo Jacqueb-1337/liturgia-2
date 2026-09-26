@@ -97,7 +97,8 @@
                 <label>Saturation % <input data-layer-field="saturation" type="number" min="0" max="200"></label>
                 <label>Hue ° <input data-layer-field="hue" type="number" min="-180" max="180"></label>
               </div>
-              <details id="worship-defaults" class="worship-defaults" hidden><summary>Worship text and slide defaults</summary><p class="helper">These settings are saved in Worship and affect every Program layer. Individual text styling needs Worship to send a separate render for each source.</p>
+              <label id="layer-transparent-label" class="transparent-toggle" hidden><input id="layer-transparent" type="checkbox"> Ignore Worship background (transparent)</label>
+              <details id="worship-defaults" class="worship-defaults" hidden><summary>Source text and slide styles</summary><p class="helper">These CSS changes affect only this Program layer. Duplicate it to show different styles on the same scene.</p>
       <div class="worship-default-form">
         <p id="worship-style-status" class="helper" role="status">Looking for a Worship output that supports style editing…</p>
         <label for="worship-style-target">Element</label>
@@ -117,7 +118,7 @@
         </div>
         <label for="worship-style-font">Font</label><select id="worship-style-font"><option value="">Use Worship default</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Segoe UI">Segoe UI</option></select>
         <details class="encoder-details"><summary>More style options (CSS)</summary><p class="helper">Use the same CSS declarations as Worship’s style editor for position, shadows, stroke, background and layout.</p><textarea id="worship-style-css" rows="7" spellcheck="false" placeholder="color: #ffffff; font-size: 60px;"></textarea></details>
-        <div class="style-actions"><button class="button primary" id="save-worship-style">Apply to Worship</button><button class="button secondary" id="reset-worship-style">Reset element</button></div>
+        <div class="style-actions"><button class="button primary" id="save-worship-style">Apply to source</button><button class="button secondary" id="reset-worship-style">Use Worship default</button></div>
       </div>
               </details>
 
@@ -158,6 +159,7 @@
     </section>
   </main>
   <div id="layer-context-menu" class="layer-context-menu" role="menu" hidden><button role="menuitem" data-menu-action="edit">Edit source</button><button role="menuitem" data-menu-action="duplicate">Duplicate layer</button><button role="menuitem" data-menu-action="fit">Fit canvas</button><button role="menuitem" data-menu-action="remove">Remove layer</button></div>
+  <div id="program-receivers" aria-hidden="true"></div>
   <script src="renderer.js"></script>
 </body>
 </html>

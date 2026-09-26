@@ -99,6 +99,10 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .layer-context-menu button { width: 100%; padding: 8px 10px; border: 0; border-radius: 4px; color: var(--text); background: transparent; cursor: pointer; text-align: left; }
 .layer-context-menu button:hover, .layer-context-menu button:focus { background: #394146; }
 
+#program-receivers { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0; overflow: hidden; }
+#program-receivers iframe { position: absolute; inset: 0; width: 1280px; height: 720px; border: 0; pointer-events: none; }
+.transparent-toggle { display: flex !important; align-items: center; gap: 8px; margin-top: 16px !important; color: var(--text) !important; }
+.transparent-toggle input { width: auto; margin: 0; }
 .worship-defaults { margin-top: 18px; padding: 11px; border: 1px solid var(--border); border-radius: 6px; }
 .worship-defaults summary { cursor: pointer; font-size: 13px; font-weight: 600; }
 .worship-default-form { display: grid; gap: 7px; padding-top: 10px; }

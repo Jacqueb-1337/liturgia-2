@@ -23,6 +23,8 @@ const editorSelection = document.getElementById('editor-selection');
 const layerList = document.getElementById('layer-list');
 const layerProperties = document.getElementById('layer-properties');
 const imageCache = new Map();
+const programReceivers = new Map();
+const programReceiverHost = document.getElementById('program-receivers');
 let selectedLayerId = '';
 let sceneSaveQueue = Promise.resolve();
 const instancesByKey = new Map();
@@ -62,6 +64,66 @@ function sceneHasSource(scene, type) {
     type === 'program' ? !!scene?.programVisible : type === 'camera' ? !!scene?.cameraVisible : false;
 }
 
+function sendProgramSourceStyles(layer) {
+  const receiver = programReceivers.get(layer.id);
+  if (receiver?.ready) receiver.iframe.contentWindow.postMessage({
+    type: 'liturgia-stream-styles', layerId: layer.id, styles: layer.sourceStyles || {}
+  }, receiver.origin);
+}
+
+function updateProgramReceivers() {
+  const scene = currentScene();
+  const instance = instancesByKey.get(selectedInstanceKey);
+  const requested = scene?.custom && instance?.url
+    ? scene.layers.filter((layer) => layer.type === 'program' && layer.visible) : [];
+  const keep = new Set(requested.map((layer) => layer.id));
+  for (const [id, receiver] of programReceivers) {
+    const layer = requested.find((item) => item.id === id);
+    if (keep.has(id) && receiver.key === selectedInstanceKey && receiver.transparent === !!layer.transparent) continue;
+    receiver.frame?.close();
+    receiver.iframe.remove();
+    programReceivers.delete(id);
+  }
+  if (!instance) return;
+  const origin = new URL(instance.url).origin;
+  for (const layer of requested) {
+    if (programReceivers.has(layer.id)) {
+      sendProgramSourceStyles(layer);
+      continue;
+    }
+    const iframe = document.createElement('iframe');
+    iframe.title = `Worship source ${layer.name}`;
+    iframe.setAttribute('aria-hidden', 'true');
+    const receiver = { iframe, origin, key: selectedInstanceKey, transparent: !!layer.transparent, ready: false, frame: null };
+    programReceivers.set(layer.id, receiver);
+    programReceiverHost.append(iframe);
+    const options = new URLSearchParams({ stream: '1', layer: layer.id });
+    if (layer.transparent) { options.set('t', '1'); options.set('c', '1'); }
+    iframe.src = `${instance.url}?${options}`;
+  }
+}
+
+window.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data || !['liturgia-stream-ready', 'liturgia-stream-frame', 'liturgia-stream-error'].includes(data.type)) return;
+  const receiver = programReceivers.get(data.layerId);
+  if (!receiver || event.source !== receiver.iframe.contentWindow || event.origin !== receiver.origin) {
+    data.frame?.close?.();
+    return;
+  }
+  if (data.type === 'liturgia-stream-ready') {
+    receiver.ready = true;
+    const layer = currentScene()?.layers?.find((item) => item.id === data.layerId);
+    if (layer) sendProgramSourceStyles(layer);
+  } else if (data.type === 'liturgia-stream-frame' && data.frame instanceof ImageBitmap) {
+    receiver.frame?.close();
+    receiver.frame = data.frame;
+    applyScene();
+  } else if (data.type === 'liturgia-stream-error') {
+    sceneMessage.textContent = `Worship source: ${data.message}`;
+  }
+});
+
 function selectedLayer() {
   return currentScene()?.layers?.find((layer) => layer.id === selectedLayerId) || null;
 }
@@ -69,7 +131,9 @@ function selectedLayer() {
 function applyScene() {
   const scene = currentScene();
   if (!scene) return;
-  const hasProgram = sceneHasSource(scene, 'program') && !!programFrame;
+  const hasProgram = sceneHasSource(scene, 'program') && (scene.custom
+    ? scene.layers.some((layer) => layer.visible && layer.type === 'program' && programReceivers.get(layer.id)?.frame)
+    : !!programFrame);
   const hasCamera = sceneHasSource(scene, 'camera') && !!cameraStream;
   const hasOther = scene.custom && scene.layers.some((layer) => layer.visible && (layer.type === 'text' || (layer.type === 'image' && imageCache.get(layer.imagePath)?.complete)));
   preview.hidden = !hasProgram && !hasCamera && !hasOther;
@@ -120,7 +184,7 @@ function drawCustomLayer(ctx, layer) {
     const lines = layer.text.split('\n');
     lines.forEach((line, index) => ctx.fillText(line, layer.x + 12 - layer.panX * 5, layer.y + 12 - layer.panY * 5 + index * layer.fontSize * 1.2));
   } else {
-    const source = layer.type === 'program' ? programFrame : layer.type === 'camera' ?
+    const source = layer.type === 'program' ? programReceivers.get(layer.id)?.frame : layer.type === 'camera' ?
       (cameraStream && sceneCameraPreview.readyState >= 2 ? sceneCameraPreview : null) : imageCache.get(layer.imagePath);
     if (source && (layer.type !== 'image' || source.complete)) {
       const sourceWidth = source.videoWidth || source.width;
@@ -221,6 +285,7 @@ function renderScenes() {
   }
   applyScene();
   renderCustomEditor();
+  updateProgramReceivers();
 }
 
 async function selectScene(sceneId) {
@@ -236,7 +301,7 @@ function newLayer(type) {
   const base = { id: crypto.randomUUID(), type, name: { program: 'Liturgia Program', camera: 'Camera', image: 'Image', text: 'Text' }[type],
     x: 0, y: 0, width: 1920, height: 1080, cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0,
     panX: 0, panY: 0, zoom: 1, opacity: 1, brightness: 100, contrast: 100, saturation: 100, hue: 0, visible: true, locked: false,
-    text: type === 'text' ? 'Your text' : '', fontSize: 72, color: '#ffffff', imagePath: '' };
+    text: type === 'text' ? 'Your text' : '', fontSize: 72, color: '#ffffff', imagePath: '', transparent: false, sourceStyles: {} };
   if (type === 'camera') Object.assign(base, { x: 1150, y: 60, width: 640, height: 360 });
   if (type === 'text') Object.assign(base, { x: 160, y: 820, width: 1600, height: 150 });
   return base;
@@ -336,7 +401,10 @@ function renderCustomEditor() {
       document.getElementById(id).hidden = layer.type === 'text';
     }
     const defaults = document.getElementById('worship-defaults');
+    document.getElementById('layer-transparent-label').hidden = layer.type !== 'program';
+    document.getElementById('layer-transparent').checked = layer.transparent === true;
     defaults.hidden = layer.type !== 'program';
+    if (layer.type === 'program') showWorshipStyle();
     if (layer.type !== 'program') defaults.open = false;
     for (const input of layerProperties.querySelectorAll('[data-layer-field]')) {
       const key = input.dataset.layerField;
@@ -380,6 +448,14 @@ document.getElementById('add-layer').addEventListener('click', () => {
   scene.layers.push(layer);
   selectedLayerId = layer.id;
   renderScenes(); persistScenes();
+});
+document.getElementById('layer-transparent').addEventListener('change', (event) => {
+  const layer = selectedLayer();
+  if (layer?.type !== 'program') return;
+  layer.transparent = event.target.checked;
+  updateProgramReceivers();
+  applyScene();
+  persistScenes();
 });
 document.getElementById('layer-name').addEventListener('change', (event) => {
   const layer = selectedLayer();
@@ -525,7 +601,7 @@ document.addEventListener('pointerdown', (event) => {
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') layerMenu.hidden = true; });
 
 function showWorshipStyle() {
-  const css = worshipStyles?.[worshipStyleTarget.value] || '';
+  const css = selectedLayer()?.sourceStyles?.[worshipStyleTarget.value] ?? worshipStyles?.[worshipStyleTarget.value] ?? '';
   worshipStyleCss.value = css;
   const style = document.createElement('div').style;
   style.cssText = css;
@@ -541,7 +617,7 @@ async function loadWorshipStyles(key) {
   const instance = instancesByKey.get(key);
   if (!instance?.styleAvailable) {
     worshipStyles = null;
-    worshipStyleStatus.textContent = 'This Worship output does not support LAN style editing. Start Worship from the current source version.';
+    worshipStyleStatus.textContent = 'Source CSS is available when Worship connects.';
     return;
   }
   worshipStyleInstanceKey = key;
@@ -551,42 +627,50 @@ async function loadWorshipStyles(key) {
     if (worshipStyleInstanceKey !== key) return;
     worshipStyles = styles;
     showWorshipStyle();
-    worshipStyleStatus.textContent = 'Connected. Changes will update the live Worship output.';
+    worshipStyleStatus.textContent = 'Worship defaults loaded. Your edits apply only to the selected source.';
   } catch (error) {
     worshipStyleStatus.textContent = `Could not load Worship styles: ${error.message}`;
   }
 }
 
 function updateWorshipStyleCss() {
-  const style = document.createElement('div').style;
-  style.cssText = worshipStyleCss.value;
-  style.setProperty('color', worshipStyleColor.value);
-  if (worshipStyleSize.value) style.setProperty('font-size', `${worshipStyleSize.value}px`);
-  else style.removeProperty('font-size');
-  if (worshipStyleFont.value) style.setProperty('font-family', worshipStyleFont.value);
-  else style.removeProperty('font-family');
-  worshipStyleCss.value = style.cssText;
+  const update = (css, property, value) => {
+    const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(^|;)\\s*${escaped}\\s*:\\s*[^;]*;?`, 'i');
+    if (!value) return css.replace(pattern, '$1').replace(/;\s*;/g, ';').trim();
+    if (pattern.test(css)) return css.replace(pattern, (_, prefix) => `${prefix}${property}: ${value};`);
+    const trimmed = css.trim();
+    const separator = trimmed && !trimmed.endsWith(';') ? '; ' : trimmed ? ' ' : '';
+    return `${trimmed}${separator}${property}: ${value};`;
+  };
+  let css = worshipStyleCss.value;
+  css = update(css, 'color', worshipStyleColor.value);
+  css = update(css, 'font-size', worshipStyleSize.value ? `${worshipStyleSize.value}px` : '');
+  css = update(css, 'font-family', worshipStyleFont.value);
+  worshipStyleCss.value = css;
 }
 
 worshipStyleTarget.addEventListener('change', showWorshipStyle);
 for (const control of [worshipStyleColor, worshipStyleSize, worshipStyleFont]) {
   control.addEventListener('change', updateWorshipStyleCss);
 }
-async function saveWorshipStyle(css) {
-  if (!worshipStyleInstanceKey || !worshipStyles) {
-    worshipStyleStatus.textContent = 'Connect to Liturgia Worship first.';
+function saveWorshipStyle(css) {
+  const layer = selectedLayer();
+  if (layer?.type !== 'program') {
+    worshipStyleStatus.textContent = 'Select a Liturgia Program layer first.';
     return;
   }
-  worshipStyleStatus.textContent = 'Applying style to Worship…';
-  try {
-    worshipStyles = await window.liturgiaStream.saveWorshipStyles(worshipStyleInstanceKey, {
-      [worshipStyleTarget.value]: css
-    });
-    showWorshipStyle();
-    worshipStyleStatus.textContent = 'Style applied and saved in Worship.';
-  } catch (error) {
-    worshipStyleStatus.textContent = `Could not apply style: ${error.message}`;
+  if (css.length > 8192) {
+    worshipStyleStatus.textContent = 'Keep source CSS under 8192 characters.';
+    return;
   }
+  layer.sourceStyles ||= {};
+  if (css.trim()) layer.sourceStyles[worshipStyleTarget.value] = css;
+  else delete layer.sourceStyles[worshipStyleTarget.value];
+  sendProgramSourceStyles(layer);
+  showWorshipStyle();
+  persistScenes();
+  worshipStyleStatus.textContent = 'Style saved for this source only.';
 }
 document.getElementById('save-worship-style').addEventListener('click', () => {
   void saveWorshipStyle(worshipStyleCss.value);
@@ -605,6 +689,7 @@ function connectToInstance(key) {
   if (programSocket) programSocket.close();
   if (programFrame) programFrame.close();
   programFrame = null;
+  updateProgramReceivers();
   applyScene();
   if (!instance.programStreamUrl) return;
 
@@ -953,7 +1038,9 @@ async function startOutputRecorder() {
   const scene = currentScene();
   if (!scene) throw new Error('Choose a scene before going live.');
   if (sceneHasSource(scene, 'camera') && !cameraStream) await ensureCameraReady();
-  if (sceneHasSource(scene, 'program') && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  if (sceneHasSource(scene, 'program') && (scene.custom
+    ? !scene.layers.some((layer) => layer.type === 'program' && layer.visible && programReceivers.get(layer.id)?.frame)
+    : !programFrame)) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
   if (selectedDevices.microphoneId) await ensureMicrophoneReady();
 
   outputCanvasStream = preview.captureStream(currentOutputConfig.fps);
@@ -1073,7 +1160,9 @@ async function checkLiveReadiness() {
   if (sceneHasSource(scene, 'camera') && !selectedDevices.cameraId) {
     throw new Error('This scene needs a camera. Select one on Video Devices, or choose Liturgia Fullscreen on Scenes.');
   }
-  if (sceneHasSource(scene, 'program') && !programFrame) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
+  if (sceneHasSource(scene, 'program') && (scene.custom
+    ? !scene.layers.some((layer) => layer.type === 'program' && layer.visible && programReceivers.get(layer.id)?.frame)
+    : !programFrame)) throw new Error('Waiting for Liturgia Program video. Make sure Worship is presenting.');
   return config;
 }
 

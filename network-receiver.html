@@ -426,29 +426,27 @@
           });
           return all;
         }
-        let lines = buildLines(baseSize);
-        while (true) {
-          const ts = baseSize + 4, tl = buildLines(ts);
-          if (tl.length * ts * lhMult < availH * 0.82 && ts < H * 0.15) { baseSize = ts; lines = tl; } else break;
-        }
-        while (lines.length * baseSize * lhMult > availH && baseSize > 20) { baseSize -= 2; lines = buildLines(baseSize); }
+        let textSize = baseSize * (textSt.sizeMultiplier || 1);
+        let lines = buildLines(textSize);
+        // Keep the requested text size stable and only shrink this text block to fit.
+        while (lines.length * textSize * lhMult > availH && textSize > 20) { textSize -= 2; lines = buildLines(textSize); }
 
-        const lh     = baseSize * lhMult;
+        const lh     = textSize * lhMult;
         const totalH = lines.length * lh;
         let startY   = vpos === 'top'    ? areaTop
                      : vpos === 'bottom' ? primaryBottom - totalH
                      :                    (areaTop + primaryBottom) / 2 - totalH / 2;
 
         lines.forEach((line, i) => {
-          const lineY = startY + i * lh + baseSize / 2;
+          const lineY = startY + i * lh + textSize / 2;
           let totalW = 0;
           line.forEach(seg => {
             if (seg.isNumber) {
-              bCtx.font = fStr(baseSize * subMult, subSt);
+              bCtx.font = fStr(textSize * subMult, subSt);
               totalW += bCtx.measureText(seg.text + ' ').width;
             } else {
               const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
-              bCtx.font = fStr(baseSize, merged); totalW += bCtx.measureText(seg.text).width;
+              bCtx.font = fStr(textSize, merged); totalW += bCtx.measureText(seg.text).width;
             }
           });
           let x = textAlign === 'left'  ? areaLeft
@@ -457,15 +455,15 @@
           bCtx.textBaseline = 'alphabetic';
           line.forEach(seg => {
             if (seg.isNumber) {
-              const ssz = baseSize * subMult;
+              const ssz = textSize * subMult;
               bCtx.font = fStr(ssz, subSt); bCtx.fillStyle = subColor; bCtx.textAlign = 'left';
               drawTx(seg.text + ' ', x, lineY + ssz * 0.35, subSt);
               bCtx.font = fStr(ssz, subSt); x += bCtx.measureText(seg.text + ' ').width;
             } else {
               const merged = { ...textSt, fontWeight: seg.bold ? 'bold' : textSt.fontWeight, fontStyle: seg.italic ? 'italic' : textSt.fontStyle };
-              bCtx.font = fStr(baseSize, merged); bCtx.fillStyle = textColor; bCtx.textAlign = 'left';
+              bCtx.font = fStr(textSize, merged); bCtx.fillStyle = textColor; bCtx.textAlign = 'left';
               drawTx(seg.text, x, lineY, merged);
-              bCtx.font = fStr(baseSize, merged); x += bCtx.measureText(seg.text).width;
+              bCtx.font = fStr(textSize, merged); x += bCtx.measureText(seg.text).width;
             }
           });
           bCtx.textBaseline = 'middle';
@@ -513,7 +511,7 @@
           const secTextAlign = textSt.textAlign || 'center';
           if ('letterSpacing' in bCtx)
             bCtx.letterSpacing = textSt.letterSpacing ? `${textSt.letterSpacing * norm}px` : '0px';
-          let secSize = H * 0.065;
+          let secSize = H * 0.065 * (textSt.sizeMultiplier || 1);
           const secLines_src = content.secondaryText.split('\n');
           function buildSecLines(size) {
             bCtx.font = fStr(size, textSt);

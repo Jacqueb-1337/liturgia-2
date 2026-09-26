@@ -163,7 +163,14 @@ function createSettingsStore(userDataPath, safeStorage, fileSystem = fs) {
               text: String(layer.text || '').slice(0, 2000),
               fontSize: bounded(layer.fontSize, 72, 8, 300),
               color: /^#[0-9a-f]{6}$/i.test(layer.color) ? layer.color : '#ffffff',
-              imagePath: typeof layer.imagePath === 'string' ? layer.imagePath.slice(0, 2048) : ''
+              imagePath: typeof layer.imagePath === 'string' ? layer.imagePath.slice(0, 2048) : '',
+              transparent: layer.transparent === true,
+              sourceStyles: Object.fromEntries(
+                Object.entries(layer.sourceStyles || {})
+                  .filter(([key, css]) => ['verseText', 'verseNumber', 'verseSubscript', 'verseReference',
+                    'songText', 'songTitle', 'songReference', 'global'].includes(key) && typeof css === 'string')
+                  .map(([key, css]) => [key, css.slice(0, 8192)])
+              )
             }))
         };
       });
