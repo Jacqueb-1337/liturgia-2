@@ -109,6 +109,7 @@ function drawCustomLayer(ctx, layer) {
   if (!layer.visible) return;
   ctx.save();
   ctx.globalAlpha = layer.opacity;
+  ctx.filter = `brightness(${layer.brightness ?? 100}%) contrast(${layer.contrast ?? 100}%) saturate(${layer.saturation ?? 100}%) hue-rotate(${layer.hue ?? 0}deg)`;
   ctx.beginPath();
   ctx.rect(layer.x, layer.y, layer.width, layer.height);
   ctx.clip();
@@ -228,20 +229,13 @@ async function selectScene(sceneId) {
   activeSceneId = sceneId;
   renderScenes();
   sceneMessage.textContent = `Previewing “${selected.name}”.`;
-  try {
-    const saved = await window.liturgiaStream.saveScenes(scenes, activeSceneId);
-    scenes = saved.scenes;
-    activeSceneId = saved.activeSceneId;
-    renderScenes();
-  } catch (error) {
-    sceneMessage.textContent = `Could not save scene: ${error.message}`;
-  }
+  await persistScenes();
 }
 
 function newLayer(type) {
   const base = { id: crypto.randomUUID(), type, name: { program: 'Liturgia Program', camera: 'Camera', image: 'Image', text: 'Text' }[type],
     x: 0, y: 0, width: 1920, height: 1080, cropLeft: 0, cropTop: 0, cropRight: 0, cropBottom: 0,
-    panX: 0, panY: 0, zoom: 1, opacity: 1, visible: true, locked: false,
+    panX: 0, panY: 0, zoom: 1, opacity: 1, brightness: 100, contrast: 100, saturation: 100, hue: 0, visible: true, locked: false,
     text: type === 'text' ? 'Your text' : '', fontSize: 72, color: '#ffffff', imagePath: '' };
   if (type === 'camera') Object.assign(base, { x: 1150, y: 60, width: 640, height: 360 });
   if (type === 'text') Object.assign(base, { x: 160, y: 820, width: 1600, height: 150 });
@@ -338,9 +332,17 @@ function renderCustomEditor() {
     for (const id of ['layer-text', 'layer-text-label', 'layer-font-size-label', 'layer-color-label']) document.getElementById(id).hidden = layer.type !== 'text';
     document.getElementById('layer-color').value = layer.color;
     document.getElementById('choose-layer-image').hidden = layer.type !== 'image';
+    for (const id of ['layer-appearance-heading', 'layer-appearance-note', 'layer-appearance-fields']) {
+      document.getElementById(id).hidden = layer.type === 'text';
+    }
+    const defaults = document.getElementById('worship-defaults');
+    defaults.hidden = layer.type !== 'program';
+    if (layer.type !== 'program') defaults.open = false;
     for (const input of layerProperties.querySelectorAll('[data-layer-field]')) {
       const key = input.dataset.layerField;
-      input.value = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom', 'opacity'].includes(key) ? Math.round(layer[key] * 100) : layer[key];
+      const fallback = { brightness: 100, contrast: 100, saturation: 100, hue: 0 };
+      const value = layer[key] ?? fallback[key];
+      input.value = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom', 'opacity'].includes(key) ? Math.round(value * 100) : value;
     }
   }
   updateSelectionOutline();
@@ -403,7 +405,8 @@ for (const input of layerProperties.querySelectorAll('[data-layer-field]')) {
     const bounds = {
       x: [-1920, 3840], y: [-1080, 2160], width: [20, 3840], height: [20, 2160],
       cropLeft: [0, .95], cropTop: [0, .95], cropRight: [0, .95], cropBottom: [0, .95],
-      panX: [-100, 100], panY: [-100, 100], zoom: [1, 5], opacity: [0, 1], fontSize: [8, 300]
+      panX: [-100, 100], panY: [-100, 100], zoom: [1, 5], opacity: [0, 1], fontSize: [8, 300],
+      brightness: [0, 200], contrast: [0, 200], saturation: [0, 200], hue: [-180, 180]
     };
     const measured = ['cropLeft', 'cropTop', 'cropRight', 'cropBottom', 'opacity'].includes(field) ? value / 100 : value;
     layer[field] = Math.max(bounds[field][0], Math.min(bounds[field][1], measured));
@@ -445,8 +448,10 @@ editorInteraction.addEventListener('pointerdown', (event) => {
   const scene = currentScene();
   if (!scene?.custom || event.button !== 0) return;
   const { x, y } = pointerCanvasPosition(event);
-  const layer = [...scene.layers].reverse().find((item) => item.visible && !item.locked &&
-    x >= item.x && y >= item.y && x <= item.x + item.width && y <= item.y + item.height);
+  const hit = (item) => item.visible && !item.locked &&
+    x >= item.x && y >= item.y && x <= item.x + item.width && y <= item.y + item.height;
+  const layer = (selectedLayer() && hit(selectedLayer()) ? selectedLayer() : null) ||
+    [...scene.layers].reverse().find(hit);
   if (!layer) { selectedLayerId = ''; renderCustomEditor(); return; }
   selectedLayerId = layer.id;
   renderCustomEditor();

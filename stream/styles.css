@@ -94,6 +94,15 @@ h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 #scene-camera-preview.camera-full { inset: 0; width: 100%; height: 100%; object-fit: cover; }
 #scene-camera-preview[hidden] { display: none; }
 
+
+.worship-defaults { margin-top: 18px; padding: 11px; border: 1px solid var(--border); border-radius: 6px; }
+.worship-defaults summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.worship-default-form { display: grid; gap: 7px; padding-top: 10px; }
+.worship-default-form select, .worship-default-form input { width: 100%; min-width: 0; }
+.worship-default-form .inline-fields { gap: 8px; }
+.worship-default-form .style-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+#layer-appearance-heading { margin-top: 18px; }
+
 .custom-editor { margin-top: 20px; }
 .editor-toolbar { display: flex; align-items: center; gap: 12px; margin: 0 0 15px; }
 .editor-toolbar label { font-size: 13px; font-weight: 600; }

@@ -15,7 +15,6 @@
   <nav class="tabs" aria-label="Main sections">
     <button class="tab active" data-page="live">Live</button>
     <button class="tab" data-page="scenes">Scenes</button>
-    <button class="tab" data-page="appearance">Worship Styles</button>
     <button class="tab" data-page="video">Video Devices</button>
     <button class="tab" data-page="audio">Audio Devices</button>
     <button class="tab" data-page="stream">Stream Setup</button>
@@ -90,20 +89,16 @@
                 <label id="layer-color-label" hidden>Text color <input id="layer-color" type="color"></label>
               </div>
               <div class="layer-actions"><button class="button secondary" id="layer-fit">Fit canvas</button><button class="button secondary" id="layer-center">Center</button><button class="button secondary" id="layer-remove">Remove layer</button></div>
-            </div>
-          </div>
-          <div class="editor-preview-panel">
-            <div class="card-label"><span>SCENE PREVIEW</span><span>Drag to move · corner to resize</span></div>
-            <div class="editor-canvas-wrap"><canvas id="scene-editor-preview" width="1920" height="1080" aria-label="Custom scene editor"></canvas><div id="editor-interaction" aria-label="Move and resize layers"><div id="editor-selection" hidden><span class="resize-handle"></span></div></div></div>
-            <p class="helper">The clean preview on the Live tab is the video sent to your destination. Selection outlines stay in this editor.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="page" id="page-appearance">
-      <div class="page-heading"><div><p class="eyebrow">WORSHIP OUTPUT</p><h1>Worship Styles</h1><p class="muted">Edit the connected Worship presentation from Stream. Changes appear live and remain saved in Worship.</p></div></div>
-      <div class="device-card form-card">
+              <h2 id="layer-appearance-heading" hidden>Source appearance</h2>
+              <p id="layer-appearance-note" class="helper" hidden>These adjustments affect only this layer, even when another layer uses the same Worship output.</p>
+              <div id="layer-appearance-fields" class="editor-fields" hidden>
+                <label>Brightness % <input data-layer-field="brightness" type="number" min="0" max="200"></label>
+                <label>Contrast % <input data-layer-field="contrast" type="number" min="0" max="200"></label>
+                <label>Saturation % <input data-layer-field="saturation" type="number" min="0" max="200"></label>
+                <label>Hue ° <input data-layer-field="hue" type="number" min="-180" max="180"></label>
+              </div>
+              <details id="worship-defaults" class="worship-defaults" hidden><summary>Worship text and slide defaults</summary><p class="helper">These settings are saved in Worship and affect every Program layer. Individual text styling needs Worship to send a separate render for each source.</p>
+      <div class="worship-default-form">
         <p id="worship-style-status" class="helper" role="status">Looking for a Worship output that supports style editing…</p>
         <label for="worship-style-target">Element</label>
         <select id="worship-style-target">
@@ -123,6 +118,17 @@
         <label for="worship-style-font">Font</label><select id="worship-style-font"><option value="">Use Worship default</option><option value="Arial">Arial</option><option value="Verdana">Verdana</option><option value="Georgia">Georgia</option><option value="Times New Roman">Times New Roman</option><option value="Segoe UI">Segoe UI</option></select>
         <details class="encoder-details"><summary>More style options (CSS)</summary><p class="helper">Use the same CSS declarations as Worship’s style editor for position, shadows, stroke, background and layout.</p><textarea id="worship-style-css" rows="7" spellcheck="false" placeholder="color: #ffffff; font-size: 60px;"></textarea></details>
         <div class="style-actions"><button class="button primary" id="save-worship-style">Apply to Worship</button><button class="button secondary" id="reset-worship-style">Reset element</button></div>
+      </div>
+              </details>
+
+            </div>
+          </div>
+          <div class="editor-preview-panel">
+            <div class="card-label"><span>SCENE PREVIEW</span><span>Drag to move · corner to resize</span></div>
+            <div class="editor-canvas-wrap"><canvas id="scene-editor-preview" width="1920" height="1080" aria-label="Custom scene editor"></canvas><div id="editor-interaction" aria-label="Move and resize layers"><div id="editor-selection" hidden><span class="resize-handle"></span></div></div></div>
+            <p class="helper">The clean preview on the Live tab is the video sent to your destination. Selection outlines stay in this editor.</p>
+          </div>
+        </div>
       </div>
     </section>
 

@@ -74,15 +74,17 @@ describe('Liturgia Stream settings store', () => {
       id: 'custom', name: 'Custom', custom: true, layers: [
         { id: 'background', type: 'program', name: 'Program', x: 0, y: 0, width: 1920, height: 1080 },
         { id: 'foreground', type: 'program', name: 'Second view', x: 200, y: 300, width: -10, height: 300,
-          cropLeft: .2, panX: 50, zoom: 2, opacity: .6 }
+          cropLeft: .2, panX: 50, zoom: 2, opacity: .6, brightness: 140, contrast: 125 }
       ]
     }], 'custom');
     const reloaded = createSettingsStore(directory, safeStorage);
     const { scenes } = await reloaded.load();
     expect(scenes[0].layers.map((layer) => layer.id)).toEqual(['background', 'foreground']);
     expect(scenes[0].layers[0].cropLeft).toBe(0);
+    expect(scenes[0].layers[0].brightness).toBe(100);
     expect(scenes[0].layers[1]).toMatchObject({
-      x: 200, y: 300, width: 20, height: 300, cropLeft: .2, panX: 50, zoom: 2, opacity: .6
+      x: 200, y: 300, width: 20, height: 300, cropLeft: .2, panX: 50, zoom: 2, opacity: .6,
+      brightness: 140, contrast: 125
     });
   });
 
