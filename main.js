@@ -45,6 +45,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib/offlineLicenseCache');
 const RemoteServer = require('./remote-server');
+const { ensureProgramFirewall } = require('./lib/streamFirewall');
 const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -256,6 +257,7 @@ const liveWindows = new Map(); // keyed by display id
 // Per-display network display servers
 // Map<displayId, {server, clients:Set, port, lastPayload, lastMode, lastError}>
 const displayNetServers = new Map();
+let streamProgramFirewallStatus = { success: false, active: null, message: 'Windows network access has not been checked.' };
 let displayNetBonjour = null;
 const displayNetBonjourServices = new Map();
 
@@ -3130,20 +3132,46 @@ app.whenReady().then(async () => {
       }
     }
 
-    // Auto-start per-display network servers if enabled
-    if (settings.displaySettings) {
-      setTimeout(() => {
-        for (const [displayIdStr, ds] of Object.entries(settings.displaySettings)) {
-          const nd = ds && ds.networkDisplay;
-          if (nd && nd.enabled) {
-            const displayId = parseInt(displayIdStr, 10);
-            const port = nd.port || 7777;
-            try { startDisplayNetServer(displayId, port); }
-            catch (e) { console.error('[network-display] Failed to auto-start for display', displayId, ':', e.message); }
-          }
-        }
-      }, 600);
+    // Liturgia Program is available over the LAN by default. Existing explicit opt-outs are preserved.
+    let programSettingsChanged = false;
+    settings.displaySettings = settings.displaySettings && typeof settings.displaySettings === 'object' ? settings.displaySettings : {};
+    const programDisplaySettings = settings.displaySettings['0'] || (settings.displaySettings['0'] = {});
+    if (!programDisplaySettings.networkDisplay || typeof programDisplaySettings.networkDisplay !== 'object') {
+      programDisplaySettings.networkDisplay = { enabled: true, port: 7777, transparent: false, blackAsClear: false };
+      programSettingsChanged = true;
+    } else {
+      const programNetworkDisplay = programDisplaySettings.networkDisplay;
+      if (typeof programNetworkDisplay.enabled !== 'boolean') { programNetworkDisplay.enabled = true; programSettingsChanged = true; }
+      if (!Number.isInteger(programNetworkDisplay.port) || programNetworkDisplay.port < 1024 || programNetworkDisplay.port > 65535) { programNetworkDisplay.port = 7777; programSettingsChanged = true; }
+      if (typeof programNetworkDisplay.transparent !== 'boolean') { programNetworkDisplay.transparent = false; programSettingsChanged = true; }
+      if (typeof programNetworkDisplay.blackAsClear !== 'boolean') { programNetworkDisplay.blackAsClear = false; programSettingsChanged = true; }
     }
+    if (programSettingsChanged) {
+      try { await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8'); }
+      catch (error) { console.warn('[network-display] Could not save default Program output settings:', error.message); }
+    }
+
+    // Auto-start all configured network displays, including Liturgia Program (display 0).
+    setTimeout(() => {
+      for (const [displayIdStr, ds] of Object.entries(settings.displaySettings)) {
+        const nd = ds && ds.networkDisplay;
+        if (!nd || !nd.enabled) continue;
+        const displayId = parseInt(displayIdStr, 10);
+        const port = nd.port || 7777;
+        try {
+          startDisplayNetServer(displayId, port);
+          if (displayId === 0 && process.platform === 'win32') {
+            ensureProgramFirewall(port, app.getPath('exe')).then((status) => {
+              streamProgramFirewallStatus = status;
+              console.log('[network-display] Program firewall status:', status.message);
+            }).catch((error) => {
+              streamProgramFirewallStatus = { success: false, active: null, managed: true, message: error.message || 'Could not configure Windows Firewall.' };
+              console.warn('[network-display] Program firewall setup failed:', streamProgramFirewallStatus.message);
+            });
+          }
+        } catch (e) { console.error('[network-display] Failed to auto-start for display', displayId, ':', e.message); }
+      }
+    }, 600);
   } catch (e) { console.warn('Failed to start remote/relay:', e); }
   
   // After window creation, load settings and, if enabled, check for updates on startup
@@ -3649,6 +3677,15 @@ ipcMain.on('update-live-window', (event, data) => {
       ? mergeStylesForDisplay(data, overrides[String(displayId)])
       : data;
     ns.lastPayload = displayData;
+    const mediaPath = displayData && displayData.media && displayData.media.path;
+    if (typeof mediaPath === 'string' && path.isAbsolute(mediaPath) && !/^https?:\/\//i.test(mediaPath)) {
+      ns.allowedMediaPaths.set(path.resolve(mediaPath), Date.now());
+    }
+    const mediaCutoff = Date.now() - 10 * 60 * 1000;
+    for (const [allowedPath, seenAt] of ns.allowedMediaPaths) {
+      if (seenAt < mediaCutoff) ns.allowedMediaPaths.delete(allowedPath);
+    }
+    while (ns.allowedMediaPaths.size > 128) ns.allowedMediaPaths.delete(ns.allowedMediaPaths.keys().next().value);
     ns.lastMode = 'normal';
     if (ns.server) broadcastToDisplayClients(ns, { type: 'content', data: displayData });
   }
@@ -3912,7 +3949,7 @@ function broadcastToAllNetDisplays(obj) {
 function startDisplayNetServer(displayId, port) {
   if (displayNetServers.has(displayId)) stopDisplayNetServer(displayId);
 
-  const ns = { server: null, clients: new Set(), port, lastPayload: null, lastMode: 'normal', lastError: null };
+  const ns = { server: null, clients: new Set(), port, lastPayload: null, lastMode: 'normal', lastError: null, allowedMediaPaths: new Map() };
   displayNetServers.set(displayId, ns);
 
   const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
@@ -3971,6 +4008,9 @@ function startDisplayNetServer(displayId, port) {
 
       // Resolve and validate the path
       const resolved = path.resolve(filePath);
+      if (!ns.allowedMediaPaths.has(resolved)) {
+        res.writeHead(403); res.end('Media is not part of the current or recent Liturgia Program output'); return;
+      }
 
       // Block directory traversal by ensuring the resolved path is absolute
       // and ends with a known media extension
@@ -4135,7 +4175,10 @@ function stopAllDisplayNetServers() {
 ipcMain.handle('display-net-start', async (_event, displayId, port) => {
   const p = (typeof port === 'number' && port > 0) ? port : 7777;
   startDisplayNetServer(displayId, p);
-  return { ok: true, port: p };
+  if (displayId === 0 && process.platform === 'win32') {
+    streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'));
+  }
+  return { ok: true, port: p, firewall: displayId === 0 ? streamProgramFirewallStatus : null };
 });
 
 ipcMain.handle('display-net-stop', async (_event, displayId) => {
@@ -4156,5 +4199,5 @@ ipcMain.handle('get-display-net-status', async (_event, displayId) => {
   const ns = displayNetServers.get(displayId);
   const running = !!(ns && ns.server);
   const port = ns ? ns.port : 7777;
-  return { running, port, url: running ? `http://${localIp}:${port}` : null, lastError: ns ? (ns.lastError || null) : null };
+  return { running, port, url: running ? `http://${localIp}:${port}` : null, lastError: ns ? (ns.lastError || null) : null, firewall: displayId === 0 ? streamProgramFirewallStatus : null };
 });

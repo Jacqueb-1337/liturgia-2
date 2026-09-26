@@ -2881,6 +2881,7 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
         <button id="dp-nd-copy" class="btn">Copy URL</button>
       </div>
       <div id="dp-nd-error" class="nd-error" style="display:none;"></div>
+      ${displayId === 0 ? '<div id="dp-nd-firewall" class="nd-error" style="display:none;"><span id="dp-nd-firewall-message"></span> <button id="dp-nd-firewall-retry" class="btn">Allow on this network</button></div>' : ''}
       <label class="toggle-label">
         <input id="dp-nd-transparent" type="checkbox" />
         <span class="toggle-ui"></span>
@@ -2911,6 +2912,9 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
   const portEl        = modal.querySelector('#dp-nd-port');
   const urlEl         = modal.querySelector('#dp-nd-url');
   const errEl         = modal.querySelector('#dp-nd-error');
+  const firewallEl    = modal.querySelector('#dp-nd-firewall');
+  const firewallMessageEl = modal.querySelector('#dp-nd-firewall-message');
+  const firewallRetryBtn = modal.querySelector('#dp-nd-firewall-retry');
   const transparentEl = modal.querySelector('#dp-nd-transparent');
   const blackClearEl  = modal.querySelector('#dp-nd-black-clear');
   const copyBtn       = modal.querySelector('#dp-nd-copy');
@@ -2938,6 +2942,12 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
       urlEl.textContent = status.running ? (buildUrl(status.url) || 'Running') : 'Not running';
       if (status.lastError) { errEl.textContent = status.lastError; errEl.style.display = ''; }
       else                  { errEl.style.display = 'none'; }
+      if (firewallEl && status.firewall && enableEl.checked) {
+        firewallEl.style.display = status.firewall.success ? 'none' : '';
+        firewallMessageEl.textContent = status.firewall.message || 'Windows needs permission to allow Program output on your network.';
+      } else if (firewallEl) {
+        firewallEl.style.display = 'none';
+      }
     } catch (_) {}
   }
 
@@ -2970,6 +2980,13 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
   };
   ipcRenderer.on('display-net-error', errorListener);
 
+  if (firewallRetryBtn) firewallRetryBtn.addEventListener('click', async () => {
+    firewallRetryBtn.disabled = true;
+    firewallMessageEl.textContent = 'Waiting for Windows permission…';
+    try { await ipcRenderer.invoke('display-net-start', 0, parseInt(portEl.value, 10) || 7777); }
+    finally { firewallRetryBtn.disabled = false; refreshStatus(); }
+  });
+
   enableEl.addEventListener('change', saveAndApply);
   portEl.addEventListener('change', saveAndApply);
   transparentEl.addEventListener('change', saveAndApply);
@@ -2997,8 +3014,10 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
     if (text && text !== 'Not running') try { navigator.clipboard.writeText(text); } catch (_) {}
   });
 
+  let statusTimer = null;
   function closeModal() {
     ipcRenderer.removeListener('display-net-error', errorListener);
+    if (statusTimer) clearInterval(statusTimer);
     backdrop.remove();
   }
 
@@ -3009,4 +3028,5 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
   });
 
   refreshStatus();
+  statusTimer = setInterval(refreshStatus, 1500);
 }
