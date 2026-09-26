@@ -71,4 +71,12 @@
 
 - Sent a 10-second synthetic color-bar and silence test to the supplied Facebook RTMPS ingest endpoint using FFmpeg H.264/AAC output at 1080p30, 6,000 Kbps video, and 160 Kbps audio. FFmpeg sent 300 frames and exited with code 0.
 - The stream key was entered through a masked Windows prompt, was not saved, and was not added to the repository. Temporary test helper files were removed.
-- This verifies RTMPS ingest with FFmpeg and the target credentials. It does not verify Liturgia Stream?s Electron UI, camera, Worship capture, or Facebook?s viewer-facing broadcast state. Those still need an end-to-end test.
+- This verifies RTMPS ingest with FFmpeg and the target credentials. It does not verify Liturgia Stream's Electron UI, camera, Worship capture, or Facebook's viewer-facing broadcast state. Those still need an end-to-end test.
+
+### Stream application validation
+
+- Ran `npm --prefix stream run check`: all Stream Electron JavaScript files passed syntax checks.
+- Ran the four focused Stream Jest suites: 22 tests passed.
+- The Electron application was launched with `npm --prefix stream start`; this turn did not complete a visual or camera/Worship in-app test.
+- The direct 10-second Facebook RTMPS test used synthetic color bars and silence. It verified service ingest but not the Stream UI or live Worship/camera pipeline.
+- Next Stream validation is an in-app Go Live test with Worship Program, camera, and audio sources.
