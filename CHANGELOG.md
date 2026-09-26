@@ -1,5 +1,11 @@
 # Changelog
 
+## 6.1.29 - 2026-09-26
+
+- fix: preserve per-display safe areas when clearing and restoring live content
+- fix: sync schedule verse clicks with the Bible list, search box, and navigation anchor
+- test: cover per-display safe-area restore and schedule verse synchronization
+
 ## 6.1.28 - 2026-09-25
 
 - fix: keep left and right song verse navigation scrolled to the selected verse
