@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liturgia Stream</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark">L</span><span>Liturgia <strong>Stream</strong></span></div>
+    <div class="header-status"><span class="status-dot"></span><span id="worship-status">Looking for Worship</span></div>
+  </header>
+
+  <nav class="tabs" aria-label="Main sections">
+    <button class="tab active" data-page="live">Live</button>
+    <button class="tab" data-page="scenes">Scenes</button>
+    <button class="tab" data-page="video">Video Devices</button>
+    <button class="tab" data-page="audio">Audio Devices</button>
+    <button class="tab" data-page="stream">Stream Setup</button>
+  </nav>
+
+  <main>
+    <section class="page active" id="page-live">
+      <div class="page-heading">
+        <div><p class="eyebrow">SERVICE</p><h1>Live</h1><p class="muted">Your Liturgia program and stream at a glance.</p></div>
+        <button class="button secondary" id="refresh-worship">Find Worship</button>
+      </div>
+      <div class="live-layout">
+        <div class="preview-card">
+          <div class="card-label"><span>PROGRAM PREVIEW</span><span id="preview-state">Waiting for Worship</span></div>
+          <div class="preview-frame">
+            <div class="preview-empty" id="preview-empty">
+              <div class="cross-mark">✦</div>
+              <h2>Connect to Liturgia Worship</h2>
+              <p>Worship’s Program output will appear here when it’s found on your network.</p>
+            </div>
+            <iframe id="program-preview" title="Liturgia Program preview" allow="autoplay; fullscreen" hidden></iframe>
+          </div>
+        </div>
+        <aside class="live-side">
+          <div class="card">
+            <p class="eyebrow">WORSHIP CONNECTION</p>
+            <div id="instance-list" class="instance-list"><p class="muted">Searching your local network…</p></div>
+          </div>
+          <div class="card service-card">
+            <p class="eyebrow">STREAM STATUS</p>
+            <div class="offline-state"><span class="large-dot"></span><span>Not streaming</span></div>
+            <button class="button primary wide" disabled title="Streaming encoder is the next MVP milestone">Go Live</button>
+            <p class="helper">Streaming setup is being built in stages.</p>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="page" id="page-scenes">
+      <div class="page-heading"><div><p class="eyebrow">PRODUCTION</p><h1>Scenes</h1><p class="muted">Choose what viewers see. Scene composition is coming next.</p></div></div>
+      <div class="empty-card"><div class="empty-icon">▣</div><h2>Scenes are next</h2><p>Your saved scenes will appear here. The MVP will include Camera, Camera + Liturgia, and Liturgia Fullscreen.</p></div>
+    </section>
+
+    <section class="page" id="page-video">
+      <div class="page-heading"><div><p class="eyebrow">INPUTS</p><h1>Video Devices</h1><p class="muted">Choose a camera or capture card for your service.</p></div><button class="button secondary" id="refresh-video">Refresh devices</button></div>
+      <div class="device-card"><label for="video-device">Camera or capture card</label><select id="video-device"><option value="">No camera selected</option></select><p id="video-message" class="helper">Allow camera access to list available devices.</p><video id="camera-preview" autoplay muted playsinline hidden></video><button class="button secondary" id="enable-video">Check camera access</button></div>
+    </section>
+
+    <section class="page" id="page-audio">
+      <div class="page-heading"><div><p class="eyebrow">INPUTS</p><h1>Audio Devices</h1><p class="muted">Choose a microphone. System and capture-card audio will be added in the encoder milestone.</p></div><button class="button secondary" id="refresh-audio">Refresh devices</button></div>
+      <div class="device-card"><label for="audio-device">Microphone</label><select id="audio-device"><option value="">No microphone selected</option></select><p id="audio-message" class="helper">Allow microphone access to list available devices.</p><div class="meter" aria-label="Microphone level"><span id="audio-level"></span></div><button class="button secondary" id="enable-audio">Check microphone access</button></div>
+    </section>
+
+    <section class="page" id="page-stream">
+      <div class="page-heading"><div><p class="eyebrow">DESTINATION</p><h1>Stream Setup</h1><p class="muted">Add your RTMP or RTMPS destination once. Credentials will be stored securely in a later setup milestone.</p></div></div>
+      <div class="device-card form-card">
+        <label for="destination-name">Destination name</label><input id="destination-name" placeholder="Church YouTube">
+        <label for="stream-server">RTMP or RTMPS server</label><input id="stream-server" placeholder="rtmps://example.com/live">
+        <label for="stream-key">Stream key</label><input id="stream-key" type="password" autocomplete="off" placeholder="Enter your stream key">
+        <div class="inline-fields"><div><label for="resolution">Resolution</label><select id="resolution"><option>1920 × 1080</option><option>1280 × 720</option></select></div><div><label for="frame-rate">Frame rate</label><select id="frame-rate"><option>30 FPS</option><option>60 FPS</option></select></div></div>
+        <button class="button primary" disabled title="The RTMP encoder is the next MVP milestone">Save destination</button>
+      </div>
+    </section>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -45,6 +45,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { createOfflineLicenseCache, restoreOfflineLicenseCache } = require('./lib/offlineLicenseCache');
 const RemoteServer = require('./remote-server');
+const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
 
@@ -255,6 +256,8 @@ const liveWindows = new Map(); // keyed by display id
 // Per-display network display servers
 // Map<displayId, {server, clients:Set, port, lastPayload, lastMode, lastError}>
 const displayNetServers = new Map();
+let displayNetBonjour = null;
+const displayNetBonjourServices = new Map();
 
 // Merge per-display style overrides into a payload's styles object.
 // override is { text, number, title, reference, subscript, global } — any field may be null/undefined.
@@ -4075,6 +4078,21 @@ function startDisplayNetServer(displayId, port) {
     ns.port      = port;
     ns.server    = server;
     ns.lastError = null;
+    try {
+      if (!displayNetBonjour) displayNetBonjour = new Bonjour((error) => console.warn('[network-display] mDNS error:', error.message));
+      const priorService = displayNetBonjourServices.get(displayId);
+      if (priorService) priorService.stop();
+      const service = displayNetBonjour.publish({
+        name: displayId === 0 ? 'Liturgia Worship Program' : `Liturgia Worship Display ${displayId}`,
+        type: 'liturgia-display',
+        port,
+        txt: { displayId: String(displayId), version: app.getVersion(), protocol: '1' }
+      });
+      service.on('error', (error) => console.warn('[network-display] mDNS publish failed:', error.message));
+      displayNetBonjourServices.set(displayId, service);
+    } catch (error) {
+      console.warn('[network-display] Could not advertise display over mDNS:', error.message);
+    }
     console.log(`[network-display] Display ${displayId} listening on port ${port}`);
     if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.webContents.send('display-net-error', { displayId, error: null });
   });
@@ -4086,6 +4104,15 @@ function startDisplayNetServer(displayId, port) {
 function stopDisplayNetServer(displayId) {
   const ns = displayNetServers.get(displayId);
   if (!ns) return;
+  const mdnsService = displayNetBonjourServices.get(displayId);
+  if (mdnsService) {
+    try { mdnsService.stop(); } catch (_) {}
+    displayNetBonjourServices.delete(displayId);
+    if (!displayNetBonjourServices.size && displayNetBonjour) {
+      try { displayNetBonjour.destroy(); } catch (_) {}
+      displayNetBonjour = null;
+    }
+  }
   for (const socket of [...ns.clients]) {
     try { socket.write(Buffer.from([0x88, 0x02, 0x03, 0xe8])); socket.destroy(); } catch (_) {}
   }
