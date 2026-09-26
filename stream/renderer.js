@@ -174,6 +174,8 @@ function connectToInstance(key) {
   const instance = instancesByKey.get(key);
   if (!instance) return;
   selectedInstanceKey = key;
+  headerStatus.classList.remove('connected');
+  worshipStatus.textContent = 'Connecting to Liturgia Program';
   if (programSocket) programSocket.close();
   if (programFrame) programFrame.close();
   programFrame = null;
@@ -189,7 +191,7 @@ function connectToInstance(key) {
     else if (event.data instanceof ArrayBuffer) acceptProgramFrame(new Blob([event.data], { type: 'image/jpeg' }));
   };
   socket.onopen = () => {
-    if (programSocket === socket) worshipStatus.textContent = 'Liturgia Program connected';
+    if (programSocket === socket) renderInstances([...instancesByKey.values()]);
   };
   socket.onerror = () => {
     if (programSocket === socket) worshipStatus.textContent = 'Connecting to Liturgia Program';
@@ -197,6 +199,7 @@ function connectToInstance(key) {
   socket.onclose = () => {
     if (programSocket !== socket || selectedInstanceKey !== key) return;
     programSocket = null;
+    headerStatus.classList.remove('connected');
     worshipStatus.textContent = 'Reconnecting to Liturgia Program…';
     window.setTimeout(() => {
       if (selectedInstanceKey === key && instancesByKey.has(key)) connectToInstance(key);
@@ -207,7 +210,6 @@ function connectToInstance(key) {
 function renderInstances(items) {
   instancesByKey.clear();
   for (const item of items) instancesByKey.set(item.key, item);
-  const current = selectedInstanceKey;
   const list = [...instancesByKey.values()];
   if (selectedInstanceKey && !instancesByKey.has(selectedInstanceKey)) {
     selectedInstanceKey = '';
@@ -222,10 +224,13 @@ function renderInstances(items) {
     if (program) connectToInstance(program.key);
   }
 
-  headerStatus.classList.toggle('connected', list.length > 0);
-  worshipStatus.textContent = list.length
-    ? `Found ${list.length} Worship ${list.length === 1 ? 'output' : 'outputs'}`
-    : 'Looking for Worship';
+  const programConnected = !!selectedInstanceKey && programSocket?.readyState === WebSocket.OPEN;
+  headerStatus.classList.toggle('connected', programConnected);
+  worshipStatus.textContent = programConnected
+    ? 'Liturgia Program connected'
+    : list.length
+      ? `Found ${list.length} Worship ${list.length === 1 ? 'output' : 'outputs'}`
+      : 'Looking for Worship';
 
   if (!list.length) {
     instanceList.innerHTML = '<p class="muted">No Worship output found yet. Make sure Worship is open and connected to this network.</p>';
@@ -245,7 +250,8 @@ function renderInstances(items) {
     meta.textContent = `Output ${outputName} · ${instance.address} · Liturgia ${instance.version || 'Worship'}`;
     const button = document.createElement('button');
     button.className = 'button secondary';
-    button.textContent = current === instance.key ? 'Connected' : 'Connect';
+    button.textContent = selectedInstanceKey === instance.key && programSocket?.readyState === WebSocket.OPEN
+      ? 'Connected' : 'Connect';
     button.addEventListener('click', () => connectToInstance(instance.key));
     row.append(title, meta, button);
     instanceList.append(row);
