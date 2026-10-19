@@ -48,6 +48,7 @@ const RemoteServer = require('./remote-server');
 const { ensureProgramFirewall } = require('./lib/streamFirewall');
 const { createProgramFramePublisher, selectProgramWindow } = require('./lib/programFramePublisher');
 const { decodeProgramStyles, applyProgramStylePatch } = require('./lib/programStyles');
+const { listProgramDisplays, makeProgramDisplay, updateProgramDisplay, removeProgramDisplay } = require('./lib/programDisplayProfiles');
 const { Bonjour } = require('bonjour-service');
 const RelayClient = require('./relay-ws-client');
 const createSpeechSidecarManager = require('./speech/speechSidecarManager');
@@ -1208,7 +1209,9 @@ ipcMain.handle('save-settings', async (event, settings) => {
     console.error('[save-settings] invalid settings payload, aborting write');
     return false;
   }
-  await writeSettingsSafe(settings);
+  const patch={...settings};
+  delete patch.programDisplayProfiles;
+  await applySettingsPatch(patch);
   return true;
 });
 
@@ -1244,6 +1247,38 @@ function applySettingsPatch(patch) {
   }).catch((e) => { console.error('applySettingsPatch error:', e); });
   return _settingsUpdateQueue;
 }
+
+// Display profiles live in Worship's settings and are shared by all connected
+// Liturgia Stream computers. Mutations use the SAME queue as other settings.
+function mutateProgramDisplaySettings(mutator) {
+  const operation=_settingsUpdateQueue.catch(()=>{}).then(async()=>{
+    const current=await fs.promises.readFile(settingsPath,'utf8').then(JSON.parse).catch(()=>({}));
+    const next=mutator(current);
+    await writeSettingsSafe(next);
+    for(const win of BrowserWindow.getAllWindows())if(!win.isDestroyed())win.webContents.send('program-displays-changed',listProgramDisplays(next));
+    return listProgramDisplays(next);
+  });
+  _settingsUpdateQueue=operation.catch(e=>{console.error('[program-displays]',e.message)});
+  return operation;
+}
+async function readProgramDisplays() {
+  const stored=await fs.promises.readFile(settingsPath,'utf8').then(JSON.parse).catch(()=>({}));
+  return listProgramDisplays(stored);
+}
+ipcMain.handle('program-displays:list',()=>readProgramDisplays());
+ipcMain.handle('program-displays:create',(_event,request)=>mutateProgramDisplaySettings(s=>makeProgramDisplay(s,request)));
+ipcMain.handle('program-displays:update',(_event,id,request)=>mutateProgramDisplaySettings(s=>updateProgramDisplay(s,id,request)));
+ipcMain.handle('program-displays:delete',(_event,id)=>mutateProgramDisplaySettings(s=>removeProgramDisplay(s,id)));
+ipcMain.handle('program-displays:save-window-styles',(_event,id,encodedStyles,expectedRevision)=>mutateProgramDisplaySettings(s=>{
+  const profile=listProgramDisplays(s).find(x=>x.id===id);
+  if(!profile)throw Error('Program display no longer exists.');
+  if(profile.revision!==expectedRevision)throw Error('Display changed elsewhere. Reopen the editor before saving.');
+  const patch={};
+  for(const key of ['verseText','verseNumber','verseSubscript','verseReference','songText','songTitle','songReference','global']){
+    patch[key]=typeof encodedStyles?.[key]==='string'?Buffer.from(encodedStyles[key],'base64').toString('utf8'):'';
+  }
+  return updateProgramDisplay(s,id,{styles:patch,expectedRevision});
+}));
 
 ipcMain.handle('update-settings', async (event, patch) => {
   const result = await applySettingsPatch(patch);
@@ -3984,6 +4019,44 @@ function startDisplayNetServer(displayId, port) {
       pathname = u.pathname;
       searchParams = u.searchParams;
     } catch (_) {}
+
+    // Named virtual displays are persistent on the Worship host. They never
+    // create a physical fullscreen window. All Stream clients use these IDs.
+    if (displayId === 0 && (pathname === '/program-displays' || pathname.startsWith('/program-displays/'))) {
+      res.setHeader('Content-Type','application/json; charset=utf-8');
+      res.setHeader('Cache-Control','no-store');
+      if(req.headers['x-liturgia-stream-token']!==programStyleToken){
+        res.writeHead(403);res.end(JSON.stringify({error:'Display profile access denied'}));return;
+      }
+      const id=pathname.startsWith('/program-displays/')?pathname.slice('/program-displays/'.length):null;
+      if(req.method==='GET' && !id){
+        void readProgramDisplays().then(displays=>res.end(JSON.stringify({displays})))
+          .catch(error=>{res.writeHead(500);res.end(JSON.stringify({error:error.message}))});return;
+      }
+      if(!(['POST','PUT','DELETE'].includes(req.method)) || (req.method==='POST'&&id) || (req.method!=='POST'&&!id)){
+        res.writeHead(405);res.end(JSON.stringify({error:'Method not allowed'}));return;
+      }
+      let body='',overLimit=false;
+      req.on('data',chunk=>{
+        body+=chunk;
+        if(Buffer.byteLength(body)>96*1024){overLimit=true;req.destroy();}
+      });
+      req.on('end',async()=>{
+        if(overLimit)return;
+        try{
+          const data=body?JSON.parse(body):{};
+          const displays=req.method==='POST'
+            ? await mutateProgramDisplaySettings(s=>makeProgramDisplay(s,data))
+            : req.method==='PUT'
+              ? await mutateProgramDisplaySettings(s=>updateProgramDisplay(s,id,data))
+              : await mutateProgramDisplaySettings(s=>removeProgramDisplay(s,id));
+          res.end(JSON.stringify({displays}));
+        }catch(error){
+          res.writeHead(error.conflict?409:400);res.end(JSON.stringify({error:error.message}));
+        }
+      });
+      return;
+    }
 
     if (displayId === 0 && pathname === '/program-styles') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8');

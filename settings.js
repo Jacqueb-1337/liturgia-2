@@ -2755,12 +2755,129 @@ async function selectBible(bible) {
   }, 2000);
 }
 
+// Virtual Program displays are reusable on every Stream computer. They are
+// independent of the physical fullscreen outputs listed above.
+
+async function editProgramDisplayLayout(profile) {
+  const backdrop=document.createElement('div');
+  backdrop.style.cssText='position:fixed;inset:0;z-index:300000;background:#000b;display:grid;place-items:center;padding:14px;';
+  const editor=document.createElement('div');
+  editor.style.cssText='width:min(540px,96vw);max-height:90vh;overflow:auto;background:#282b2e;color:#fff;border:1px solid #58616a;border-radius:9px;padding:16px;';
+  const title=document.createElement('h3');title.textContent='Canvas layout · '+profile.name;
+  const hint=document.createElement('p');hint.textContent='Source placement shared with Liturgia Stream. For draggable text and safe-area controls, use Edit Styles.';
+  hint.style.cssText='font-size:12px;color:#aab1b5;';
+  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;';
+  const fields=[
+    ['x','X position'],['y','Y position'],['width','Width'],['height','Height'],
+    ['opacity','Opacity (0–1)'],['zoom','Zoom'],['cropLeft','Crop Left (0–1)'],['cropTop','Crop Top (0–1)'],
+    ['cropRight','Crop Right (0–1)'],['cropBottom','Crop Bottom (0–1)'],
+    ['panX','Pan X'],['panY','Pan Y']
+  ];
+  const inputs={};
+  for(const [key,labelText] of fields){
+    const label=document.createElement('label');label.textContent=labelText;
+    label.style.cssText='font-size:11px;display:flex;flex-direction:column;gap:3px;';
+    const input=document.createElement('input');input.type='number';input.step=key==='x'||key==='y'||key==='width'||key==='height'?'1':'0.01';
+    input.value=String(profile.layout?.[key] ?? ({x:0,y:0,width:1920,height:1080,opacity:1,zoom:1}[key]||0));
+    input.style.cssText='padding:7px;background:#191c1e;color:#fff;border:1px solid #545e63;border-radius:4px;';
+    inputs[key]=input;label.append(input);grid.append(label);
+  }
+  const transparentLabel=document.createElement('label');transparentLabel.style.cssText='display:flex;gap:8px;align-items:center;margin:12px 0;';
+  const transparent=document.createElement('input');transparent.type='checkbox';transparent.checked=profile.layout?.transparent!==false;
+  transparentLabel.append(transparent,document.createTextNode('Transparent Worship background'));
+  const footer=document.createElement('div');footer.style.cssText='display:flex;justify-content:flex-end;gap:8px;';
+  const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';
+  cancel.onclick=()=>backdrop.remove();
+  const save=document.createElement('button');save.className='btn';save.textContent='Save on Worship';
+  save.onclick=async()=>{
+    const layout={transparent:transparent.checked};
+    for(const [key,input] of Object.entries(inputs)){
+      const value=Number(input.value);
+      if(!input.value.trim()||!Number.isFinite(value)){window.alert('Enter a valid '+key);return}
+      layout[key]=value;
+    }
+    try{
+      await ipcRenderer.invoke('program-displays:update',profile.id,{expectedRevision:profile.revision,layout});
+      backdrop.remove();await renderProgramDisplayProfiles();
+    }catch(error){window.alert(error.message);await renderProgramDisplayProfiles()}
+  };
+  footer.append(cancel,save);
+  editor.append(title,hint,grid,transparentLabel,footer);
+  backdrop.append(editor);
+  backdrop.onclick=e=>{if(e.target===backdrop)backdrop.remove()};
+  document.body.append(backdrop);
+}
+
+async function renderProgramDisplayProfiles() {
+  const container=document.getElementById('display-list');
+  if(!container)return;
+  let panel=document.getElementById('program-display-profiles');
+  if(!panel){
+    panel=document.createElement('section');
+    panel.id='program-display-profiles';
+    panel.style.cssText='margin-top:16px;border-top:1px solid #555;padding-top:12px;';
+    container.parentElement.appendChild(panel);
+  }
+  let profiles;
+  try{profiles=await ipcRenderer.invoke('program-displays:list')}
+  catch(error){panel.textContent='Could not load Program displays: '+error.message;return}
+  panel.replaceChildren();
+  const heading=document.createElement('div');
+  heading.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;';
+  const name=document.createElement('strong');name.textContent='Reusable Program Displays';
+  const add=document.createElement('button');add.className='btn';add.textContent='+ New Program Display';
+  add.onclick=async()=>{
+    const newName=window.prompt('Name for the new Program display','Stream Lower Third');
+    if(newName===null)return;
+    try{await ipcRenderer.invoke('program-displays:create',{name:newName});await renderProgramDisplayProfiles()}
+    catch(error){window.alert(error.message)}
+  };
+  heading.append(name,add);panel.append(heading);
+  const explanation=document.createElement('p');
+  explanation.className='muted-text';
+  explanation.textContent='Saved in Liturgia Worship. Connect Liturgia Stream on any computer and choose an existing display to reuse its text styles and safe area.';
+  panel.append(explanation);
+  for(const profile of profiles){
+    const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:6px;margin:7px 0;';
+    const title=document.createElement('span');title.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;';title.textContent=profile.name;
+    const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit Styles';
+    edit.onclick=async()=>{
+      const settings=await ipcRenderer.invoke('load-settings');
+      const encode={};
+      for(const [key,css] of Object.entries(profile.styles||{}))if(css)encode[key]=btoa(unescape(encodeURIComponent(css)));
+      ipcRenderer.send('open-style-window',{
+        previewStyles:encode,globalStyles:settings?.previewStyles||{},content:null,
+        darkMode:document.body.classList.contains('dark-theme'),
+        programProfileId:profile.id,programProfileRevision:profile.revision,programProfileName:profile.name
+      });
+    };
+    const layout=document.createElement('button');layout.className='btn';layout.textContent='Canvas Layout';
+    layout.onclick=()=>{void editProgramDisplayLayout(profile)};
+    const rename=document.createElement('button');rename.className='btn';rename.textContent='Rename';
+    rename.onclick=async()=>{
+      const newName=window.prompt('Rename Program display',profile.name);
+      if(newName===null)return;
+      try{await ipcRenderer.invoke('program-displays:update',profile.id,{name:newName,expectedRevision:profile.revision});await renderProgramDisplayProfiles()}
+      catch(error){window.alert(error.message);await renderProgramDisplayProfiles()}
+    };
+    const remove=document.createElement('button');remove.className='btn';remove.textContent='Delete';
+    remove.onclick=async()=>{
+      if(!window.confirm('Delete "'+profile.name+'"? Connected Stream layers will need a different display.'))return;
+      try{await ipcRenderer.invoke('program-displays:delete',profile.id);await renderProgramDisplayProfiles()}
+      catch(error){window.alert(error.message)}
+    };
+    row.append(title,edit,layout,rename,remove);panel.append(row);
+  }
+}
+ipcRenderer.on('program-displays-changed',()=>{void renderProgramDisplayProfiles()});
+
 async function loadDisplays() {
   _allDisplays = await ipcRenderer.invoke('get-displays');
   const settings = await ipcRenderer.invoke('load-settings');
   const savedIds = (settings && Array.isArray(settings.liveDisplays)) ? settings.liveDisplays : [];
   const displaySettings = (settings && settings.displaySettings) || {};
   renderDisplayEntries(savedIds, displaySettings);
+  await renderProgramDisplayProfiles();
 }
 
 function renderDisplayEntries(ids, displaySettings) {

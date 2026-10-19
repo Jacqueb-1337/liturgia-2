@@ -900,6 +900,8 @@ let bgSnapshot   = null;
 let _activeFontTarget = null; // id of hidden font input currently being picked
 let _isPerDisplay = false;
 let _displayId    = null;
+let _programProfileId = null;
+let _programProfileRevision = null;
 let _activeTab    = 'verses';
 let _safeArea     = { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
 let _globalStyles = {};
@@ -1862,12 +1864,15 @@ ipcRenderer.on('style-window-init', (event, data) => {
   _globalStyles = data.globalStyles ? { ...data.globalStyles } : {};
   initContent = data.content   || null;
   bgSnapshot  = data.bgSnapshot || null;
-  _isPerDisplay = data.displayId != null;
+  _programProfileId = data.programProfileId || null;
+  _programProfileRevision = data.programProfileRevision || null;
+  _isPerDisplay = data.displayId != null || !!_programProfileId;
   _displayId    = data.displayId != null ? data.displayId : null;
   if (data.darkMode) document.body.classList.add('dark');
   if (_isPerDisplay) document.body.classList.add('per-display');
   else document.body.classList.remove('per-display');
-  if (_isPerDisplay && data.displayIndex != null) {
+  if (_programProfileId) document.title = `Text Styling - ${data.programProfileName || 'Program Display'}`;
+  else if (_isPerDisplay && data.displayIndex != null) {
     document.title = `Text Styling - Window ${data.displayIndex}`;
   }
   populateControls();
@@ -1986,6 +1991,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     readControlsToLocalStyles();
+    if (_programProfileId) {
+      try {
+        await ipcRenderer.invoke('program-displays:save-window-styles',_programProfileId,{...localStyles},_programProfileRevision);
+        window.close();
+      } catch (error) { window.alert(error.message || String(error)); }
+      return;
+    }
     if (_isPerDisplay) {
       const s = await ipcRenderer.invoke('load-settings');
       const displaySettings = (s && s.displaySettings) || {};
