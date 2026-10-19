@@ -3604,6 +3604,10 @@ ipcMain.handle('load-all-verses', async (event, baseDir) => {
   return await loadAllVersesFromDiskMain(baseDir);
 });
 
+// Retain the latest presentation even when Go Live fires before any output exists.
+let latestLivePresentation = null;
+let latestLiveMode = 'normal';
+
 function createLiveWindowForDisplay(display) {
   if (liveWindows.has(display.id)) {
     const existing = liveWindows.get(display.id);
@@ -3633,7 +3637,11 @@ function createLiveWindowForDisplay(display) {
     }
   });
   win._liveReady = false;
-  win._livePending = null; // buffers the last update-content payload before ready
+  win._livePending = latestLivePresentation
+    ? routeWidgetForDisplay(latestLivePresentation._displayStyleOverrides?.[String(display.id)]
+      ? mergeStylesForDisplay(latestLivePresentation, latestLivePresentation._displayStyleOverrides[String(display.id)])
+      : latestLivePresentation, 'window', display.id)
+    : null; // Include presentations sent before the window was created
   liveWindows.set(display.id, win);
   if (programCaptureDisplayId === null) programCaptureDisplayId = display.id;
   win.loadFile('live.html');
@@ -3650,6 +3658,8 @@ ipcMain.on('live-window-ready', (event) => {
         win.webContents.send('update-content', win._livePending);
         win._livePending = null;
       }
+      win.webContents.send('set-live-mode', latestLiveMode);
+      // Mode replay must occur even without a pending presentation.
       break;
     }
   }
@@ -3703,6 +3713,7 @@ ipcMain.handle('close-live-window', () => {
 
 const { routeWidgetForDisplay } = require('./lib/widgetDisplayRouting');
 ipcMain.on('update-live-window', (event, data) => {
+  latestLivePresentation = data;
   const overrides = data._displayStyleOverrides || {};
   for (const [displayId, win] of liveWindows.entries()) {
     if (win.isDestroyed()) continue;
@@ -3762,6 +3773,7 @@ ipcMain.on('reset-live-canvas', () => {
 
 // Forward unified mode messages to live window
 ipcMain.on('set-live-mode', (event, mode) => {
+  latestLiveMode = mode;
   for (const win of liveWindows.values()) {
     if (!win.isDestroyed()) win.webContents.send('set-live-mode', mode);
   }
