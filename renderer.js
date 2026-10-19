@@ -1073,22 +1073,13 @@ const TUTORIAL_ONBOARDING = [
 function _syncWidgetButtonVisibility() {
   const widgetBtn = document.getElementById('lower-third-btn');
   if (!widgetBtn) return;
-  const hasWidget = !!(_rememberedWidget && _rememberedWidget.url);
-  // Keep the control available even before the first widget is created. In
-  // that state clicking it opens the Add OBS Widget dialog.
-  widgetBtn.style.display = '';
-  if (!hasWidget) {
-    widgetBtn.classList.remove('active');
-    widgetBtn.textContent = 'Widget';
-    return;
-  }
-  if (window.__activeObsWidget && window.__activeObsWidget.visible) {
-    widgetBtn.textContent = 'Widget: On';
-    widgetBtn.classList.add('active');
-  } else {
-    widgetBtn.textContent = 'Widget';
-    widgetBtn.classList.remove('active');
-  }
+  const widget = window.__activeObsWidget;
+  const isOnAir = !!(widget && widget.url && widget.visible === true);
+  widgetBtn.hidden = !isOnAir;
+  widgetBtn.style.display = isOnAir ? '' : 'none';
+  widgetBtn.textContent = 'Hide Widget';
+  widgetBtn.classList.toggle('active', isOnAir);
+  widgetBtn.setAttribute('aria-label', 'Hide the currently displayed live widget');
 }
 let keybinds = {}; // Loaded from settings
 
@@ -8760,28 +8751,18 @@ function initLowerThird() {
     ipcRenderer.invoke('update-settings', { lowerThird: _ltState }).catch(() => {});
   }
 
-  function _sendWidgetToggle(visible) {
-    let activeWidget = window.__activeObsWidget || {};
-    if (!activeWidget.url && _rememberedWidget && _rememberedWidget.url) {
-      activeWidget = {
-        url: _rememberedWidget.url,
-        layout: _rememberedWidget.layout || null,
-        visible: false,
-        transitionOut: _rememberedWidget.transitionOut || 'fade'
-      };
-      window.__activeObsWidget = activeWidget;
-    }
-    if (!activeWidget.url) return;
+  function hideActiveObsWidget() {
+    const widget = window.__activeObsWidget;
+    if (!widget?.url || widget.visible !== true) return;
+    widget.visible = false;
+    setObsWidgetCanvasPreview('live', null);
     ipcRenderer.send('update-live-window', {
       isWebsite: true,
-      obsWidgetLayout: activeWidget.layout || null,
-      obsWidgetUrl: activeWidget.url,
-      obsWidgetVisible: !!visible,
-      obsWidgetTransitionOut: activeWidget.transitionOut || 'fade'
+      obsWidgetLayout: widget.layout || null,
+      obsWidgetUrl: widget.url,
+      obsWidgetVisible: false,
+      obsWidgetTransitionOut: widget.transitionOut || 'fade'
     });
-    activeWidget.visible = !!visible;
-    _rememberedWidget = { url: activeWidget.url, layout: activeWidget.layout || null, transitionOut: activeWidget.transitionOut || 'fade' };
-    try { ipcRenderer.invoke('update-settings', { lastWidget: _rememberedWidget }).catch(() => {}); } catch (_) {}
     _syncWidgetButtonVisibility();
   }
 
@@ -8823,37 +8804,9 @@ function initLowerThird() {
     popover.classList.remove('active');
   }
 
-  window.onToggleLowerThird = () => {
-    const activeWidget = window.__activeObsWidget || {};
-    if (activeWidget.url) {
-      _sendWidgetToggle(!activeWidget.visible);
-      return;
-    }
-    if (_rememberedWidget && _rememberedWidget.url) {
-      window.__activeObsWidget = {
-        url: _rememberedWidget.url,
-        layout: _rememberedWidget.layout || null,
-        visible: true,
-        transitionOut: _rememberedWidget.transitionOut || 'fade'
-      };
-      _sendWidgetToggle(true);
-      return;
-    }
-    const selected = selectedMediaIndex !== null ? allMedia[selectedMediaIndex] : null;
-    if (selected && selected.type === 'OBS_WIDGET') {
-      const url = buildLocalWidgetNetworkUrl(selected);
-      const layout = normalizeLocalWidgetLayout(selected.kind, selected.layout);
-      const transitionOut = selected.params?.transitionOut || 'fade';
-      window.__activeObsWidget = { url, layout, visible: true, transitionOut };
-      _rememberedWidget = { url, layout, transitionOut };
-      _sendWidgetToggle(true);
-      return;
-    }
-
-    // A fresh install has no remembered widget. The toolbar control must still
-    // do something useful instead of silently returning with no feedback.
-    openLocalWidgetModal();
-  };
+  // Legacy remote command now only hides an active, on-air widget.
+  // Re-showing requires double-clicking/Go Live on a widget again.
+  window.onToggleLowerThird = () => hideActiveObsWidget();
 
   document.addEventListener('click', (e) => {
     if (popover.classList.contains('active') && !popover.contains(e.target) && e.target !== document.getElementById('lower-third-btn')) {
@@ -10557,6 +10510,60 @@ function initWebsitePanels() {
 
 // ===================================
 
+
+function setObsWidgetCanvasPreview(side, media = null) {
+  // OBS widgets are HTML overlays, not websites. Keep the presentation canvas
+  // and position an iframe in the same normalized region as the live display.
+  const host = document.getElementById(side === 'preview' ? 'slide-preview' : 'slide-live');
+  const canvas = document.getElementById(side === 'preview' ? 'preview-canvas' : 'live-canvas');
+  if (!host || !canvas) return;
+  let layer = host.querySelector('.liturgia-obs-canvas-overlay');
+  if (!media) {
+    if (layer) { layer._resizeObserver?.disconnect(); layer.remove(); }
+    return;
+  }
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'liturgia-obs-canvas-overlay';
+    layer.style.cssText = 'position:absolute;inset:0;z-index:9;pointer-events:none;overflow:hidden;background:transparent;';
+    const iframe = document.createElement('iframe');
+    iframe.title = 'OBS widget preview';
+    iframe.setAttribute('aria-hidden','true');
+    iframe.setAttribute('scrolling','no');
+    iframe.style.cssText = 'display:block;position:absolute;border:0;overflow:hidden;background:transparent;pointer-events:none;';
+    layer.appendChild(iframe);
+    host.appendChild(layer);
+  }
+  const iframe = layer.querySelector('iframe');
+  const l = normalizeLocalWidgetLayout(media.kind, media.layout);
+  const updateBounds = () => {
+    if (!layer.isConnected) return;
+    const bounds = host.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const ratio = (canvas.width || 1920) / (canvas.height || 1080);
+    const frameWidth = Math.min(bounds.width, bounds.height * ratio);
+    const frameHeight = frameWidth / ratio;
+    const offsetX = (bounds.width - frameWidth) / 2;
+    const offsetY = (bounds.height - frameHeight) / 2;
+    Object.assign(iframe.style, {
+      left: (offsetX + l.x * frameWidth) + 'px',
+      top: (offsetY + l.y * frameHeight) + 'px',
+      width: (l.w * frameWidth) + 'px',
+      height: (l.h * frameHeight) + 'px'
+    });
+  };
+  // Listen to resize in the preview without creating leaked observers each
+  // time an OBS widget is selected.
+  layer._resizeObserver?.disconnect();
+  if (typeof ResizeObserver !== 'undefined') {
+    layer._resizeObserver = new ResizeObserver(updateBounds);
+    layer._resizeObserver.observe(host);
+  }
+  updateBounds();
+  const url = buildLocalWidgetUrl(media);
+  if (iframe.src !== url) iframe.src = url;
+}
+
 function displayMediaOnPreview(media) {
   console.log('displayMediaOnPreview called with:', media);
 
@@ -10570,6 +10577,8 @@ function displayMediaOnPreview(media) {
     _previewCanvas._bgToken = (_previewCanvas._bgToken || 0) + 1;
   }
 
+  // Switching away from an OBS widget hides its isolated overlay, but never alters the other canvas.
+  if (media.type !== 'OBS_WIDGET') setObsWidgetCanvasPreview('preview', null);
   // WEBSITE: draw placeholder on the LEFT preview canvas only.
   // Never touch the right canvas or the website panel — single-click must never
   // interrupt whatever is currently live.
@@ -10578,7 +10587,7 @@ function displayMediaOnPreview(media) {
     return;
   }
   if (media.type === 'OBS_WIDGET') {
-    drawObsWidgetPlaceholder(media);
+    setObsWidgetCanvasPreview('preview', media);
     return;
   }
 
@@ -10855,6 +10864,7 @@ function initVideoLiveBar() {
 }
 
 async function displayMediaOnLive(media) {
+  if (media.type !== 'OBS_WIDGET') setObsWidgetCanvasPreview('live', null);
   // Ensure the live window exists and liveMode is active — same as handleVerseDoubleClick
   if (!liveMode) {
     liveMode = true;
@@ -10884,7 +10894,9 @@ async function displayMediaOnLive(media) {
     if (window.blackButton) window.blackButton.classList.remove('active');
     const widgetPath = buildLocalWidgetUrl(media);
     const widgetUrl = buildLocalWidgetNetworkUrl(media);
-    showWebsiteLivePanel(widgetPath);
+    // A widget is a transparent overlay, not a navigable website.
+    hideWebsiteLivePanel(true);
+    setObsWidgetCanvasPreview('live', media);
     const widgetState = {
       url: widgetUrl,
       path: widgetPath,

@@ -58,6 +58,7 @@
     let _widgetActiveFrame = null;
     let _widgetLoadToken = 0;
     let _widgetTransitionOut = 'fade';
+    let _widgetHideTimer = null;
     let lastContentPayload = null;
     let mirrorEnabled = false;
     let mirrorBlobUrl = null;
@@ -112,6 +113,8 @@
 
     function showWidgetOverlay(url, layout) {
       if (!widgetOverlay || !widgetFrameA || !widgetFrameB) return;
+      // Cancel a pending hide: it must never clear a newly displayed widget.
+      if (_widgetHideTimer !== null) { clearTimeout(_widgetHideTimer); _widgetHideTimer = null; }
       const token = ++_widgetLoadToken;
       const outgoing = _widgetActiveFrame;
       const incoming = outgoing === widgetFrameA ? widgetFrameB : widgetFrameA;
@@ -166,6 +169,7 @@
 
     function hideWidgetOverlay() {
       if (!widgetOverlay || !widgetFrameA || !widgetFrameB) return;
+      if (_widgetHideTimer !== null) { clearTimeout(_widgetHideTimer); _widgetHideTimer = null; }
       _widgetLoadToken += 1;
       const tout = _widgetTransitionOut || 'fade';
       const activeFrame = _widgetActiveFrame || widgetFrameA;
@@ -176,7 +180,10 @@
       } else {
         activeFrame.style.opacity = '0';
       }
-      setTimeout(() => {
+      const hideToken = _widgetLoadToken;
+      _widgetHideTimer = setTimeout(() => {
+        _widgetHideTimer = null;
+        if (hideToken !== _widgetLoadToken) return;
         widgetOverlay.style.display = 'none';
         widgetFrameA.style.display = 'none';
         widgetFrameB.style.display = 'none';

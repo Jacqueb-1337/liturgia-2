@@ -3972,6 +3972,8 @@ function startDisplayNetServer(displayId, port) {
   }
   const receiverHtmlPath = path.join(__dirname, 'network-receiver.html');
   const streamReceiverBridgePath = path.join(__dirname, 'lib', 'streamReceiverBridge.js');
+  // Bundled and served locally; Stream does not depend on a CDN for widgets.
+  const streamWidgetCapturePath = path.join(__dirname, 'vendor', 'html2canvas.min.js');
   const obsRoot = path.join(__dirname, 'obs');
 
   const server = http.createServer((req, res) => {
@@ -4022,6 +4024,12 @@ function startDisplayNetServer(displayId, port) {
       return;
     }
 
+    if (displayId === 0 && pathname === '/stream-widget-capture.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      fs.createReadStream(streamWidgetCapturePath).on('error', () => res.destroy()).pipe(res);
+      return;
+    }
+
     if (displayId === 0 && pathname === '/stream-receiver-bridge.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
       fs.createReadStream(streamReceiverBridgePath).on('error', () => res.destroy()).pipe(res);
@@ -4033,7 +4041,7 @@ function startDisplayNetServer(displayId, port) {
         if (err) { res.writeHead(404); res.end('Receiver page not found'); return; }
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
         res.end(displayId === 0 && searchParams.get('stream') === '1'
-          ? data.replace('</body>', '<script src="/stream-receiver-bridge.js"></script></body>')
+          ? data.replace('</body>', '<script src="/stream-widget-capture.js"></script><script src="/stream-receiver-bridge.js"></script></body>')
           : data);
       });
       return;

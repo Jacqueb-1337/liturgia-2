@@ -5,9 +5,12 @@ describe('widget and dual translation controls', () => {
   const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer.js'), 'utf8');
   const searchBox = fs.readFileSync(path.join(__dirname, '..', 'searchBox.js'), 'utf8');
 
-  test('Widget control opens widget creation instead of silently doing nothing on a fresh install', () => {
-    expect(renderer).toContain('widgetBtn.style.display = \'\';');
-    expect(renderer).toContain('openLocalWidgetModal();');
+  test('Widget control only appears for an actively presented OBS widget', () => {
+    expect(renderer).toContain('const isOnAir = !!(widget && widget.url && widget.visible === true);');
+    expect(renderer).toContain("widgetBtn.style.display = isOnAir ? '' : 'none';");
+    expect(renderer).toContain("widgetBtn.textContent = 'Hide Widget';");
+    expect(renderer).toContain('window.onToggleLowerThird = () => hideActiveObsWidget();');
+    expect(renderer).toContain("setObsWidgetCanvasPreview('live', null);");
   });
 
   test('Dual translation controls are explicit non-submit buttons with guarded async handlers', () => {

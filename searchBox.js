@@ -93,7 +93,9 @@ function updateSearchBox({ containerId, onReferenceSelected, onNavigate, onEnter
   // Widget toggle button
   const ltBtn = document.createElement('button');
   ltBtn.id = 'lower-third-btn';
-  ltBtn.textContent = 'Widget';
+  ltBtn.textContent = 'Hide Widget';
+  ltBtn.hidden = true;
+  ltBtn.style.display = 'none';
   ltBtn.style.padding = '4px 8px';
   ltBtn.style.borderRadius = '6px';
   ltBtn.style.marginRight = '6px';
