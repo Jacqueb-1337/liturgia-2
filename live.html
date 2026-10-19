@@ -704,6 +704,18 @@
     }
 
     function transitionTextLayer(oldContent, newContent, options = {}) {
+      // Ignore identical text re-renders; otherwise each program update restarts
+      // a fade-out and fade-in, causing periodic verse flicker on the stream.
+      // Do not cancel an in-progress entrance animation when content is the same.
+      if (!options.skipTextTransition && oldContent && newContent &&
+          (oldContent.text || '') === (newContent.text || '') &&
+          (oldContent.number || '') === (newContent.number || '') &&
+          (oldContent.reference || '') === (newContent.reference || '') &&
+          !!oldContent.isMedia === !!newContent.isMedia &&
+          !!oldContent.clearPresentation === !!newContent.clearPresentation &&
+          JSON.stringify(oldContent.styles || {}) === JSON.stringify(newContent.styles || {})) {
+        return;
+      }
       if (options.skipTextTransition) {
         cancelTextAnimation();
         textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
