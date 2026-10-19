@@ -26,7 +26,7 @@
   },
   "build": {
     "appId": "com.jacqueb.liturgia",
-    "productName": "Liturgia",
+    "productName": "Liturgia Worship",
     "icon": "build/icon",
     "artifactName": "liturgia.${ext}",
     "win": {
@@ -71,7 +71,7 @@
       "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Liturgia",
+      "shortcutName": "Liturgia Worship",
       "runAfterFinish": false,
       "include": "build/installer.nsh"
     },

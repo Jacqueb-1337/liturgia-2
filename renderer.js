@@ -9652,6 +9652,37 @@ function initWebsiteModal() {
   });
 }
 
+async function populateLocalWidgetDisplayExclusions(media) {
+  const host=document.getElementById('local-widget-excluded-displays');
+  if(!host)return;
+  host.replaceChildren();
+  const excluded=new Set(Array.isArray(media?.excludedDisplays)?media.excludedDisplays:[]);
+  const add=(key,label)=>{
+    const row=document.createElement('label');
+    row.style.cssText='display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;';
+    const checkbox=document.createElement('input');checkbox.type='checkbox';
+    checkbox.value=key;checkbox.checked=excluded.has(key);
+    row.append(checkbox,document.createTextNode(label));host.append(row);
+  };
+  try{
+    const [displays,settings]=await Promise.all([
+      ipcRenderer.invoke('get-displays'),ipcRenderer.invoke('load-settings')
+    ]);
+    for(const [index,d] of displays.entries()){
+      add('window:'+d.id,'Monitor '+(index+1)+(d.bounds?.x===0 && d.bounds?.y===0?' (primary)':''));
+    }
+    const networks=settings?.displaySettings||{};
+    const entries=new Set(['0',...Object.keys(networks)]);
+    for(const id of entries){
+      const data=networks[id]?.networkDisplay;
+      if(id!=='0' && !data?.enabled)continue;
+      add('network:'+id,id==='0'?'Liturgia Program / Stream display':('Network display '+id));
+    }
+  }catch(error){
+    const message=document.createElement('p');message.textContent='Display list unavailable: '+error.message;host.append(message);
+  }
+}
+
 function openLocalWidgetModal(mediaIndex = null) {
   editingMediaIndex = mediaIndex;
   const modal = document.getElementById('local-widget-modal');
@@ -9672,6 +9703,7 @@ function openLocalWidgetModal(mediaIndex = null) {
     if (titleEl) titleEl.textContent = 'Add OBS Widget';
   }
   modal.classList.add('active');
+  void populateLocalWidgetDisplayExclusions(mediaIndex !== null ? allMedia[mediaIndex] : null);
   syncLocalWidgetFieldVisibility();
   syncLocalWidgetLayoutEditorVisibility();
 }
@@ -9903,7 +9935,8 @@ async function saveLocalWidgetItem() {
       };
     }
   }
-  const item = { name, type: 'OBS_WIDGET', kind, params, layout, size: '-', addedDate: new Date().toISOString() };
+  const excludedDisplays=[...document.querySelectorAll('#local-widget-excluded-displays input[type="checkbox"]:checked')].map(input=>input.value);
+  const item = { name, type: 'OBS_WIDGET', kind, params, layout, excludedDisplays, size: '-', addedDate: new Date().toISOString() };
   if (editingMediaIndex !== null) allMedia[editingMediaIndex] = { ...allMedia[editingMediaIndex], ...item };
   else allMedia.push(item);
   await saveMedia();
@@ -10915,6 +10948,7 @@ async function displayMediaOnLive(media) {
       obsWidgetUrl: widgetUrl,
       obsWidgetPath: widgetPath,
       obsWidgetVisible: true,
+      obsWidgetExcludedDisplays: Array.isArray(media.excludedDisplays) ? media.excludedDisplays : [],
       obsWidgetTransitionOut: media.params?.transitionOut || 'fade'
     });
     return;

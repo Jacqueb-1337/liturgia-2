@@ -3701,13 +3701,14 @@ ipcMain.handle('close-live-window', () => {
   }
 });
 
+const { routeWidgetForDisplay } = require('./lib/widgetDisplayRouting');
 ipcMain.on('update-live-window', (event, data) => {
   const overrides = data._displayStyleOverrides || {};
   for (const [displayId, win] of liveWindows.entries()) {
     if (win.isDestroyed()) continue;
-    const displayData = overrides[String(displayId)]
+    const displayData = routeWidgetForDisplay(overrides[String(displayId)]
       ? mergeStylesForDisplay(data, overrides[String(displayId)])
-      : data;
+      : data, 'window', displayId);
     if (win._liveReady) {
       win.webContents.send('update-content', displayData);
     } else {
@@ -3717,9 +3718,9 @@ ipcMain.on('update-live-window', (event, data) => {
   }
   // Relay to per-display network clients
   for (const [displayId, ns] of displayNetServers.entries()) {
-    const displayData = overrides[String(displayId)]
+    const displayData = routeWidgetForDisplay(overrides[String(displayId)]
       ? mergeStylesForDisplay(data, overrides[String(displayId)])
-      : data;
+      : data, 'network', displayId);
     ns.lastPayload = displayData;
     const mediaPath = displayData && displayData.media && displayData.media.path;
     if (typeof mediaPath === 'string' && path.isAbsolute(mediaPath) && !/^https?:\/\//i.test(mediaPath)) {
