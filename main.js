@@ -4354,6 +4354,16 @@ ipcMain.handle('display-net-start', async (_event, displayId, port) => {
   return { ok: true, port: p, firewall: displayId === 0 ? streamProgramFirewallStatus : null };
 });
 
+// Only the user-triggered repair button is allowed to invoke UAC.
+ipcMain.handle('display-net-allow-firewall', async (_event, displayId, port) => {
+  if (displayId !== 0 || process.platform !== 'win32') {
+    return { success: false, active: null, message: 'Firewall repair is only available for the Windows Program display.' };
+  }
+  const p = (Number.isInteger(Number(port)) && Number(port) >= 1024 && Number(port) <= 65535) ? Number(port) : 7777;
+  streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'), { allowElevation: true });
+  return streamProgramFirewallStatus;
+});
+
 ipcMain.handle('display-net-stop', async (_event, displayId) => {
   stopDisplayNetServer(displayId);
   return { ok: true };

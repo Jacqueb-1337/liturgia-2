@@ -3100,8 +3100,13 @@ function openDisplayEditModal(displayId, displayIndex, initialSettings) {
   if (firewallRetryBtn) firewallRetryBtn.addEventListener('click', async () => {
     firewallRetryBtn.disabled = true;
     firewallMessageEl.textContent = 'Waiting for Windows permission…';
-    try { await ipcRenderer.invoke('display-net-start', 0, parseInt(portEl.value, 10) || 7777); }
-    finally { firewallRetryBtn.disabled = false; refreshStatus(); }
+    try {
+      const result = await ipcRenderer.invoke('display-net-allow-firewall', 0, parseInt(portEl.value, 10) || 7777);
+      if (result?.success !== true) {
+        errEl.textContent = result?.message || 'Windows Firewall permission was not granted.';
+        errEl.style.display = '';
+      }
+    } finally { firewallRetryBtn.disabled = false; refreshStatus(); }
   });
 
   enableEl.addEventListener('change', saveAndApply);

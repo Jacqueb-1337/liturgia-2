@@ -35,6 +35,35 @@ describe('Liturgia Stream Program firewall', () => {
     expect(buildFirewallCheckScript(7777, 'C:\\Liturgia.exe')).toContain('LocalSubnet');
   });
 
+  test('does not request elevation automatically when the client rule check fails', async () => {
+    const execFileImpl = jest.fn((_file, _args, _options, callback) => {
+      callback(null, JSON.stringify({ checked: true, active: false, checks: [
+        { name: 'LiturgiaWorshipStreamProgramTcp', exists: true, valid: false,
+          ruleSettings: true, port: true, program: false, localSubnet: true }
+      ] }), '');
+    });
+    const status = await ensureProgramFirewall(7777, 'C:\\Program Files\\Liturgia\\Liturgia Worship.exe', {
+      platform: 'win32', execFileImpl
+    });
+    expect(status.success).toBe(false);
+    expect(status.message).toContain('executable path');
+    expect(execFileImpl).toHaveBeenCalledTimes(1);
+    expect(execFileImpl.mock.calls[0][2]).toMatchObject({ windowsHide: true });
+  });
+
+  test('requests elevation only when explicitly authorized by repair action', async () => {
+    let checkCount = 0;
+    const execFileImpl = jest.fn((_file, _args, _options, callback) => {
+      checkCount++;
+      callback(null, checkCount === 2 ? '' : JSON.stringify({checked:true,active:checkCount === 3}), '');
+    });
+    const status = await ensureProgramFirewall(7777, 'C:\\Liturgia.exe', {
+      platform:'win32', execFileImpl, allowElevation:true
+    });
+    expect(status).toMatchObject({success:true,active:true});
+    expect(execFileImpl).toHaveBeenCalledTimes(3);
+  });
+
   test('does not run Windows commands on other platforms', async () => {
     const execFileImpl = jest.fn();
     const result = await ensureProgramFirewall(7777, '/opt/liturgia', {
