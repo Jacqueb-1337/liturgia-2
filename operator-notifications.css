@@ -1,45 +1,265 @@
-#liturgia-notification-center { position: fixed; right: 18px; bottom: 16px; z-index: 19900; font-family: 'Segoe UI',system-ui,sans-serif; font-size: 13px; color: var(--text, #222); }
-#liturgia-notification-button { border-radius: 999px; border: 1px solid var(--border, #aaa); box-shadow:0 2px 14px #0003; background:var(--surface, #fafafa); color:var(--text,#222); padding:8px 14px; font-weight:600; cursor:pointer; }
-#liturgia-notification-button.has-unread { border-color:#c08d37; }
-#liturgia-notification-button[hidden] {display:none}
-#liturgia-notification-panel { position:absolute; bottom:42px; right:0; width:min(385px,calc(100vw - 24px)); max-height:min(66vh,610px); overflow:auto; background:var(--surface,#fafafa); color:var(--text,#222); border:1px solid var(--border,#ccc); border-radius:10px; padding:0; box-shadow:0 8px 28px #0005; }
-#liturgia-notification-panel[hidden] {display:none}
-#liturgia-notification-panel header { position:sticky; top:0; z-index:1; display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--surface,#fafafa); border-bottom:1px solid var(--border,#aaa5); }
-#liturgia-notification-panel button {cursor:pointer;color:inherit}
-#liturgia-notification-panel .lnt-close { background:none;border:0;font-size:23px;line-height:1.1 }
-#liturgia-notification-list { padding:10px; display:flex;flex-direction:column; gap:9px; }
-.liturgia-notification-entry { border:1px solid var(--border,#ccc); border-left:4px solid var(--notice-accent);border-radius:7px;padding:11px 12px;background:var(--bg,#f4f4f4); }
-.liturgia-notification-entry .lnt-heading {display:flex;align-items:start;justify-content:space-between;gap:8px;color:var(--notice-accent); }
-.liturgia-notification-entry p {margin:8px 0;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
-.liturgia-notification-entry summary {cursor:pointer;font-size:12px;opacity:.85}
-.liturgia-notification-entry pre {overflow:auto;max-height:170px;white-space:pre-wrap;overflow-wrap:anywhere;padding:9px;border-radius:6px;background:#7772;font-size:11px}
-.lnt-dismiss {font-size:11px;background:transparent;border:1px solid currentColor;border-radius:4px;padding:3px 6px;opacity:.8;white-space:nowrap}
-.lnt-actions {display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
-.lnt-action {font-weight:600;border:1px solid var(--notice-accent);background:var(--notice-accent);color:#fff!important;border-radius:5px;padding:6px 11px}
-.lnt-action:disabled {opacity:.55}
-body.dark-theme #liturgia-notification-center {--surface:#252526;--bg:#1d1d1e;--border:#4d4d50;--text:#eee;}
+/* Liturgia operator notification center.
+   Anime.js v4 orchestrates movement; CSS defines the settled visual state.
+   Never attach these effects to presentation or program-output surfaces. */
+#liturgia-notification-center {
+  position:fixed;
+  right:18px;
+  bottom:16px;
+  z-index:19900;
+  font-family:'Segoe UI',system-ui,sans-serif;
+  font-size:13px;
+  color:var(--text,#222);
+  --lnt-highlight: #7e76dc;
+}
+#liturgia-notification-button {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  position:relative;
+  isolation:isolate;
+  overflow:visible;
+  border-radius:999px;
+  border:1px solid var(--border,#aaa);
+  box-shadow:0 5px 18px #0003,0 1px 2px #0002,inset 0 1px #ffffff20;
+  background:linear-gradient(135deg,var(--surface,#fafafa),var(--bg,#f4f4f4));
+  color:var(--text,#222);
+  padding:6px 12px 6px 7px;
+  font-weight:600;
+  cursor:pointer;
+  transform-origin:85% 100%;
+  transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease;
+}
+#liturgia-notification-button.has-unread {
+  border-color:color-mix(in srgb,var(--lnt-highlight) 65%,var(--border,#aaa));
+  box-shadow:0 7px 24px #0003,0 0 0 1px color-mix(in srgb,var(--lnt-highlight) 14%,transparent),inset 0 1px #ffffff22;
+}
+#liturgia-notification-button:hover {
+  box-shadow:0 10px 26px #0004,0 0 0 1px color-mix(in srgb,var(--lnt-highlight) 25%,transparent);
+}
+#liturgia-notification-button:active { background:var(--bg,#eee) }
+#liturgia-notification-button[hidden],
+.lnt-pill-count[hidden] {display:none!important}
+.lnt-pill-icon {
+  position:relative;
+  display:grid;
+  place-items:center;
+  flex:none;
+  width:31px;height:31px;
+  border-radius:50%;
+  background:linear-gradient(145deg,#7c79b92b,#9389fd18);
+  color:var(--lnt-highlight);
+  transform-origin:center;
+}
+.lnt-pill-icon.is-urgent {
+  color:#d29a38;
+  background:linear-gradient(145deg,#f3bd5438,#efba6720);
+}
+.lnt-pill-icon svg {
+  width:18px;height:18px;
+  z-index:1;
+}
+.lnt-icon-halo {
+  position:absolute;inset:0;
+  border:1.5px solid currentColor;
+  border-radius:50%;
+  opacity:0;
+  pointer-events:none;
+}
+.lnt-pill-label {
+  font-size:12px;
+  white-space:nowrap;
+  letter-spacing:.08px;
+}
+.lnt-pill-count {
+  display:grid;place-items:center;
+  flex:none;
+  min-width:20px;height:20px;padding:0 5px;
+  border-radius:999px;
+  background:var(--lnt-highlight);
+  color:white;
+  font-size:11px;
+  font-weight:750;
+  font-variant-numeric:tabular-nums;
+  transform-origin:center;
+}
 
-/* Operator notifications enter as a calm, physical surface; they never
-   steal focus, block controls, or animate the presentation output. */
-@keyframes lnt-pill-enter { from {opacity:0;transform:translateY(9px) scale(.95)} to {opacity:1;transform:translateY(0) scale(1)} }
-@keyframes lnt-panel-enter { from {opacity:0;transform:translateY(14px) scale(.965);filter:blur(3px)} to {opacity:1;transform:translateY(0) scale(1);filter:blur(0)} }
-@keyframes lnt-panel-leave { from {opacity:1;transform:translateY(0) scale(1)} to {opacity:0;transform:translateY(8px) scale(.98)} }
-@keyframes lnt-card-enter { from {opacity:0;transform:translateY(7px)} to {opacity:1;transform:translateY(0)} }
-@keyframes lnt-attention { 0%,100%{box-shadow:0 2px 14px #0003} 38%{box-shadow:0 0 0 5px #e7a52a25,0 4px 20px #0004} }
-#liturgia-notification-button:not([hidden]) {animation:lnt-pill-enter .28s cubic-bezier(.2,.8,.2,1) both;transition:transform .18s ease,box-shadow .18s ease;}
-#liturgia-notification-button:hover {transform:translateY(-2px);box-shadow:0 5px 18px #0004;}
-#liturgia-notification-button:active {transform:translateY(0) scale(.975);}
-#liturgia-notification-button.lnt-attention {animation:lnt-attention .75s ease-out;}
-#liturgia-notification-panel:not([hidden]) {transform-origin:bottom right;animation:lnt-panel-enter .23s cubic-bezier(.16,1,.3,1) both;}
-#liturgia-notification-panel.is-closing {animation:lnt-panel-leave .17s ease-in both;pointer-events:none;}
-.liturgia-notification-entry {animation:lnt-card-enter .23s ease-out both;animation-delay:calc(var(--notice-index,0) * 26ms);transition:border-color .18s ease,background-color .18s ease;}
-.liturgia-notification-entry:hover {border-color:var(--notice-accent);}
-.lnt-action,.lnt-dismiss {transition:transform .15s ease,filter .15s ease,background-color .15s ease;}
-.lnt-action:hover:not(:disabled) {filter:brightness(1.1);transform:translateY(-1px)}
-.lnt-action:active:not(:disabled) {transform:scale(.97)}
+#liturgia-notification-panel {
+  position:absolute;
+  bottom:53px;right:0;
+  width:min(410px,calc(100vw - 24px));
+  max-height:min(72vh,670px);
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  background:var(--surface,#fafafa);
+  color:var(--text,#222);
+  border:1px solid var(--border,#ccc);
+  border-radius:16px;
+  box-shadow:0 24px 70px #0005,0 6px 20px #0003,inset 0 1px #ffffff28;
+  transform-origin:91% 100%;
+  isolation:isolate;
+}
+#liturgia-notification-panel[hidden] {display:none}
+#liturgia-notification-panel.is-closing {pointer-events:none}
+.lnt-panel-sheen {
+  position:absolute;
+  left:-150px;
+  top:-30px;
+  width:160px;height:calc(100% + 60px);
+  z-index:4;
+  background:linear-gradient(100deg,transparent,#ffffff38,transparent);
+  transform:skewX(-17deg);
+  opacity:0;
+  pointer-events:none;
+  mix-blend-mode:screen;
+}
+#liturgia-notification-panel header {
+  position:sticky;
+  top:0;z-index:2;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:15px 16px 12px;
+  background:
+    radial-gradient(ellipse at 9% 0%,color-mix(in srgb,var(--lnt-highlight) 13%,transparent),transparent 65%),
+    var(--surface,#fafafa);
+  border-bottom:1px solid var(--border,#aaa5);
+}
+.lnt-header-text {display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.lnt-eyebrow {
+  font-size:9px;font-weight:800;
+  letter-spacing:2px;
+  color:var(--lnt-highlight);
+}
+.lnt-header-text strong {font-size:16px;font-weight:700;line-height:1.2;letter-spacing:-.2px}
+.lnt-header-subtitle {font-size:11px;opacity:.62;margin-top:2px}
+#liturgia-notification-panel button {cursor:pointer;color:inherit}
+#liturgia-notification-panel .lnt-close {
+  display:grid;place-items:center;
+  width:31px;height:31px;
+  background:#7771;
+  border:1px solid var(--border,#aaa5);
+  border-radius:50%;
+  font-size:22px;line-height:1;
+  transition:background-color .15s ease,box-shadow .15s ease;
+}
+#liturgia-notification-panel .lnt-close:hover {
+  background:#7772;
+  box-shadow:0 0 0 3px #7771;
+}
+#liturgia-notification-list {padding:12px;display:flex;flex-direction:column;gap:10px}
+.lnt-empty {margin:9px 6px;color:var(--text,#222);opacity:.75}
+.liturgia-notification-entry {
+  position:relative;
+  padding:12px 13px 12px 16px;
+  border:1px solid var(--border,#ccc);
+  border-radius:11px;
+  background:
+    linear-gradient(118deg,color-mix(in srgb,var(--notice-accent) 6%,transparent),transparent 63%),
+    var(--bg,#f4f4f4);
+  box-shadow:0 2px 6px #00000008;
+  transform-origin:95% 35%;
+  transition:border-color .18s ease,background-color .18s ease,box-shadow .18s ease;
+}
+.liturgia-notification-entry:hover {
+  border-color:color-mix(in srgb,var(--notice-accent) 50%,var(--border,#ccc));
+  box-shadow:0 5px 20px #00000018;
+}
+.liturgia-notification-entry.is-leaving {pointer-events:none}
+.lnt-entry-signal {
+  position:absolute;
+  left:0;top:11px;bottom:11px;width:3px;
+  border-radius:0 3px 3px 0;
+  background:var(--notice-accent);
+  box-shadow:0 0 11px color-mix(in srgb,var(--notice-accent) 45%,transparent);
+  transform-origin:center top;
+}
+.liturgia-notification-entry .lnt-heading {
+  display:flex;
+  align-items:flex-start;justify-content:space-between;
+  gap:9px;color:var(--notice-accent);
+}
+.lnt-entry-identity {display:flex;align-items:center;gap:9px;min-width:0}
+.lnt-entry-identity strong {line-height:1.4;overflow-wrap:anywhere}
+.lnt-entry-icon {
+  display:grid;place-items:center;
+  flex:none;
+  width:23px;height:23px;
+  color:var(--notice-accent);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--notice-accent) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--notice-accent) 19%,transparent);
+  font-weight:800;
+  font-size:13px;
+  transform-origin:center;
+}
+.liturgia-notification-entry p {
+  margin:9px 0;
+  line-height:1.5;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+}
+.liturgia-notification-entry summary {cursor:pointer;font-size:12px;opacity:.86}
+.liturgia-notification-entry pre {
+  overflow:auto;max-height:170px;
+  white-space:pre-wrap;overflow-wrap:anywhere;
+  padding:9px;
+  border-radius:7px;
+  background:#7772;
+  font-size:11px;
+}
+.lnt-dismiss {
+  flex:none;
+  font-size:11px;
+  background:transparent;
+  border:1px solid currentColor;
+  border-radius:6px;
+  padding:4px 8px;
+  opacity:.8;
+  white-space:nowrap;
+}
+.lnt-actions {display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.lnt-action {
+  font-weight:650;
+  border:1px solid var(--notice-accent);
+  background:var(--notice-accent);
+  color:#fff!important;
+  border-radius:7px;
+  padding:7px 12px;
+  box-shadow:0 3px 10px color-mix(in srgb,var(--notice-accent) 22%,transparent);
+}
+.lnt-action:disabled {opacity:.55;cursor:default}
+.lnt-action,.lnt-dismiss {
+  transition:filter .15s ease,background-color .15s ease,opacity .15s ease;
+}
+.lnt-action:hover:not(:disabled) {filter:brightness(1.12)}
+.lnt-action:active:not(:disabled) {filter:brightness(.92)}
 .lnt-dismiss:hover {opacity:1;background:#7772}
+.lnt-panel-footer {
+  display:flex;
+  align-items:center;justify-content:center;gap:7px;
+  padding:10px 12px 12px;
+  color:var(--text,#222);
+  opacity:.57;
+  font-size:10px;
+  letter-spacing:.12px;
+}
+.lnt-footer-dot {width:6px;height:6px;border-radius:50%;background:#278c5b}
+.lnt-footer-dot.is-urgent {background:#e7a52a}
+#liturgia-notification-center button:focus-visible,
+#liturgia-notification-center summary:focus-visible {
+  outline:2px solid #2686cf;outline-offset:2px;
+}
+body.dark-theme #liturgia-notification-center {
+  --surface:#252526;
+  --bg:#1d1d1e;
+  --border:#4d4d50;
+  --text:#eee;
+  --lnt-highlight:#aaa1ff;
+}
 @media (prefers-reduced-motion:reduce) {
-  #liturgia-notification-center *,#liturgia-notification-center *::before,#liturgia-notification-center *::after {
-    animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important;
+  #liturgia-notification-center *,#liturgia-notification-center *::before,
+  #liturgia-notification-center *::after {
+    animation:none!important;
+    transition:none!important;
+    scroll-behavior:auto!important;
   }
 }
