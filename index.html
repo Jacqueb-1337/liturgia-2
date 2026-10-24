@@ -529,7 +529,27 @@
           <select id="song-hymnal-filter" title="Filter by hymnal" style="padding: 8px 10px; max-width: 130px;">
             <option value="">All hymnals</option>
           </select>
-          <button id="song-view-toggle" style="padding: 8px 12px; white-space: nowrap; height: 36px; box-sizing: border-box;" title="Toggle between full song and verse blocks">Verse Blocks</button>
+          <div id="song-view-picker" class="song-view-picker">
+            <button id="song-view-toggle" type="button" aria-haspopup="menu" aria-controls="song-view-menu" aria-expanded="false" title="Choose song verse layout">
+              <svg class="song-view-current-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3" width="15" height="4" rx="1"/><rect x="2.5" y="9" width="15" height="4" rx="1"/><rect x="2.5" y="15" width="15" height="2" rx=".7"/></svg>
+              <span>View</span>
+              <svg class="song-view-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div id="song-view-menu" class="song-view-menu" role="menu" aria-label="Song verse layout" hidden>
+              <button type="button" data-song-view="full" role="menuitemradio" aria-checked="true">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3" width="15" height="6" rx="1"/><rect x="2.5" y="11" width="15" height="6" rx="1"/></svg>
+                <span>Full verses</span><span class="song-view-check" aria-hidden="true">✓</span>
+              </button>
+              <button type="button" data-song-view="grid" role="menuitemradio" aria-checked="false">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="3" width="7" height="6" rx="1"/><rect x="10.5" y="3" width="7" height="6" rx="1"/><rect x="2.5" y="11" width="7" height="6" rx="1"/><rect x="10.5" y="11" width="7" height="6" rx="1"/></svg>
+                <span>Compact grid</span><span class="song-view-check" aria-hidden="true">✓</span>
+              </button>
+              <button type="button" data-song-view="list" role="menuitemradio" aria-checked="false">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 4h3M8 4h9M3 10h3M8 10h9M3 16h3M8 16h9" stroke-linecap="round"/></svg>
+                <span>Compact list</span><span class="song-view-check" aria-hidden="true">✓</span>
+              </button>
+            </div>
+          </div>
           <button id="song-add-btn" style="padding: 8px 12px; font-size: 18px; font-weight: bold; height: 36px; line-height: 1; box-sizing: border-box; color: #0078d4;" title="Create new song">+</button>
         </div>
         <div style="display: flex; flex: 1; min-height: 0;">

@@ -7,6 +7,7 @@ const { ipcRenderer, shell } = require('electron');
 const { createOperatorNotifications } = require('./lib/operatorNotifications');
 const { renderMediaLibraryGrid, supportsSongBackground } = require('./lib/mediaLibraryGrid');
 const { mergeSongStyles } = require('./lib/songStyleOverrides');
+const { normalizeSongVerseViewMode, renderSongVerseCollection } = require('./lib/songVerseViews');
 const operatorNotifications = createOperatorNotifications({
   doc: document,
   storage: window.localStorage,
@@ -965,7 +966,7 @@ let selectedSongVerseIndex = null; // Track selected verse within a song
 let selectedIndices = [];
 let selectedSongIndices = [];
 let currentTab = 'verses'; // 'verses' or 'songs'
-let songVerseViewMode = 'full'; // 'full' or 'blocks' - controls how song is displayed
+let songVerseViewMode = 'full'; // full-width, compact grid, or compact list
 let anchorIndex = null;
 let currentBibleFile = null; // e.g. 'en_kjv.json'
 let secondaryBibleFile = null;    // secondary translation filename
@@ -5765,16 +5766,29 @@ async function saveSongViewMode() {
   }
 }
 
+function updateSongViewSelector() {
+  const menu = document.getElementById('song-view-menu');
+  const toggle = document.getElementById('song-view-toggle');
+  if (!menu || !toggle) return;
+  const selected = menu.querySelector('[data-song-view="' + songVerseViewMode + '"]');
+  menu.querySelectorAll('[data-song-view]').forEach(option =>
+    option.setAttribute('aria-checked', String(option === selected)));
+  const icon = selected && selected.querySelector('svg');
+  const current = toggle.querySelector('.song-view-current-icon');
+  if (icon && current) {
+    const updated = icon.cloneNode(true);
+    updated.classList.add('song-view-current-icon');
+    current.replaceWith(updated);
+  }
+  toggle.title = 'Song layout: ' + (selected ? selected.querySelector('span').textContent : 'Full verses');
+}
+
 async function loadSongViewMode() {
   try {
     const settings = await ipcRenderer.invoke('load-settings') || {};
-    if (settings.songVerseViewMode) {
-      songVerseViewMode = settings.songVerseViewMode;
-      const viewToggle = document.getElementById('song-view-toggle');
-      if (viewToggle) {
-        viewToggle.textContent = songVerseViewMode === 'full' ? 'Verse Blocks' : 'Full Song';
-      }
-    }
+    songVerseViewMode = normalizeSongVerseViewMode(settings.songVerseViewMode);
+    updateSongViewSelector();
+    if (selectedSongIndices.length > 0) displaySelectedSong();
   } catch (err) {
     console.error('Failed to load song view mode:', err);
   }
@@ -6058,17 +6072,56 @@ function initTabs() {
     });
   });
   
-  // Song view toggle button
+  // Explorer-style View control. Changing view never changes song selection.
   const viewToggle = document.getElementById('song-view-toggle');
-  if (viewToggle) {
+  const viewMenu = document.getElementById('song-view-menu');
+  if (viewToggle && viewMenu) {
+    const closeViewMenu = () => {
+      viewMenu.hidden = true;
+      viewToggle.setAttribute('aria-expanded', 'false');
+    };
     viewToggle.addEventListener('click', () => {
-      songVerseViewMode = songVerseViewMode === 'full' ? 'blocks' : 'full';
-      viewToggle.textContent = songVerseViewMode === 'full' ? 'Verse Blocks' : 'Full Song';
-      displaySelectedSong();
-      saveSongViewMode();
+      const opening = viewMenu.hidden;
+      viewMenu.hidden = !opening;
+      viewToggle.setAttribute('aria-expanded', String(opening));
+      if (opening) viewMenu.querySelector('[aria-checked="true"]')?.focus();
     });
+    viewMenu.querySelectorAll('[data-song-view]').forEach(option => {
+      option.addEventListener('click', () => {
+        const next = normalizeSongVerseViewMode(option.dataset.songView);
+        if (next !== songVerseViewMode) {
+          songVerseViewMode = next;
+          updateSongViewSelector();
+          displaySelectedSong();
+          requestAnimationFrame(scrollSelectedSongVerseIntoView);
+          saveSongViewMode();
+        }
+        closeViewMenu();
+        viewToggle.focus();
+      });
+    });
+    viewMenu.addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const choices = [...viewMenu.querySelectorAll('[data-song-view]')];
+      let next = choices.indexOf(document.activeElement);
+      if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = choices.length - 1;
+      else next = (next + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
+      choices[next]?.focus();
+    });
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('#song-view-picker')) closeViewMenu();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !viewMenu.hidden) {
+        closeViewMenu();
+        viewToggle.focus();
+      }
+    });
+    updateSongViewSelector();
   }
-  
+
   // Song add button
   const addBtn = document.getElementById('song-add-btn');
   if (addBtn) {
@@ -6308,36 +6361,15 @@ function displaySelectedSong() {
     html += `<p class="song-author">${song.author}</p>`;
   }
   
-  if (songVerseViewMode === 'blocks') {
-    // Verse blocks view - similar to schedule expanded view
-    song.lyrics.forEach((section, sectionIndex) => {
-      const verses = section.text.split(/\n\n+/);
-      verses.forEach((verse, verseIndex) => {
-        const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
-        const isSelected = selectedSongVerseIndex === globalVerseIndex;
-        const firstLine = verse.split('\n')[0];
-        // Remove any highlight markers that might be in the raw text (shouldn't be there, but clean it up)
-        const cleanFirstLine = firstLine.replace(/___HIGHLIGHT_(START|END)___/g, '');
-        const label = cleanFirstLine.length > 40 ? cleanFirstLine.substring(0, 40) + '...' : cleanFirstLine;
-        // Only show verse index if there are multiple verses in this section
-        const verseLabel = verses.length > 1 ? ` (${verseIndex + 1})` : '';
-        html += `<div class="song-verse-block${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}">${section.section}${verseLabel}: ${label}</div>`;
-      });
-    });
-  } else {
-    // Full view - show complete song text with clickable verses
-    song.lyrics.forEach((section, sectionIndex) => {
-      html += `<h3>${section.section}</h3>`;
-      const verses = section.text.split(/\n\n+/);
-      verses.forEach((verse, verseIndex) => {
-        const globalVerseIndex = song.lyrics.slice(0, sectionIndex).reduce((sum, s) => sum + s.text.split(/\n\n+/).length, 0) + verseIndex;
-        const isSelected = selectedSongVerseIndex === globalVerseIndex;
-        const verseHtml = (currentSearchQuery && currentSearchQuery.trim()) ? renderSongVerse(verse, currentSearchQuery) : parseMarkdown(verse);
-        html += `<p class="song-verse${isSelected ? ' selected' : ''}" data-verse-index="${globalVerseIndex}" style="white-space: pre-wrap; padding: 4px; margin: 2px 0; cursor: pointer; border-radius: 4px; ${isSelected ? 'background: #0078d4; color: #fff;' : ''}">${verseHtml}</p>`;
-      });
-    });
-  }
-  
+  songDisplay.classList.toggle('song-view-grid', songVerseViewMode === 'grid');
+  songDisplay.classList.toggle('song-view-list', songVerseViewMode === 'list');
+  html += renderSongVerseCollection(song, {
+    mode: songVerseViewMode,
+    selectedVerseIndex: selectedSongVerseIndex,
+    renderVerse: verse => (currentSearchQuery && currentSearchQuery.trim())
+      ? renderSongVerse(verse, currentSearchQuery) : parseMarkdown(verse)
+  });
+
   songDisplay.innerHTML = html;
   
   // Add double-click handler to song title
@@ -6357,6 +6389,13 @@ function displaySelectedSong() {
     });
     verseEl.addEventListener('dblclick', () => {
       handleSongVerseDoubleClick(verseIndex);
+    });
+    verseEl.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        if (event.ctrlKey || event.metaKey) handleSongVerseDoubleClick(verseIndex);
+        else handleSongVerseClick(verseIndex);
+      }
     });
   });
 }

@@ -3301,3 +3301,90 @@ body.dark-theme .lt-preset-btn.lt-active {
   background: rgba(77,184,255,0.15);
   color: #4db8ff;
 }
+
+/* Song verse layout switcher, styled after File Explorer's View control. */
+.song-view-picker { position:relative; flex:0 0 auto; }
+#song-view-toggle {
+  height:36px; display:inline-flex; align-items:center; gap:7px;
+  border:1px solid var(--border,#c6c6c6); border-radius:6px;
+  padding:0 10px; background:var(--surface,#fff); color:inherit;
+  font:inherit; font-size:13px; cursor:pointer; white-space:nowrap;
+}
+#song-view-toggle:hover, #song-view-toggle[aria-expanded="true"] {
+  background:var(--hover,#eceff3);
+}
+#song-view-toggle:focus-visible, #song-view-menu button:focus-visible {
+  outline:2px solid var(--accent,#0078d4); outline-offset:2px;
+}
+.song-view-picker svg { width:17px; height:17px; flex:none; }
+.song-view-picker .song-view-chevron { width:12px; height:12px; margin-left:1px; }
+#song-view-menu {
+  position:absolute; top:calc(100% + 5px); right:0; z-index:160;
+  width:204px; padding:5px; border:1px solid var(--border,#c6c6c6);
+  border-radius:8px; background:var(--surface,#fff); color:inherit;
+  box-shadow:0 10px 28px rgba(0,0,0,.20);
+}
+#song-view-menu[hidden] { display:none; }
+#song-view-menu button {
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  padding:9px 10px; border:0; border-radius:5px;
+  background:transparent; color:inherit; cursor:pointer; font:inherit; font-size:13px;
+}
+#song-view-menu button:hover, #song-view-menu button[aria-checked="true"] {
+  background:var(--hover,#edf3fa);
+}
+#song-view-menu .song-view-check {
+  margin-left:auto; color:var(--accent,#0078d4);
+  opacity:0; font-weight:700;
+}
+#song-view-menu button[aria-checked="true"] .song-view-check { opacity:1; }
+body.dark-theme #song-view-toggle, body.dark-theme #song-view-menu {
+  background:#292929; border-color:#505050; color:#eee;
+}
+body.dark-theme #song-view-toggle:hover,
+body.dark-theme #song-view-toggle[aria-expanded="true"],
+body.dark-theme #song-view-menu button:hover,
+body.dark-theme #song-view-menu button[aria-checked="true"] { background:#393f46; }
+
+/* The grid shows entire verses and flows into as many columns as fit. */
+#song-display { min-width:0; box-sizing:border-box; }
+#song-display .song-verse-grid-list {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));
+  gap:10px; align-items:stretch; width:100%; min-width:0; padding:3px 0 8px;
+}
+#song-display .song-verse-grid-item {
+  min-width:0; box-sizing:border-box; padding:11px 12px; margin:0;
+  background:var(--surface,#f9fafb); border:1px solid var(--border,#d2d6da);
+  border-radius:8px; cursor:pointer; overflow-wrap:anywhere; color:inherit;
+  font-size:.9em; line-height:1.4;
+}
+#song-display .song-verse-grid-caption {
+  font-size:11px; font-weight:650; letter-spacing:.02em;
+  opacity:.75; margin-bottom:6px;
+}
+#song-display .song-verse-grid-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+#song-display .song-verse-grid-item:hover { background:var(--hover,#eef3f8)!important; }
+#song-display .song-verse-grid-item.selected {
+  color:inherit; border-color:var(--accent,#0078d4);
+  background:color-mix(in srgb,var(--accent,#0078d4) 10%,transparent);
+  box-shadow:inset 0 0 0 1px var(--accent,#0078d4);
+}
+body.dark-theme #song-display .song-verse-grid-item { background:#2b2c2e; border-color:#4c4c4c; color:#eee; }
+body.dark-theme #song-display .song-verse-grid-item:hover { background:#363d47!important; }
+body.dark-theme #song-display .song-verse-grid-item.selected {
+  border-color:#6caee8; background:#244059!important; box-shadow:inset 0 0 0 1px #6caee8;
+}
+
+/* Dense text rows reuse the pre-existing verse blocks visuals and behavior. */
+#song-display .song-verse-compact-list { display:flex; flex-direction:column; gap:4px; }
+#song-display .song-verse-compact-list .song-verse-block {
+  margin:0; padding:7px 10px; min-width:0; font-size:12px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+#song-display .song-verse-list-label { font-weight:650; }
+#song-display .song-verse-list-excerpt { font-weight:400; }
+#song-display [data-verse-index]:focus-visible {
+  outline:2px solid var(--accent,#0078d4); outline-offset:2px;
+}
+#song-display .song-verse-block.selected:hover,
+body.dark-theme #song-display .song-verse-block.selected:hover { background:#0078d4; color:#fff; }
