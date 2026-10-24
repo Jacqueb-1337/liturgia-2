@@ -1,7 +1,7 @@
 const { createOperatorNotifications, STORE_KEY } = require('../lib/operatorNotifications');
 
 beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
-afterEach(() => { delete window.matchMedia; });
+afterEach(() => { delete window.matchMedia; delete window.ResizeObserver; });
 
 function motionHarness(reduce = false) {
   const callbacks = new Set();
@@ -34,6 +34,22 @@ test('queues independent messages and supports severity, read and dismiss', () =
   expect(center.getMessages().every(x => x.read)).toBe(true);
   document.querySelector('.lnt-dismiss').click();
   expect(center.getMessages().filter(x => x.dismissed)).toHaveLength(1);
+  center.destroy();
+});
+
+test('notification pill shows unread count only in the badge', () => {
+  const center = createOperatorNotifications({ doc: document, storage: localStorage });
+  center.add({ id:'first', title:'One', severity:'warning' });
+  const pill = center.root.querySelector('#liturgia-notification-button');
+  const label = pill.querySelector('.lnt-pill-label');
+  const badge = pill.querySelector('.lnt-pill-count');
+  expect(label.textContent).toBe('Notifications');
+  expect(badge.textContent).toBe('1');
+  center.add({ id:'second', title:'Two' });
+  expect(label.textContent).toBe('Notifications');
+  expect(badge.textContent).toBe('2');
+  center.show();
+  expect(badge.hidden).toBe(true);
   center.destroy();
 });
 
@@ -154,8 +170,58 @@ test('the new choreography springs from the pill and ripples the bell', () => {
   const opening = animations.find(a => a.node === panel);
   expect(opening.options.scale).toEqual([.78, 1]);
   expect(opening.options.rotate).toEqual([-2.6, 0]);
-  expect(animations.some(a => a.node.classList?.contains('lnt-entry-signal'))).toBe(true);
+  expect(center.root.querySelector('.lnt-entry-signal')).toBeNull();
   expect(animations.some(a => a.node.classList?.contains('lnt-entry-icon'))).toBe(true);
+  center.destroy();
+});
+
+test('popover height animates when a card is removed and is clipped around the scrollbar', () => {
+  const { animateFn, animations } = motionHarness();
+  const center = createOperatorNotifications({ doc: document, storage: localStorage, animateFn });
+  center.add({ id:'first', title:'First' });
+  center.add({ id:'second', title:'Second' });
+  const content = center.root.querySelector('.lnt-panel-content');
+  const viewport = center.root.querySelector('.lnt-panel-scroll');
+  const panel = center.root.querySelector('#liturgia-notification-panel');
+  let contentHeight = 450;
+  Object.defineProperty(content, 'scrollHeight', { get: () => contentHeight });
+  viewport.getBoundingClientRect = () => ({ height: parseFloat(viewport.style.height) || 0 });
+  center.show();
+  expect(viewport.style.height).toBe('450px');
+  center.dismiss('first');
+  contentHeight = 260;
+  animations.filter(a => a.node.dataset?.notificationId === 'first').at(-1).complete();
+  const heightChange = animations.filter(a => a.node === viewport).at(-1);
+  expect(heightChange.options.height).toEqual([450, 260]);
+  heightChange.complete();
+  expect(viewport.style.height).toBe('260px');
+  expect(viewport.parentElement).toBe(panel);
+  center.destroy();
+});
+
+test('details expansion resizes the entire popover through its clipped viewport', () => {
+  const { animateFn, animations } = motionHarness();
+  let notifyResize;
+  window.ResizeObserver = class {
+    constructor(callback) { notifyResize = callback; }
+    observe() {}
+    disconnect() {}
+  };
+  const center = createOperatorNotifications({ doc: document, storage: localStorage, animateFn });
+  center.add({ id: 'one', title: 'Message', details: 'Expanded diagnostic details' });
+  const content = center.root.querySelector('.lnt-panel-content');
+  const viewport = center.root.querySelector('.lnt-panel-scroll');
+  let measuredHeight = 220;
+  Object.defineProperty(content, 'scrollHeight', { get: () => measuredHeight });
+  viewport.getBoundingClientRect = () => ({ height: parseFloat(viewport.style.height) || 0 });
+  center.show();
+  expect(viewport.style.height).toBe('220px');
+  measuredHeight = 375;
+  notifyResize();
+  const animated = animations.filter(a => a.node === viewport).at(-1);
+  expect(animated.options.height).toEqual([220, 375]);
+  animated.complete();
+  expect(viewport.style.height).toBe('375px');
   center.destroy();
 });
 
@@ -173,8 +239,8 @@ test('many messages do not restart existing cards, with mixed severity and new r
   const before = animations.length;
   center.add({ id: 'message-29', title: 'Message 29', revision: 'new' });
   expect(center.root.querySelector('[data-notification-id="message-0"]')).toBe(old);
-  // The refreshed card, its accent rail and icon animate, not every old card.
-  expect(animations.length - before).toBeLessThanOrEqual(3);
+  // Only the refreshed card and its icon animate, never the entire list.
+  expect(animations.length - before).toBeLessThanOrEqual(2);
   expect(center.getMessages().find(x => x.id === 'message-29').read).toBe(false);
   center.destroy();
 });

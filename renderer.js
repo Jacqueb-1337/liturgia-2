@@ -17,9 +17,9 @@ const operatorNotifications = createOperatorNotifications({
     if (action === 'repair-program-firewall') {
       const status = await ipcRenderer.invoke('get-display-net-status', 0);
       const result = await ipcRenderer.invoke('display-net-allow-firewall', 0, status?.port || 7777);
-      if (result?.active === true) {
+      if (result?.active === true || result?.managed === false) {
         operatorNotifications.resolve('program-firewall');
-        operatorNotifications.add({id:'firewall-repaired',title:'Network access configured',body:'The Program display firewall rules are verified.',severity:'success'});
+        if (result?.active === true) operatorNotifications.add({id:'firewall-repaired',title:'Network access configured',body:'The Program display firewall rules are verified.',severity:'success'});
       } else {
         operatorNotifications.add({id:'program-firewall',revision:String(Date.now()),title:'Network access needs attention',
           body:result?.message || 'Windows could not repair the firewall rules.',severity:'warning',
@@ -30,7 +30,7 @@ const operatorNotifications = createOperatorNotifications({
 });
 window.liturgiaNotifications = operatorNotifications;
 ipcRenderer.on('operator-firewall-status', (_event, status) => {
-  if (status?.active === true) return operatorNotifications.resolve('program-firewall');
+  if (status?.active === true || status?.managed === false) return operatorNotifications.resolve('program-firewall');
   operatorNotifications.add({ id:'program-firewall',title:'Network access needs attention',
     body:status?.message || 'Liturgia cannot verify Program output network access.',severity:'warning',
     actions:[{id:'repair-program-firewall',label:'Fix'}] });
@@ -42,7 +42,9 @@ ipcRenderer.on('operator-message', (_event, message) => {
 // completed before the renderer's notification listener was registered.
 window.addEventListener('DOMContentLoaded', () => {
   ipcRenderer.invoke('get-display-net-status', 0).then(status => {
-    if (status?.running && status.firewall?.active !== true && status.firewall?.managed !== false) {
+    if (status?.firewall?.active === true || status?.firewall?.managed === false) {
+      operatorNotifications.resolve('program-firewall');
+    } else if (status?.running && status.firewall && status.firewall.active !== true) {
       operatorNotifications.add({id:'program-firewall',title:'Network access needs attention',severity:'warning',
         body:status.firewall?.message || 'Liturgia cannot verify the network display firewall rules.',
         actions:[{id:'repair-program-firewall',label:'Fix'}]});

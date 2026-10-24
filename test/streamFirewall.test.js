@@ -64,6 +64,16 @@ describe('Liturgia Stream Program firewall', () => {
     expect(execFileImpl).toHaveBeenCalledTimes(3);
   });
 
+  test('does not flag packaged-app firewall rules as broken when running the Electron dev binary', async () => {
+    const execFileImpl = jest.fn();
+    const status = await ensureProgramFirewall(7777, 'C:\\dev\\electron.exe', {
+      platform: 'win32', development: true, execFileImpl, allowElevation: true
+    });
+    expect(status).toMatchObject({ success: true, active: null, managed: false });
+    expect(status.message).toMatch(/development electron/i);
+    expect(execFileImpl).not.toHaveBeenCalled();
+  });
+
   test('does not run Windows commands on other platforms', async () => {
     const execFileImpl = jest.fn();
     const result = await ensureProgramFirewall(7777, '/opt/liturgia', {

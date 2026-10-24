@@ -20,21 +20,21 @@
   overflow:visible;
   border-radius:999px;
   border:1px solid var(--border,#aaa);
-  box-shadow:0 5px 18px #0003,0 1px 2px #0002,inset 0 1px #ffffff20;
+  box-shadow:0 3px 9px #0002;
   background:linear-gradient(135deg,var(--surface,#fafafa),var(--bg,#f4f4f4));
   color:var(--text,#222);
   padding:6px 12px 6px 7px;
   font-weight:600;
   cursor:pointer;
   transform-origin:85% 100%;
-  transition:border-color .18s ease,box-shadow .18s ease,background-color .18s ease;
+  transition:border-color .18s ease,background-color .18s ease;
 }
 #liturgia-notification-button.has-unread {
   border-color:color-mix(in srgb,var(--lnt-highlight) 65%,var(--border,#aaa));
-  box-shadow:0 7px 24px #0003,0 0 0 1px color-mix(in srgb,var(--lnt-highlight) 14%,transparent),inset 0 1px #ffffff22;
+  box-shadow:0 3px 9px #0002;
 }
 #liturgia-notification-button:hover {
-  box-shadow:0 10px 26px #0004,0 0 0 1px color-mix(in srgb,var(--lnt-highlight) 25%,transparent);
+  background:var(--bg,#eee);
 }
 #liturgia-notification-button:active { background:var(--bg,#eee) }
 #liturgia-notification-button[hidden],
@@ -88,39 +88,41 @@
   bottom:53px;right:0;
   width:min(410px,calc(100vw - 24px));
   max-height:min(72vh,670px);
-  overflow-y:auto;
-  overflow-x:hidden;
-  overscroll-behavior:contain;
+  box-sizing:border-box;
+  overflow:hidden;
   background:var(--surface,#fafafa);
   color:var(--text,#222);
   border:1px solid var(--border,#ccc);
   border-radius:16px;
-  box-shadow:0 24px 70px #0005,0 6px 20px #0003,inset 0 1px #ffffff28;
+  box-shadow:0 11px 29px #0004;
   transform-origin:91% 100%;
   isolation:isolate;
 }
 #liturgia-notification-panel[hidden] {display:none}
 #liturgia-notification-panel.is-closing {pointer-events:none}
-.lnt-panel-sheen {
-  position:absolute;
-  left:-150px;
-  top:-30px;
-  width:160px;height:calc(100% + 60px);
-  z-index:4;
-  background:linear-gradient(100deg,transparent,#ffffff38,transparent);
-  transform:skewX(-17deg);
-  opacity:0;
-  pointer-events:none;
-  mix-blend-mode:screen;
+/* The scrollbar belongs to this clipped inner viewport, never the rounded shell. */
+.lnt-panel-scroll {
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  border-radius:inherit;
+  scrollbar-width:thin;
+  scrollbar-color:var(--border,#777) transparent;
 }
+.lnt-panel-scroll::-webkit-scrollbar {width:7px}
+.lnt-panel-scroll::-webkit-scrollbar-track {background:transparent}
+.lnt-panel-scroll::-webkit-scrollbar-thumb {
+  background:var(--border,#777);
+  border:2px solid var(--surface,#252526);
+  border-radius:9px;
+}
+.lnt-panel-content {display:flow-root;}
 #liturgia-notification-panel header {
   position:sticky;
   top:0;z-index:2;
   display:flex;align-items:center;justify-content:space-between;
   padding:15px 16px 12px;
-  background:
-    radial-gradient(ellipse at 9% 0%,color-mix(in srgb,var(--lnt-highlight) 13%,transparent),transparent 65%),
-    var(--surface,#fafafa);
+  background:var(--surface,#fafafa);
   border-bottom:1px solid var(--border,#aaa5);
 }
 .lnt-header-text {display:flex;flex-direction:column;align-items:flex-start;gap:2px}
@@ -143,35 +145,23 @@
 }
 #liturgia-notification-panel .lnt-close:hover {
   background:#7772;
-  box-shadow:0 0 0 3px #7771;
+  border-color:var(--text,#ccc);
 }
 #liturgia-notification-list {padding:12px;display:flex;flex-direction:column;gap:10px}
 .lnt-empty {margin:9px 6px;color:var(--text,#222);opacity:.75}
 .liturgia-notification-entry {
   position:relative;
-  padding:12px 13px 12px 16px;
+  padding:12px 13px;
   border:1px solid var(--border,#ccc);
   border-radius:11px;
-  background:
-    linear-gradient(118deg,color-mix(in srgb,var(--notice-accent) 6%,transparent),transparent 63%),
-    var(--bg,#f4f4f4);
-  box-shadow:0 2px 6px #00000008;
+  background:var(--bg,#f4f4f4);
   transform-origin:95% 35%;
-  transition:border-color .18s ease,background-color .18s ease,box-shadow .18s ease;
+  transition:border-color .18s ease,background-color .18s ease;
 }
 .liturgia-notification-entry:hover {
   border-color:color-mix(in srgb,var(--notice-accent) 50%,var(--border,#ccc));
-  box-shadow:0 5px 20px #00000018;
 }
 .liturgia-notification-entry.is-leaving {pointer-events:none}
-.lnt-entry-signal {
-  position:absolute;
-  left:0;top:11px;bottom:11px;width:3px;
-  border-radius:0 3px 3px 0;
-  background:var(--notice-accent);
-  box-shadow:0 0 11px color-mix(in srgb,var(--notice-accent) 45%,transparent);
-  transform-origin:center top;
-}
 .liturgia-notification-entry .lnt-heading {
   display:flex;
   align-items:flex-start;justify-content:space-between;
@@ -224,7 +214,7 @@
   color:#fff!important;
   border-radius:7px;
   padding:7px 12px;
-  box-shadow:0 3px 10px color-mix(in srgb,var(--notice-accent) 22%,transparent);
+
 }
 .lnt-action:disabled {opacity:.55;cursor:default}
 .lnt-action,.lnt-dismiss {

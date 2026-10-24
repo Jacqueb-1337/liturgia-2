@@ -3201,7 +3201,7 @@ app.whenReady().then(async () => {
         try {
           startDisplayNetServer(displayId, port);
           if (displayId === 0 && process.platform === 'win32') {
-            ensureProgramFirewall(port, app.getPath('exe')).then((status) => {
+            ensureProgramFirewall(port, app.getPath('exe'), { development: !app.isPackaged }).then((status) => {
               streamProgramFirewallStatus = status;
               if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operator-firewall-status', status);
               console.log('[network-display] Program firewall status:', status.message);
@@ -4357,7 +4357,7 @@ ipcMain.handle('display-net-start', async (_event, displayId, port) => {
   const p = (typeof port === 'number' && port > 0) ? port : 7777;
   startDisplayNetServer(displayId, p);
   if (displayId === 0 && process.platform === 'win32') {
-    streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'));
+    streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'), { development: !app.isPackaged });
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operator-firewall-status', streamProgramFirewallStatus);
   }
   return { ok: true, port: p, firewall: displayId === 0 ? streamProgramFirewallStatus : null };
@@ -4369,7 +4369,9 @@ ipcMain.handle('display-net-allow-firewall', async (_event, displayId, port) => 
     return { success: false, active: null, message: 'Firewall repair is only available for the Windows Program display.' };
   }
   const p = (Number.isInteger(Number(port)) && Number(port) >= 1024 && Number(port) <= 65535) ? Number(port) : 7777;
-  streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'), { allowElevation: true });
+  streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'), {
+    allowElevation: app.isPackaged, development: !app.isPackaged
+  });
   return streamProgramFirewallStatus;
 });
 
