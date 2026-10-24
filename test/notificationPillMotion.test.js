@@ -33,7 +33,10 @@ function harness() {
 test('Motion drag stays horizontal, constrained to the bottom, and is disabled when open', () => {
   const t=harness();
   expect(t.dragFn).toHaveBeenCalledTimes(1);
-  expect(t.moves[0]).toMatchObject({axis:'x',momentum:true,elastic:.12});
+  expect(t.moves[0]).toMatchObject({momentum:true,snapToOrigin:'y'});
+  expect(t.moves[0].axis).toBeUndefined();
+  expect(t.moves[0].constraints).toMatchObject({top:0,bottom:0});
+  expect(t.moves[0].elastic.top).toBeGreaterThan(0);
   expect(t.moves[0].constraints.right).toBe(0);
   expect(t.moves[0].constraints.left).toBeLessThan(0);
   t.obj.setOpen(true);
