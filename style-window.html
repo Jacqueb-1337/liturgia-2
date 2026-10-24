@@ -364,7 +364,29 @@
     .sw-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .sw-tab:hover:not(.active) { color: var(--text); }
     .sw-tab-panel { display: none; }
-    .sw-tab-panel.active { display: block; }
+    .sw-tab-panel.active { display: block; animation:sw-tab-enter .19s ease-out both; }
+    @keyframes sw-tab-enter {from {opacity:0;transform:translateY(7px)} to {opacity:1;transform:translateY(0)}}
+    @keyframes sw-window-enter {from {opacity:0;transform:translateY(12px)} to {opacity:1;transform:translateY(0)}}
+    body.song-specific {animation:sw-window-enter .27s cubic-bezier(.16,1,.3,1) both;}
+    .song-inherit-wrapper > .style-field, .song-inherit-wrapper > .btn-toggle {
+      opacity:1;max-height:100px;transform:translateY(0);
+      transition:opacity .19s ease,max-height .24s ease,transform .22s cubic-bezier(.16,1,.3,1);
+    }
+    .song-inherit-wrapper.is-inherited > .style-field,.song-inherit-wrapper.is-inherited > .btn-toggle {
+      opacity:0;max-height:0;overflow:hidden;pointer-events:none;transform:translateY(-4px);margin:0;
+    }
+    #song-bg-custom {opacity:1;max-height:150px;overflow:hidden;transform:translateY(0);
+      transition:opacity .19s ease,max-height .24s ease,transform .2s ease;}
+    #song-bg-custom.is-inherited {opacity:0;max-height:0;pointer-events:none;transform:translateY(-4px)}
+    @media(prefers-reduced-motion:reduce) {body.song-specific,.sw-tab-panel.active,.song-inherit-wrapper > .style-field,
+      .song-inherit-wrapper > .btn-toggle,#song-bg-custom {animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+    body.song-specific .song-inherit-wrapper { display:flex; flex-direction:column;align-items:flex-start;gap:3px;margin:4px 6px 5px 0;min-width:70px; }
+    body.song-specific .song-inherit-control {display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);cursor:pointer;white-space:nowrap;}
+    body.song-specific .song-inherit-control input { accent-color:var(--accent); }
+    body.song-specific .style-row {align-items:flex-start;}
+    body.song-specific .song-inherit-wrapper > .style-field {margin-top:3px;}
+    body.song-specific #tab-verses {display:none!important;}
   </style>
 </head>
 <body>
@@ -905,6 +927,85 @@ let _programProfileRevision = null;
 let _activeTab    = 'verses';
 let _safeArea     = { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
 let _globalStyles = {};
+let _isSongEditor = false;
+let _songEnabledFields = new Set();
+let _songBackground = null;
+
+function resetSongSpecificControls() {
+  for (const wrap of document.querySelectorAll('.song-inherit-wrapper')) {
+    const control = wrap.lastElementChild;
+    if (control) wrap.replaceWith(control);
+  }
+  document.querySelector('.sw-tab[data-tab="song-background"]')?.remove();
+  document.getElementById('tab-song-background')?.remove();
+  const versesTab = document.querySelector('.sw-tab[data-tab="verses"]');
+  if (versesTab) versesTab.style.display = '';
+  _activeTab = 'verses';
+  document.querySelectorAll('.sw-tab').forEach(tab => tab.classList.toggle('active',tab.dataset.tab === 'verses'));
+  document.querySelectorAll('.sw-tab-panel').forEach(panel => panel.classList.toggle('active',panel.id === 'tab-verses'));
+}
+
+function installSongBackgroundTab(data) {
+  const verses = document.querySelector('.sw-tab[data-tab="verses"]');
+  if (verses) verses.style.display = 'none';
+  document.querySelector('.sw-tab[data-tab="songs"]')?.click();
+  const bar = document.querySelector('.sw-tab-bar');
+  let tab = bar.querySelector('[data-tab="song-background"]');
+  if (!tab) {
+    tab = document.createElement('button'); tab.className = 'sw-tab';
+    tab.dataset.tab = 'song-background'; tab.textContent = 'Song Background'; bar.appendChild(tab);
+    const panel = document.createElement('div');
+    panel.id = 'tab-song-background'; panel.className = 'sw-tab-panel';
+    panel.innerHTML = '<div class="style-section"><div class="style-section-title">Song-specific background</div><label class="song-inherit-control"><input type="checkbox" id="song-bg-inherit" checked> Keep original background</label><div id="song-bg-custom" class="is-inherited"><label for="song-bg-media">Background from Media Library</label><select id="song-bg-media" style="width:100%"></select></div></div>';
+    document.getElementById('controls-wrap').appendChild(panel);
+    tab.onclick = () => {
+      _activeTab = 'song-background';
+      document.querySelectorAll('.sw-tab').forEach(b => b.classList.toggle('active',b===tab));
+      document.querySelectorAll('.sw-tab-panel').forEach(p => p.classList.toggle('active',p===panel));
+    };
+    panel.querySelector('#song-bg-inherit').onchange = e => {
+      panel.querySelector('#song-bg-custom').classList.toggle('is-inherited',e.target.checked);
+    };
+  }
+  const select = document.getElementById('song-bg-media'); select.replaceChildren();
+  for (const medium of data.mediaChoices || []) {
+    const option = document.createElement('option');
+    option.value = medium.path; option.textContent = medium.label || medium.path;
+    select.appendChild(option);
+  }
+  const check = document.getElementById('song-bg-inherit');
+  check.checked = !_songBackground?.path;
+  if (_songBackground?.path) select.value = _songBackground.path;
+  document.getElementById('song-bg-custom').classList.toggle('is-inherited',check.checked);
+}
+
+function installSongInheritance() {
+  const sections = [...document.querySelectorAll('#tab-songs .style-section'),
+    ...document.querySelectorAll('#controls-wrap > .style-section')];
+  for (const section of sections) {
+    const controls = [...section.querySelectorAll('.style-field'),
+      ...section.querySelectorAll('.style-row > .btn-toggle')];
+    for (const control of controls) {
+      if (control.closest('.song-inherit-wrapper')) continue;
+      const input = control.id ? control : control.querySelector('[id]');
+      if (!input?.id) continue;
+      const key = input.id, wrap = document.createElement('div');
+      wrap.className = 'song-inherit-wrapper';
+      const label = document.createElement('label'); label.className = 'song-inherit-control';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+      checkbox.checked = !_songEnabledFields.has(key);
+      label.append(checkbox, document.createTextNode(' Keep original setting'));
+      control.parentNode.insertBefore(wrap,control); wrap.append(label,control);
+      wrap.classList.toggle('is-inherited', checkbox.checked);
+      checkbox.onchange = () => {
+        if (checkbox.checked) _songEnabledFields.delete(key); else _songEnabledFields.add(key);
+        wrap.classList.toggle('is-inherited', checkbox.checked);
+        onControlChange();
+      };
+    }
+  }
+}
+
 
 // â”€â”€ Utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function pathToFileURL(p) {
@@ -1860,12 +1961,18 @@ function resetSectionToDefault(section) {
 
 // â”€â”€ IPC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ipcRenderer.on('style-window-init', (event, data) => {
+  resetSongSpecificControls();
   localStyles = data.previewStyles ? { ...data.previewStyles } : {};
   _globalStyles = data.globalStyles ? { ...data.globalStyles } : {};
   initContent = data.content   || null;
   bgSnapshot  = data.bgSnapshot || null;
   _programProfileId = data.programProfileId || null;
   _programProfileRevision = data.programProfileRevision || null;
+  _isSongEditor = !!data.songEditor;
+  _songEnabledFields = new Set(data.songStyles?.enabled || []);
+  _songBackground = data.backgroundOverride || null;
+  if (_isSongEditor) localStyles = {...(data.globalStyles || {}),...(data.songStyles?.styles || {})};
+  document.body.classList.toggle('song-specific',_isSongEditor);
   _isPerDisplay = data.displayId != null || !!_programProfileId;
   _displayId    = data.displayId != null ? data.displayId : null;
   if (data.darkMode) document.body.classList.add('dark');
@@ -1876,6 +1983,11 @@ ipcRenderer.on('style-window-init', (event, data) => {
     document.title = `Text Styling - Window ${data.displayIndex}`;
   }
   populateControls();
+  if (_isSongEditor) {
+    document.title = 'Song Styles - ' + (data.songName || 'New Song');
+    installSongBackgroundTab(data);
+    installSongInheritance();
+  }
   rerenderCanvas();
 });
 
@@ -1991,6 +2103,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-save').addEventListener('click', async () => {
     readControlsToLocalStyles();
+    if (_isSongEditor) {
+      const inherit = document.getElementById('song-bg-inherit');
+      const media = document.getElementById('song-bg-media');
+      ipcRenderer.send('song-styles-changed', {
+        styles:{styles:{...localStyles},enabled:[..._songEnabledFields]},
+        backgroundOverride:(!inherit?.checked && media?.value) ? {path:media.value} : null
+      });
+      window.close(); return;
+    }
     if (_programProfileId) {
       try {
         await ipcRenderer.invoke('program-displays:save-window-styles',_programProfileId,{...localStyles},_programProfileRevision);

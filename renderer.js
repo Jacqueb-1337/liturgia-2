@@ -4,6 +4,51 @@ const fs = require('fs');
 const { LICENSE_SERVER } = require('./constants');
 const path = require('path');
 const { ipcRenderer, shell } = require('electron');
+const { createOperatorNotifications } = require('./lib/operatorNotifications');
+const { mergeSongStyles } = require('./lib/songStyleOverrides');
+const operatorNotifications = createOperatorNotifications({
+  doc: document,
+  storage: window.localStorage,
+  onAction: async (action, notification) => {
+    if (action === 'save-report') {
+      await ipcRenderer.invoke('trigger-save-report');
+      return;
+    }
+    if (action === 'repair-program-firewall') {
+      const status = await ipcRenderer.invoke('get-display-net-status', 0);
+      const result = await ipcRenderer.invoke('display-net-allow-firewall', 0, status?.port || 7777);
+      if (result?.active === true) {
+        operatorNotifications.resolve('program-firewall');
+        operatorNotifications.add({id:'firewall-repaired',title:'Network access configured',body:'The Program display firewall rules are verified.',severity:'success'});
+      } else {
+        operatorNotifications.add({id:'program-firewall',revision:String(Date.now()),title:'Network access needs attention',
+          body:result?.message || 'Windows could not repair the firewall rules.',severity:'warning',
+          actions:[{id:'repair-program-firewall',label:'Fix'}]});
+      }
+    }
+  }
+});
+window.liturgiaNotifications = operatorNotifications;
+ipcRenderer.on('operator-firewall-status', (_event, status) => {
+  if (status?.active === true) return operatorNotifications.resolve('program-firewall');
+  operatorNotifications.add({ id:'program-firewall',title:'Network access needs attention',
+    body:status?.message || 'Liturgia cannot verify Program output network access.',severity:'warning',
+    actions:[{id:'repair-program-firewall',label:'Fix'}] });
+});
+ipcRenderer.on('operator-message', (_event, message) => {
+  if (message?.id && message?.title) operatorNotifications.add({...message,origin:'liturgia'});
+});
+// Check once after the operator UI loads in case startup network diagnostics
+// completed before the renderer's notification listener was registered.
+window.addEventListener('DOMContentLoaded', () => {
+  ipcRenderer.invoke('get-display-net-status', 0).then(status => {
+    if (status?.running && status.firewall?.active !== true && status.firewall?.managed !== false) {
+      operatorNotifications.add({id:'program-firewall',title:'Network access needs attention',severity:'warning',
+        body:status.firewall?.message || 'Liturgia cannot verify the network display firewall rules.',
+        actions:[{id:'repair-program-firewall',label:'Fix'}]});
+    }
+  }).catch(() => {});
+});
 
 function selectUpdateAssetForPlatform(assets) {
   const list = Array.isArray(assets) ? assets : [];
@@ -1300,6 +1345,12 @@ function getCanvasStylesFor(type) {
   return map;
 }
 
+// Resolve per-song overrides one property at a time, retaining display/global defaults.
+function getSongCanvasStyles(overrides) {
+  return mergeSongStyles(getCanvasStylesFor('song'), overrides,
+    parseCanvasStyleFromB64, parseGlobalStyleFromB64);
+}
+
 // Build a { [displayId]: parsedStyles } map for per-display style overrides.
 // Returns null if no display has per-display styles enabled.
 function getPerDisplayStyleOverrides(type) {
@@ -2166,55 +2217,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // Listen for report requests from main and prepare renderer payload
   // Show a non-blocking toast when main process detects errors
-ipcRenderer.on('error-report-prompt', (event, data) => {
-  // De-duplicate: only one toast per session
-  if (document.getElementById('_err-report-toast')) return;
-
-  // Prefer errors passed from main process; fall back to renderer's own log
-  const passedErrors = data && Array.isArray(data.errors) && data.errors.length ? data.errors : null;
-  const rendererErrors = (window.appLogs || []).filter(l => l.level === 'error').map(l => `[${l.ts}] ${l.msg}`);
-  const allErrors = passedErrors || rendererErrors;
-  const errorText = allErrors.length ? allErrors.join('\n') : '(no error details captured)';
-
-  const toast = document.createElement('div');
-  toast.id = '_err-report-toast';
-  toast.style.cssText = [
-    'position:fixed', 'bottom:20px', 'right:20px', 'z-index:9999',
-    'border:1px solid #c0392b', 'border-radius:8px', 'padding:16px 18px',
-    'box-shadow:0 4px 24px rgba(0,0,0,0.45)', 'max-width:360px',
-    'backdrop-filter:blur(12px)', '-webkit-backdrop-filter:blur(12px)'
-  ].join(';');
-  toast.className = 'song-editor-panel'; // inherits theming (dark/light)
-  toast.innerHTML = `
-    <div style="font-weight:600;margin-bottom:6px;color:#e74c3c;">Errors detected</div>
-    <div style="font-size:0.9em;margin-bottom:8px;">One or more errors occurred. Save a diagnostic report to share with support?</div>
-    <div style="margin-bottom:10px;">
-      <button id="_err-toggle" style="background:none;border:none;padding:0;font-size:0.8em;cursor:pointer;color:#e74c3c;text-decoration:underline;">Show errors</button>
-      <pre id="_err-detail" style="display:none;margin-top:6px;font-size:0.75em;line-height:1.5;white-space:pre-wrap;word-break:break-all;overflow-y:auto;max-height:110px;background:rgba(0,0,0,0.2);border-radius:4px;padding:6px 8px;"></pre>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button id="_err-dismiss" class="btn">Dismiss</button>
-      <button id="_err-save" class="btn" style="background:#c0392b;color:#fff;">Save Report</button>
-    </div>
-  `;
-  document.body.appendChild(toast);
-
-  // Populate error text safely without innerHTML injection
-  toast.querySelector('#_err-detail').textContent = errorText;
-
-  let detailVisible = false;
-  toast.querySelector('#_err-toggle').addEventListener('click', () => {
-    detailVisible = !detailVisible;
-    toast.querySelector('#_err-detail').style.display = detailVisible ? 'block' : 'none';
-    toast.querySelector('#_err-toggle').textContent = detailVisible ? 'Hide errors' : 'Show errors';
-  });
-
-  const remove = () => { try { document.body.removeChild(toast); } catch (e) {} };
-  toast.querySelector('#_err-dismiss').addEventListener('click', remove);
-  toast.querySelector('#_err-save').addEventListener('click', async () => {
-    remove();
-    try { await ipcRenderer.invoke('trigger-save-report'); } catch (e) { console.error('Failed to trigger save report:', e); }
-  });
+ipcRenderer.on('error-report-prompt', (_event, data) => {
+  const errors = Array.isArray(data?.errors) && data.errors.length ? data.errors :
+    (window.appLogs || []).filter(l => l.level === 'error').map(l => '[' + l.ts + '] ' + l.msg);
+  operatorNotifications.add({id:'javascript-errors',revision:errors.join('\n').slice(0,800),
+    severity:'error',title:'Application errors detected',
+    body:'One or more JavaScript errors occurred. Save a diagnostic report to share with support.',
+    details:errors.length ? errors.join('\n') : '(no error details captured)',
+    actions:[{id:'save-report',label:'Save Report'}]});
 });
 
 ipcRenderer.on('prepare-renderer-report', async () => {
@@ -5668,7 +5678,9 @@ function getScheduleSongVerseText(songIndex, verseIndex) {
         return {
           title: song.title,
           section: section.section,
-          text: verse
+          text: verse,
+          styleOverrides: song.styleOverrides || null,
+          backgroundOverride: song.backgroundOverride || null
         };
       }
       currentIndex++;
@@ -6384,7 +6396,9 @@ function getSongVerseText(verseIndex) {
         return {
           title: song.title,
           section: section.section,
-          text: verse
+          text: verse,
+          styleOverrides: song.styleOverrides || null,
+          backgroundOverride: song.backgroundOverride || null
         };
       }
       currentIndex++;
@@ -6406,8 +6420,8 @@ async function updatePreviewFromSongVerse(verseIndex) {
   
   const previewCanvas = document.getElementById('preview-canvas');
   if (previewCanvas) {
-    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
-    const styles = getCanvasStylesFor('song');
+    const backgroundMedia = getBackgroundMedia(verseData.backgroundOverride?.path) || getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getSongCanvasStyles(verseData.styleOverrides);
     const songPreviewContent = {
       number: '',
       text: verseData.text,
@@ -6440,8 +6454,8 @@ async function updateLiveFromSongVerse(verseIndex) {
   
   const liveCanvas = document.getElementById('live-canvas');
   if (liveCanvas) {
-    const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
-    const styles = getCanvasStylesFor('song');
+    const backgroundMedia = getBackgroundMedia(verseData.backgroundOverride?.path) || getBackgroundMedia(defaultBackgrounds.songs);
+    const styles = getSongCanvasStyles(verseData.styleOverrides);
     window.currentContent = {
       type: 'song',
       number: '',
@@ -6466,7 +6480,7 @@ async function updateLiveFromSongVerse(verseIndex) {
     }
   }
   
-  const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+  const backgroundMedia = getBackgroundMedia(verseData.backgroundOverride?.path) || getBackgroundMedia(defaultBackgrounds.songs);
   const livePayload = {
     number: '',
     text: verseData.text,
@@ -6474,7 +6488,8 @@ async function updateLiveFromSongVerse(verseIndex) {
     showingCount: 1,
     totalSelected: 1,
     backgroundMedia: backgroundMedia,
-    styles: getCanvasStylesFor('song'),
+    styles: getSongCanvasStyles(verseData.styleOverrides),
+    _songEnabledFields: verseData.styleOverrides?.enabled || [],
     _displayStyleOverrides: getPerDisplayStyleOverrides('song') || undefined,
     transitionIn: transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out']
@@ -7011,7 +7026,10 @@ function editSong(songIndex) {
   if (modal && titleInput && authorInput && lyricsDiv) {
     // Store the index we're editing
     modal.setAttribute('data-editing-index', songIndex);
+    songStyleDraft = song.styleOverrides || {};
+    songBackgroundDraft = song.backgroundOverride || null;
     
+    prepareSongEditorOpening(modal);
     modal.style.display = 'flex';
     titleInput.value = song.title;
     authorInput.value = song.author || '';
@@ -7628,6 +7646,28 @@ function parseSongText(title, lyricsText) {
 }
 
 // ========== SONG EDITOR ==========
+let songEditorCloseTimer = null;
+function prepareSongEditorOpening(modal) {
+  clearTimeout(songEditorCloseTimer);
+  songEditorCloseTimer = null;
+  modal.classList.remove('song-editor-leaving');
+}
+let songStyleDraft = {};
+let songBackgroundDraft = null;
+ipcRenderer.on('song-styles-changed', (_event, change) => {
+  songStyleDraft = change?.styles || {};
+  songBackgroundDraft = change?.backgroundOverride || null;
+});
+function openSongStylesWindow() {
+  ipcRenderer.send('open-style-window', {
+    songEditor: true, songName: document.getElementById('song-editor-title')?.value || 'New Song',
+    songStyles: songStyleDraft, backgroundOverride: songBackgroundDraft,
+    previewStyles: {...previewStyles}, globalStyles: {...previewStyles},
+    mediaChoices: allMedia.filter(m => m?.path).map(m => ({path:m.path,label:m.name || m.title || path.basename(m.path),type:m.type})),
+    content: window.previewContent || null, darkMode: document.body.classList.contains('dark-theme'),bgSnapshot:null
+  });
+}
+
 
 function initSongEditor() {
   const modal = document.getElementById('song-editor-modal');
@@ -7760,31 +7800,7 @@ function initSongEditor() {
   }
   }
 
-  editStylesBtn.addEventListener('click', () => {
-    // Simple menu to choose which song style to edit
-    const menu = document.createElement('div');
-    menu.style.position = 'absolute';
-    menu.style.bottom = '60px';
-    menu.style.left = '20px';
-    menu.style.background = 'white';
-    menu.style.border = '1px solid #ccc';
-    menu.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-    menu.style.zIndex = 21000;
-    menu.style.padding = '8px';
-    menu.innerHTML = `<div style="padding:6px; cursor:pointer;">Edit Song Title Style</div>
-                      <div style="padding:6px; cursor:pointer;">Edit Song Text Style</div>
-                      <div style="padding:6px; cursor:pointer;">Edit Song Reference Style</div>`;
-    document.body.appendChild(menu);
-
-    const removeMenu = () => { if (menu && menu.parentNode) menu.parentNode.removeChild(menu); };
-
-    menu.children[0].addEventListener('click', () => { removeMenu(); showPopover('Song Title', 'songTitle'); });
-    menu.children[1].addEventListener('click', () => { removeMenu(); showPopover('Song Text', 'songText'); });
-    menu.children[2].addEventListener('click', () => { removeMenu(); showPopover('Song Reference', 'songReference'); });
-
-    // Close the menu on any click outside
-    setTimeout(() => document.addEventListener('click', removeMenu, { once: true }), 0);
-  });
+  editStylesBtn.addEventListener('click', openSongStylesWindow);
 
   // Keep editor fields explicitly focusable even if another handler changed focus state.
   if (modal) {
@@ -7793,19 +7809,14 @@ function initSongEditor() {
         ? e.target.closest('#song-editor-title, #song-editor-author, #song-editor-hymnal, #song-editor-page, #song-editor-lyrics')
         : null;
       if (field && modal.contains(field) && !field.disabled) {
-        requestAnimationFrame(() => focusSongEditorField(field));
+        // Native pointer focus must be left intact for text-selection dragging.
       }
     }, true);
   }
 
-  // Close on backdrop click
-  if (modal) {
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
-        closeSongEditor();
-      }
-    });
-  }
+  // Do not close by clicking the backdrop: releasing a selection outside
+  // the window may synthesize a backdrop click. Use X or Cancel.
+
 }
 
 function openSongEditor() {
@@ -7817,7 +7828,9 @@ function openSongEditor() {
   if (modal) {
     // Clear editing flag for new song
     modal.removeAttribute('data-editing-index');
-    
+    songStyleDraft = {};
+    songBackgroundDraft = null;
+    prepareSongEditorOpening(modal);
     modal.style.display = 'flex';
     if (titleInput) titleInput.value = '';
     if (authorInput) authorInput.value = '';
@@ -7843,9 +7856,18 @@ function focusSongEditorField(field) {
 
 function closeSongEditor() {
   const modal = document.getElementById('song-editor-modal');
-  if (modal) {
+  if (!modal || modal.style.display === 'none') return;
+  clearTimeout(songEditorCloseTimer);
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     modal.style.display = 'none';
+    return;
   }
+  modal.classList.add('song-editor-leaving');
+  songEditorCloseTimer = setTimeout(() => {
+    modal.style.display = 'none';
+    modal.classList.remove('song-editor-leaving');
+    songEditorCloseTimer = null;
+  }, 170);
 }
 
 
@@ -7975,7 +7997,9 @@ async function saveSongFromEditor() {
   const songData = {
     title,
     author: author || '',
-    lyrics: sections
+    lyrics: sections,
+    styleOverrides: {...(songStyleDraft || {})},
+    backgroundOverride: songBackgroundDraft || null
   };
   if (hymnalVal) songData.hymnal = hymnalVal;
   if (pageVal && !isNaN(pageVal)) songData.page = pageVal;
@@ -11503,8 +11527,8 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
           
           const liveCanvas = document.getElementById('live-canvas');
           if (liveCanvas) {
-            const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
-            const styles = getCanvasStylesFor('song');
+            const backgroundMedia = getBackgroundMedia(verseData.backgroundOverride?.path) || getBackgroundMedia(defaultBackgrounds.songs);
+            const styles = getSongCanvasStyles(verseData.styleOverrides);
             window.currentContent = {
               type: 'song',
               number: '',
@@ -11519,7 +11543,7 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
             renderToCanvas(liveCanvas, window.currentContent, width, height);
           }
           
-          const backgroundMedia = getBackgroundMedia(defaultBackgrounds.songs);
+          const backgroundMedia = getBackgroundMedia(verseData.backgroundOverride?.path) || getBackgroundMedia(defaultBackgrounds.songs);
           ipcRenderer.send('update-live-window', {
             number: '',
             text: verseData.text,
@@ -11527,7 +11551,8 @@ ipcRenderer.on('remote-command', async (event, { deviceId, deviceName, command, 
             showingCount: 1,
             totalSelected: 1,
             backgroundMedia: backgroundMedia,
-            styles: getCanvasStylesFor('song'),
+            styles: getSongCanvasStyles(verseData.styleOverrides),
+            _songEnabledFields: verseData.styleOverrides?.enabled || [],
             _displayStyleOverrides: getPerDisplayStyleOverrides('song') || undefined,
             transitionIn: transitionSettings['fade-in'],
             transitionOut: transitionSettings['fade-out']

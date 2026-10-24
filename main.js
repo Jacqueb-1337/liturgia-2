@@ -266,6 +266,7 @@ let streamProgramFirewallStatus = { success: false, active: null, message: 'Wind
 let displayNetBonjour = null;
 const displayNetBonjourServices = new Map();
 
+const { reapplySongOverridesAfterDisplay } = require('./lib/songStyleOverrides');
 // Merge per-display style overrides into a payload's styles object.
 // override is { text, number, title, reference, subscript, global } — any field may be null/undefined.
 function mergeStylesForDisplay(data, override) {
@@ -275,7 +276,7 @@ function mergeStylesForDisplay(data, override) {
     if (override[key] != null) merged[key] = override[key];
   }
   if (override.global != null) merged.global = { ...data.styles.global, ...override.global };
-  return { ...data, styles: merged };
+  return { ...data, styles: reapplySongOverridesAfterDisplay(merged, data.styles, data._songEnabledFields) };
 }
 let speechWindow = null;
 let aiSpeechWorkerWindow = null;
@@ -3202,9 +3203,11 @@ app.whenReady().then(async () => {
           if (displayId === 0 && process.platform === 'win32') {
             ensureProgramFirewall(port, app.getPath('exe')).then((status) => {
               streamProgramFirewallStatus = status;
+              if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operator-firewall-status', status);
               console.log('[network-display] Program firewall status:', status.message);
             }).catch((error) => {
               streamProgramFirewallStatus = { success: false, active: null, managed: true, message: error.message || 'Could not configure Windows Firewall.' };
+              if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operator-firewall-status', streamProgramFirewallStatus);
               console.warn('[network-display] Program firewall setup failed:', streamProgramFirewallStatus.message);
             });
           }
@@ -3880,6 +3883,11 @@ ipcMain.on('styles-changed', (event, newStyles) => {
   }
 });
 
+// Song style editor sends a draft back to the song editor, not global styles.
+ipcMain.on('song-styles-changed', (_event, draft) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('song-styles-changed', draft);
+});
+
 // Forward per-display style changes back to main renderer
 ipcMain.on('styles-changed-display', (event, { displayId, styles }) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -4350,6 +4358,7 @@ ipcMain.handle('display-net-start', async (_event, displayId, port) => {
   startDisplayNetServer(displayId, p);
   if (displayId === 0 && process.platform === 'win32') {
     streamProgramFirewallStatus = await ensureProgramFirewall(p, app.getPath('exe'));
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('operator-firewall-status', streamProgramFirewallStatus);
   }
   return { ok: true, port: p, firewall: displayId === 0 ? streamProgramFirewallStatus : null };
 });

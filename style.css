@@ -1428,6 +1428,25 @@ body.dark-theme .video-editor-section-note {
   display: flex !important;
 }
 
+/* The editor eases into place without animating presentation canvases. */
+@keyframes song-editor-backdrop-in {from {opacity:0} to {opacity:1}}
+@keyframes song-editor-panel-in {from {opacity:0;transform:translateY(20px) scale(.972)} to {opacity:1;transform:translateY(0) scale(1)}}
+@keyframes song-editor-backdrop-out {from {opacity:1} to {opacity:0}}
+@keyframes song-editor-panel-out {from {opacity:1;transform:translateY(0) scale(1)} to {opacity:0;transform:translateY(10px) scale(.985)}}
+#song-editor-modal {animation:song-editor-backdrop-in .18s ease-out both;}
+#song-editor-panel {animation:song-editor-panel-in .27s cubic-bezier(.16,1,.3,1) both;}
+#song-editor-modal.song-editor-leaving {animation:song-editor-backdrop-out .17s ease-in both;pointer-events:none;}
+#song-editor-modal.song-editor-leaving #song-editor-panel {animation:song-editor-panel-out .17s ease-in both;}
+#song-editor-panel button {transition:transform .15s ease,filter .15s ease,background-color .15s ease;}
+#song-editor-panel button:hover:not(:disabled) {filter:brightness(1.08);}
+#song-editor-panel button:active:not(:disabled) {transform:scale(.975);}
+#song-editor-preview {animation:song-editor-panel-in .2s ease-out both;}
+@media (prefers-reduced-motion:reduce) {
+  #song-editor-modal,#song-editor-panel,#song-editor-preview,#song-editor-panel button {
+    animation-duration:.01ms!important;transition-duration:.01ms!important;
+  }
+}
+
 #song-editor-panel {
   background: #fff;
   color: #000;
