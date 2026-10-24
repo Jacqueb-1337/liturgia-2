@@ -1,5 +1,12 @@
 # Changelog
 
+## 6.1.36 - 2026-10-23
+
+- feat: reuse the Media tab thumbnail grid for per-song backgrounds, including colors, gradients, images, GIFs, and videos
+- feat: add song background search and reuse the existing New Color editor while preserving inheritance
+- fix: restore the original splash GIF instead of the experimental GSAP vector animation
+- fix: restore notification pill saved position immediately at startup and refine elastic drag and unread badge motion
+
 ## 6.1.35 - 2026-10-23
 
 - fix: prevent repeated startup UAC prompts when Program display firewall verification fails; repair only when requested
