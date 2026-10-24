@@ -375,9 +375,20 @@
     .song-inherit-wrapper.is-inherited > .style-field,.song-inherit-wrapper.is-inherited > .btn-toggle {
       opacity:0;max-height:0;overflow:hidden;pointer-events:none;transform:translateY(-4px);margin:0;
     }
-    #song-bg-custom {opacity:1;max-height:150px;overflow:hidden;transform:translateY(0);
+    #song-bg-custom {opacity:1;max-height:500px;overflow:hidden;transform:translateY(0);
       transition:opacity .19s ease,max-height .24s ease,transform .2s ease;}
-    #song-bg-custom.is-inherited {opacity:0;max-height:0;pointer-events:none;transform:translateY(-4px)}
+    .song-bg-grid-label {display:block;margin:9px 0 6px;font-size:11px;color:var(--muted)}
+    #song-bg-search {width:100%;padding:7px 9px;border:1px solid var(--input-border);
+      border-radius:6px;background:var(--input-bg);color:var(--text);outline-offset:2px}
+    #song-bg-media-grid {overflow:auto;max-height:350px;min-height:110px;
+      border:1px solid var(--border);border-radius:7px;margin-top:7px;background:var(--surface)}
+    #song-bg-media-grid .media-item {background:transparent}
+    #song-bg-media-grid .media-item.selected {background:var(--hover);border-color:var(--accent)!important}
+    #song-bg-media-grid .media-item:hover {background:var(--hover)}
+    #song-bg-media-grid .media-item:focus-visible {outline:2px solid var(--accent);outline-offset:-2px}
+    #song-bg-media-grid .media-thumb {position:relative}
+    #song-bg-media-grid .media-item div[style*="background: #f0f0f0"] {background:var(--hover)!important}
+    #song-bg-media-grid .media-item div[style*="color: #666"] {color:var(--muted)!important}
     @media(prefers-reduced-motion:reduce) {body.song-specific,.sw-tab-panel.active,.song-inherit-wrapper > .style-field,
       .song-inherit-wrapper > .btn-toggle,#song-bg-custom {animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
@@ -945,6 +956,60 @@ function resetSongSpecificControls() {
   document.querySelectorAll('.sw-tab-panel').forEach(panel => panel.classList.toggle('active',panel.id === 'tab-verses'));
 }
 
+const {renderMediaLibraryGrid, supportsSongBackground} = require('./lib/mediaLibraryGrid');
+let _songBackgroundChoices = [];
+let _songBackgroundSelectedIndex = -1;
+
+function getSelectedSongBackground() {
+  const media = _songBackgroundChoices[_songBackgroundSelectedIndex];
+  if (!media || !supportsSongBackground(media)) return null;
+  if (media.type === 'COLOR') return {type:'COLOR', color:media.color};
+  return media.path ? {path:media.path} : null;
+}
+
+function renderSongBackgroundGrid() {
+  const grid = document.getElementById('song-bg-media-grid');
+  if (!grid) return;
+  const query = document.getElementById('song-bg-search')?.value || '';
+  const scrollTop = grid.scrollTop;
+  grid.innerHTML = renderMediaLibraryGrid({
+    allMedia:_songBackgroundChoices,
+    selectedMediaIndex:_songBackgroundSelectedIndex,
+    query, showCreateColor:true
+  });
+  grid.scrollTop = scrollTop;
+  for (const tile of grid.querySelectorAll('.media-item[data-index]')) {
+    const index = Number(tile.dataset.index);
+    tile.removeAttribute('draggable');
+    if (index === -1) {
+      const addColor = () => ipcRenderer.send('song-background-create-color');
+      tile.addEventListener('click', addColor);
+      tile.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); addColor(); }
+      });
+      tile.setAttribute('role','button');
+      tile.setAttribute('aria-label','Create new color or gradient in Media Library');
+      continue;
+    }
+    const select = () => {
+      _songBackgroundSelectedIndex = index;
+      const check = document.getElementById('song-bg-inherit');
+      check.checked = false;
+      renderSongBackgroundGrid();
+      grid.querySelector('.media-item.selected')?.focus({preventScroll:true});
+    };
+    tile.addEventListener('click', select);
+    tile.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        select();
+      }
+    });
+    tile.setAttribute('role','button');
+    tile.setAttribute('aria-pressed', String(index === _songBackgroundSelectedIndex));
+  }
+}
+
 function installSongBackgroundTab(data) {
   const verses = document.querySelector('.sw-tab[data-tab="verses"]');
   if (verses) verses.style.display = 'none';
@@ -956,27 +1021,33 @@ function installSongBackgroundTab(data) {
     tab.dataset.tab = 'song-background'; tab.textContent = 'Song Background'; bar.appendChild(tab);
     const panel = document.createElement('div');
     panel.id = 'tab-song-background'; panel.className = 'sw-tab-panel';
-    panel.innerHTML = '<div class="style-section"><div class="style-section-title">Song-specific background</div><label class="song-inherit-control"><input type="checkbox" id="song-bg-inherit" checked> Keep original background</label><div id="song-bg-custom" class="is-inherited"><label for="song-bg-media">Background from Media Library</label><select id="song-bg-media" style="width:100%"></select></div></div>';
+    panel.innerHTML = [
+      '<div class="style-section"><div class="style-section-title">Song-specific background</div>',
+      '<label class="song-inherit-control"><input type="checkbox" id="song-bg-inherit" checked> Keep original background</label>',
+      '<div id="song-bg-custom">',
+      '<label for="song-bg-search" class="song-bg-grid-label">Choose from Media Library</label>',
+      '<input type="search" id="song-bg-search" placeholder="Search backgrounds..." aria-label="Search media backgrounds">',
+      '<div id="song-bg-media-grid" aria-label="Song background media grid"></div>',
+      '</div></div>'
+    ].join('');
     document.getElementById('controls-wrap').appendChild(panel);
     tab.onclick = () => {
       _activeTab = 'song-background';
       document.querySelectorAll('.sw-tab').forEach(b => b.classList.toggle('active',b===tab));
       document.querySelectorAll('.sw-tab-panel').forEach(p => p.classList.toggle('active',p===panel));
     };
-    panel.querySelector('#song-bg-inherit').onchange = e => {
-      panel.querySelector('#song-bg-custom').classList.toggle('is-inherited',e.target.checked);
-    };
+    panel.querySelector('#song-bg-search').oninput = renderSongBackgroundGrid;
   }
-  const select = document.getElementById('song-bg-media'); select.replaceChildren();
-  for (const medium of data.mediaChoices || []) {
-    const option = document.createElement('option');
-    option.value = medium.path; option.textContent = medium.label || medium.path;
-    select.appendChild(option);
-  }
+  _songBackgroundChoices = (data.mediaChoices || []).filter(supportsSongBackground);
+  _songBackgroundSelectedIndex = _songBackgroundChoices.findIndex(media =>
+    _songBackground?.path
+      ? media.path === _songBackground.path
+      : _songBackground?.type === 'COLOR' && media.type === 'COLOR' &&
+        media.color === _songBackground.color
+  );
   const check = document.getElementById('song-bg-inherit');
-  check.checked = !_songBackground?.path;
-  if (_songBackground?.path) select.value = _songBackground.path;
-  document.getElementById('song-bg-custom').classList.toggle('is-inherited',check.checked);
+  check.checked = _songBackgroundSelectedIndex < 0;
+  renderSongBackgroundGrid();
 }
 
 function installSongInheritance() {
@@ -1960,6 +2031,18 @@ function resetSectionToDefault(section) {
 }
 
 // â”€â”€ IPC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ipcRenderer.on('song-background-media-updated', (_event, data) => {
+  if (!_isSongEditor) return;
+  _songBackgroundChoices = (data?.mediaChoices || []).filter(supportsSongBackground);
+  const index = _songBackgroundChoices.findIndex(item =>
+    item.type === 'COLOR' && item.color === data?.selectedColor);
+  if (index >= 0) {
+    _songBackgroundSelectedIndex = index;
+    const inherit = document.getElementById('song-bg-inherit');
+    if (inherit) inherit.checked = false;
+  }
+  renderSongBackgroundGrid();
+});
 ipcRenderer.on('style-window-init', (event, data) => {
   resetSongSpecificControls();
   localStyles = data.previewStyles ? { ...data.previewStyles } : {};
@@ -2105,10 +2188,9 @@ document.addEventListener('DOMContentLoaded', () => {
     readControlsToLocalStyles();
     if (_isSongEditor) {
       const inherit = document.getElementById('song-bg-inherit');
-      const media = document.getElementById('song-bg-media');
       ipcRenderer.send('song-styles-changed', {
         styles:{styles:{...localStyles},enabled:[..._songEnabledFields]},
-        backgroundOverride:(!inherit?.checked && media?.value) ? {path:media.value} : null
+        backgroundOverride: inherit?.checked ? null : getSelectedSongBackground()
       });
       window.close(); return;
     }

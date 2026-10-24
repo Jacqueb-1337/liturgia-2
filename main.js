@@ -3876,6 +3876,19 @@ ipcMain.on('open-style-window', (event, data) => {
   styleWindow.on('closed', () => { styleWindow = null; });
 });
 
+// Reuse the Media tab color editor for song-background creation rather than
+// introducing a second implementation in the styling window.
+ipcMain.on('song-background-create-color', (event) => {
+  if (!styleWindow || event.sender !== styleWindow.webContents || !mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.focus();
+  mainWindow.webContents.send('song-background-create-color');
+});
+ipcMain.on('song-background-media-updated', (event, payload) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !styleWindow || styleWindow.isDestroyed()) return;
+  styleWindow.webContents.send('song-background-media-updated', payload);
+  styleWindow.focus();
+});
+
 // Forward style changes from style-window back to main renderer
 ipcMain.on('styles-changed', (event, newStyles) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
