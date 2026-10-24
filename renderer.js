@@ -5,6 +5,8 @@ const { LICENSE_SERVER } = require('./constants');
 const path = require('path');
 const { ipcRenderer, shell } = require('electron');
 const { createOperatorNotifications } = require('./lib/operatorNotifications');
+const { renderUpdateChangelog } = require('./lib/updateReleaseNotes');
+const { createScheduleMotion } = require('./lib/scheduleMotion');
 const { renderMediaLibraryGrid, supportsSongBackground } = require('./lib/mediaLibraryGrid');
 const { mergeSongStyles } = require('./lib/songStyleOverrides');
 const { normalizeSongVerseViewMode, renderSongVerseCollection } = require('./lib/songVerseViews');
@@ -1845,7 +1847,7 @@ ipcRenderer.on('update-available', (event, res) => {
           note.style.marginTop = '8px';
           note.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-              <div style="flex:1">Update available: <strong>${info.latest||''}</strong></div>
+              <div style="flex:1">Update available: <strong></strong></div>
               <div style="display:flex;gap:8px">
                 <button class="btn small" data-action="open-release">Open Release</button>
                 <button class="btn small primary" data-action="download">Download</button>
@@ -1857,6 +1859,7 @@ ipcRenderer.on('update-available', (event, res) => {
             </div>
           `;
           targetCard.appendChild(note);
+          note.querySelector('strong').textContent = String(info.latest || '');
 
           note.querySelector('[data-action="open-release"]').onclick = () => { require('electron').shell.openExternal(info.html_url); };
           const downloadBtn = note.querySelector('[data-action="download"]');
@@ -1923,25 +1926,11 @@ ipcRenderer.on('update-available', (event, res) => {
           modal.id = 'update-modal';
           modal.className = 'update-overlay';
 
-          // Build changelog HTML: all versions newer than current, or fall back to latest body.
-          let changelogHtml = '';
-          const entries = (info.changelog && info.changelog.length) ? info.changelog
-            : (info.body ? [{ version: info.latest || '', body: info.body }] : []);
-          if (entries.length) {
-            changelogHtml = entries.map(e => {
-              const lines = (e.body || '').trim().split('\n')
-                .map(l => l.trim()).filter(Boolean)
-                .map(l => `<div class="update-cl-line">${l.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`)
-                .join('');
-              return `<div class="update-cl-version">${e.version.replace(/</g,'&lt;')}</div>${lines}`;
-            }).join('');
-          }
-
           modal.innerHTML = `
             <div class="setup-card">
-              <h2>Update available: ${info.latest || ''}</h2>
+              <h2>Update available</h2>
               <div class="update-changelog-wrap">
-                <div class="update-changelog-scroll">${changelogHtml || '<div style="color:var(--muted,#888)">No release notes.</div>'}</div>
+                <div class="update-changelog-scroll"></div>
               </div>
               <div style="margin-top:12px;display:flex;gap:8px;">
                 <button id="update-open-release" class="btn">Open Release Page</button>
@@ -1955,6 +1944,14 @@ ipcRenderer.on('update-available', (event, res) => {
             </div>
           `;
           document.body.appendChild(modal);
+          modal.querySelector('h2').textContent = 'Update available: ' + String(info.latest || '');
+          renderUpdateChangelog(modal.querySelector('.update-changelog-scroll'), info);
+          modal.querySelector('.update-changelog-scroll').addEventListener('click', event => {
+            const link = event.target.closest('a.update-cl-link');
+            if (!link) return;
+            event.preventDefault();
+            if (link.href.startsWith('https://')) require('electron').shell.openExternal(link.href);
+          });
           document.getElementById('update-open-release').onclick = () => { require('electron').shell.openExternal(info.html_url); };
           document.getElementById('update-dismiss').onclick = () => { modal.remove(); };
 
@@ -5075,12 +5072,20 @@ function addScheduleItem(indices) {
   saveScheduleToSettings();
 }
 
+let scheduleMotion = null;
 function renderSchedule() {
   const scheduleList = document.getElementById('schedule-list');
+  if (!scheduleMotion || scheduleMotion.list !== scheduleList) {
+    scheduleMotion?.destroy();
+    scheduleMotion = createScheduleMotion(scheduleList);
+    scheduleMotion.list = scheduleList;
+  }
+  const motionSnapshot = scheduleMotion.capture();
   scheduleList.innerHTML = '';
   
   if (scheduleItems.length === 0) {
     scheduleList.innerHTML = '<div class="schedule-empty-hint">Drag verses, songs, or media here.<br><span class="schedule-empty-sub">You can also open a .litsch file.</span></div>';
+    scheduleMotion.reconcile(motionSnapshot);
     return;
   }
   
@@ -5089,6 +5094,7 @@ function renderSchedule() {
     itemDiv.className = 'schedule-item';
     itemDiv.setAttribute('draggable', 'false');
     itemDiv.setAttribute('data-schedule-index', itemIndex);
+    itemDiv.dataset.motionId = scheduleMotion.keyFor(item);
     
     // Drag handlers for reordering
     itemDiv.addEventListener('dragstart', handleScheduleItemDragStart);
@@ -5322,6 +5328,7 @@ function renderSchedule() {
     
     scheduleList.appendChild(itemDiv);
   });
+  scheduleMotion.reconcile(motionSnapshot);
   
   // Re-focus the previously focused item after render
   if (focusedScheduleItem) {
@@ -5871,6 +5878,7 @@ function handleScheduleItemDrop(e) {
     renderSchedule();
   }
 
+  draggedScheduleIndex = null;
   clearScheduleDropIndicators();
 }
 
@@ -7702,14 +7710,23 @@ ipcRenderer.on('song-styles-changed', (_event, change) => {
 });
 ipcRenderer.on('song-background-create-color', () => openColorEditor());
 function openSongStylesWindow() {
+  const songName = document.getElementById('song-editor-title')?.value || 'New Song';
+  const rawLyrics = document.getElementById('song-editor-lyrics')?.value || '';
+  const songSample = rawLyrics.split(/\r?\n/).map(line => line.trim())
+    .filter(line => line && !/^\[.+\]$/.test(line)).slice(0,3).join('\n');
+  const background = getBackgroundMedia(songBackgroundDraft || defaultBackgrounds.songs);
   ipcRenderer.send('open-style-window', {
-    songEditor: true, songName: document.getElementById('song-editor-title')?.value || 'New Song',
+    songEditor: true, songName,
     songStyles: songStyleDraft, backgroundOverride: songBackgroundDraft,
     previewStyles: {...previewStyles}, globalStyles: {...previewStyles},
-    // The styling window uses the SAME Media tab tile builder and needs full
-    // records, including virtual COLOR/gradient items with no filesystem path.
     mediaChoices: allMedia.filter(supportsSongBackground).map(m => ({...m})),
-    content: window.previewContent || null, darkMode: document.body.classList.contains('dark-theme'),bgSnapshot:null
+    content: {
+      width: 1920, height: 1080,
+      text: songSample || 'Amazing grace, how sweet the sound\nThat saved a wretch like me',
+      reference: songName,
+      isSong: true, backgroundMedia: background
+    },
+    darkMode: document.body.classList.contains('dark-theme'), bgSnapshot:null
   });
 }
 

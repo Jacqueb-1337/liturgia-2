@@ -996,6 +996,7 @@ function renderSongBackgroundGrid() {
       const check = document.getElementById('song-bg-inherit');
       check.checked = false;
       renderSongBackgroundGrid();
+      rerenderCanvas();
       grid.querySelector('.media-item.selected')?.focus({preventScroll:true});
     };
     tile.addEventListener('click', select);
@@ -1008,6 +1009,27 @@ function renderSongBackgroundGrid() {
     tile.setAttribute('role','button');
     tile.setAttribute('aria-pressed', String(index === _songBackgroundSelectedIndex));
   }
+}
+
+function syncSongBackgroundControls() {
+  for (const [source,target,suffix] of [
+    ['ts-global-blur','song-bg-blur','px'],
+    ['ts-global-overlay','song-bg-overlay','%']
+  ]) {
+    const sourceEl=document.getElementById(source);
+    const targetEl=document.getElementById(target);
+    if (!sourceEl || !targetEl) continue;
+    targetEl.value=sourceEl.value;
+    const label=document.getElementById(target+'-val');
+    if (label)label.textContent=sourceEl.value+suffix;
+  }
+}
+
+function currentPreviewBackground() {
+  if (!_isSongEditor) return initContent?.backgroundMedia || null;
+  if (document.getElementById('song-bg-inherit')?.checked)
+    return initContent?.backgroundMedia || null;
+  return _songBackgroundChoices[_songBackgroundSelectedIndex] || initContent?.backgroundMedia || null;
 }
 
 function installSongBackgroundTab(data) {
@@ -1024,6 +1046,10 @@ function installSongBackgroundTab(data) {
     panel.innerHTML = [
       '<div class="style-section"><div class="style-section-title">Song-specific background</div>',
       '<label class="song-inherit-control"><input type="checkbox" id="song-bg-inherit" checked> Keep original background</label>',
+      '<div class="style-row song-bg-settings">',
+      '<div class="style-field"><label for="song-bg-blur">BG Blur</label><input type="range" id="song-bg-blur" min="0" max="20" step="1" value="0"><span class="range-val" id="song-bg-blur-val">0px</span></div>',
+      '<div class="style-field"><label for="song-bg-overlay">Overlay</label><input type="range" id="song-bg-overlay" min="0" max="100" step="1" value="40"><span class="range-val" id="song-bg-overlay-val">40%</span></div>',
+      '</div>',
       '<div id="song-bg-custom">',
       '<label for="song-bg-search" class="song-bg-grid-label">Choose from Media Library</label>',
       '<input type="search" id="song-bg-search" placeholder="Search backgrounds..." aria-label="Search media backgrounds">',
@@ -1037,6 +1063,26 @@ function installSongBackgroundTab(data) {
       document.querySelectorAll('.sw-tab-panel').forEach(p => p.classList.toggle('active',p===panel));
     };
     panel.querySelector('#song-bg-search').oninput = renderSongBackgroundGrid;
+    panel.querySelector('#song-bg-inherit').addEventListener('change', () => rerenderCanvas());
+    for (const [source,original,valueId,suffix] of [
+      ['song-bg-blur','ts-global-blur','song-bg-blur-val','px'],
+      ['song-bg-overlay','ts-global-overlay','song-bg-overlay-val','%']
+    ]) {
+      panel.querySelector('#'+source).addEventListener('input', event => {
+        const main = document.getElementById(original);
+        if (main) {
+          main.value = event.target.value;
+          document.getElementById(original+'-val').textContent = event.target.value+suffix;
+          const inherited = main.closest('.song-inherit-wrapper')?.querySelector('.song-inherit-control input');
+          if (inherited?.checked) {
+            inherited.checked = false;
+            inherited.dispatchEvent(new Event('change',{bubbles:true}));
+          }
+        }
+        document.getElementById(valueId).textContent = event.target.value+suffix;
+        onControlChange();
+      });
+    }
   }
   _songBackgroundChoices = (data.mediaChoices || []).filter(supportsSongBackground);
   _songBackgroundSelectedIndex = _songBackgroundChoices.findIndex(media =>
@@ -1048,6 +1094,7 @@ function installSongBackgroundTab(data) {
   const check = document.getElementById('song-bg-inherit');
   check.checked = _songBackgroundSelectedIndex < 0;
   renderSongBackgroundGrid();
+  syncSongBackgroundControls();
 }
 
 function installSongInheritance() {
@@ -1105,8 +1152,11 @@ function applyColorToCanvas(ctx, colorCSS, W, H) {
 }
 
 function drawImageCover(ctx, img, W, H) {
-  const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-  const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+  const iw = img.naturalWidth || img.videoWidth || img.width;
+  const ih = img.naturalHeight || img.videoHeight || img.height;
+  if (!iw || !ih) return;
+  const scale = Math.max(W / iw, H / ih);
+  const w = iw * scale, h = ih * scale;
   ctx.drawImage(img, (W-w)/2, (H-h)/2, w, h);
 }
 
@@ -1252,7 +1302,7 @@ function wireRange(rangeId, valId, suffix) {
   const r = document.getElementById(rangeId);
   const v = document.getElementById(valId);
   if (!r || !v) return;
-  const update = () => { v.textContent = r.value + suffix; onControlChange(); };
+  const update = () => { v.textContent = r.value + suffix; syncSongBackgroundControls(); onControlChange(); };
   r.addEventListener('input', update);
 }
 
@@ -1505,6 +1555,7 @@ function populateControls() {
   const g = globalFromB64(localStyles.global);
   setRange('ts-global-overlay', 'ts-global-overlay-val', Math.round(g.overlayOpacity * 100), '%');
   setRange('ts-global-blur',    'ts-global-blur-val',    g.bgBlur, 'px');
+  syncSongBackgroundControls();
   setActiveToggleGroup(['ts-global-vpos-top','ts-global-vpos-center','ts-global-vpos-bottom'], g.verticalPosition || 'center');
   const lhEl = document.getElementById('ts-global-lineheight');
   if (lhEl) lhEl.value = String(g.lineHeight);
@@ -1600,7 +1651,7 @@ function wrapTextWithSubscripts(ctx, segs, maxW, baseSize, subMult, fontFamily) 
 
 // â”€â”€ Main canvas render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function buildStylesObj() {
-  if (_activeTab === 'songs') {
+  if (_isSongEditor || _activeTab === 'songs') {
     return {
       text:      styleFromB64(localStyles.songText      || localStyles.verseText),
       title:     styleFromB64(localStyles.songTitle     || localStyles.verseNumber),
@@ -1618,7 +1669,12 @@ function buildStylesObj() {
   };
 }
 
+let songStylePreviewVideo = null;
+let songStylePreviewVideoPath = null;
+let songStyleVideoFailedPath = null;
+let styleCanvasRevision = 0;
 function renderContentToCanvas(canvas, content, stylesObj) {
+  const revision = styleCanvasRevision;
   const W = canvas.width, H = canvas.height;
   const ctx = canvas.getContext('2d');
   const gl = stylesObj.global || {};
@@ -1639,11 +1695,45 @@ function renderContentToCanvas(canvas, content, stylesObj) {
     const m = content.backgroundMedia;
     if (m.type === 'COLOR') {
       applyBg(() => applyColorToCanvas(ctx, m.color, W, H));
-    } else if (['JPG','JPEG','PNG','WEBP','BMP'].includes(m.type)) {
+    } else if (['JPG','JPEG','PNG','GIF','WEBP','BMP'].includes(m.type)) {
       const img = new Image();
-      img.onload = () => applyBg(() => drawImageCover(ctx, img, W, H));
+      img.onload = () => { if (revision === styleCanvasRevision) applyBg(() => drawImageCover(ctx, img, W, H)); };
       img.onerror = () => { ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H); renderText(); };
       img.src = pathToFileURL(m.path);
+      return;
+    } else if (['MP4','MOV','WEBM','OGG','AVI'].includes(m.type) && m.path) {
+      if (songStyleVideoFailedPath === m.path) {
+        ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H); renderText(); return;
+      }
+      // Use a loaded frame as a visual preview without starting playback.
+      // Reuse the element when only the blur/overlay settings change.
+      if (!songStylePreviewVideo || songStylePreviewVideoPath !== m.path) {
+        songStylePreviewVideo?.pause();
+        const video = document.createElement('video');
+        video.preload = 'auto';
+        video.muted = true;
+        video.playsInline = true;
+        songStylePreviewVideo = video;
+        songStylePreviewVideoPath = m.path;
+        video.onloadeddata = () => {
+          if (songStylePreviewVideo === video) rerenderCanvas();
+        };
+        video.onerror = () => {
+          if (songStylePreviewVideo === video) {
+            songStylePreviewVideo = null;
+            songStylePreviewVideoPath = null;
+            songStyleVideoFailedPath = m.path;
+            rerenderCanvas();
+          }
+        };
+        video.src = pathToFileURL(m.path);
+        video.load();
+      }
+      if (songStylePreviewVideo?.readyState >= 2) {
+        applyBg(() => drawImageCover(ctx, songStylePreviewVideo, W, H));
+      } else {
+        ctx.fillStyle='#111'; ctx.fillRect(0,0,W,H); renderText();
+      }
       return;
     } else if (bgSnapshot) {
       const img = new Image();
@@ -1835,9 +1925,11 @@ function rerenderCanvas() {
         text: 'For God so loved the world,\nthat he gave his only begotten Son',
         number: '16',
         reference: 'John 3:16' });
+  styleCanvasRevision++;
   canvas.width  = content.width  || 1920;
   canvas.height = content.height || 1080;
-  renderContentToCanvas(canvas, content, buildStylesObj());
+  const shown = _isSongEditor ? {...content,backgroundMedia:currentPreviewBackground()} : content;
+  renderContentToCanvas(canvas, shown, buildStylesObj());
   updateSafeAreaOverlay();
 }
 
@@ -1902,6 +1994,7 @@ function initSafeAreaDrag() {
 
 // â”€â”€ Control change â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function onControlChange() {
+  syncSongBackgroundControls();
   readControlsToLocalStyles();
   rerenderCanvas();
 }
@@ -2042,6 +2135,7 @@ ipcRenderer.on('song-background-media-updated', (_event, data) => {
     if (inherit) inherit.checked = false;
   }
   renderSongBackgroundGrid();
+  rerenderCanvas();
 });
 ipcRenderer.on('style-window-init', (event, data) => {
   resetSongSpecificControls();

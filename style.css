@@ -2111,6 +2111,23 @@ body.dark-theme .verse-item.selected {
   cursor: grabbing;
 }
 
+/* The drop slot responds while dragging; the schedule FLIP effect handles
+   the real movement as soon as the item is dropped. */
+.schedule-item-header { transition: background-color 140ms ease, translate 145ms ease; }
+.schedule-drop-before > .schedule-item-header { translate:0 -3px; }
+.schedule-drop-after > .schedule-item-header { translate:0 3px; }
+.schedule-motion-ghost {
+  transform-origin:center;
+  overflow:hidden;
+  box-shadow:0 5px 18px rgba(0,0,0,.17);
+}
+@media (prefers-reduced-motion: reduce) {
+  .schedule-item-header { transition:none; }
+  .schedule-drop-before > .schedule-item-header,
+  .schedule-drop-after > .schedule-item-header { translate:none; }
+}
+
+
 .schedule-item-header:focus {
   outline: 2px solid #0078d4;
   outline-offset: -2px;
@@ -3378,13 +3395,27 @@ body.dark-theme #song-display .song-verse-grid-item.selected {
 /* Dense text rows reuse the pre-existing verse blocks visuals and behavior. */
 #song-display .song-verse-compact-list { display:flex; flex-direction:column; gap:4px; }
 #song-display .song-verse-compact-list .song-verse-block {
+  display:flex; align-items:baseline; gap:4px;
   margin:0; padding:7px 10px; min-width:0; font-size:12px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  overflow:hidden; white-space:nowrap;
 }
-#song-display .song-verse-list-label { font-weight:650; }
-#song-display .song-verse-list-excerpt { font-weight:400; }
+#song-display .song-verse-list-label { font-weight:650; flex:none; }
+#song-display .song-verse-list-excerpt {
+  font-weight:400; flex:1; min-width:0;
+  overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+}
 #song-display [data-verse-index]:focus-visible {
   outline:2px solid var(--accent,#0078d4); outline-offset:2px;
 }
 #song-display .song-verse-block.selected:hover,
 body.dark-theme #song-display .song-verse-block.selected:hover { background:#0078d4; color:#fff; }
+
+/* Release notes can include Markdown links and long commit comparison URLs. */
+.update-cl-line { overflow-wrap:anywhere; margin:3px 0; }
+.update-cl-line strong { font-weight:700; opacity:1; }
+.update-cl-link { color:var(--accent,#42afff); text-decoration:underline; text-underline-offset:2px; }
+.update-cl-link:hover { text-decoration-thickness:2px; }
+.update-cl-bullet { padding-left:12px; }
+.update-changelog-scroll { -webkit-mask-image:none; mask-image:none; }
+.update-overlay .setup-card { max-width:min(620px,calc(100vw - 30px)); box-sizing:border-box; }
+.update-overlay .setup-card > div[style*="display:flex"] { flex-wrap:wrap; }

@@ -47,12 +47,17 @@ test('grid contains full verse text in responsive cards and section captions',()
   expect(host.querySelector('[data-verse-index="2"] .song-verse-grid-caption').textContent).toBe('Chorus');
 });
 
-test('compact list shows only opening words, escaping song content safely',()=>{
+test('compact list fills the available row with consecutive verse lines, rather than 40 characters',()=>{
   const host=render('list');
   expect(host.querySelectorAll('.song-verse-block')).toHaveLength(3);
   expect(host.textContent).toContain('Amazing grace how sweet the sound');
-  expect(host.textContent).not.toContain('That saved a wretch like me');
-  expect(host.textContent).not.toContain('And it keeps going to prove the entire verse text is retained.');
+  expect(host.textContent).toContain('That saved a wretch like me');
+  expect(host.textContent).toContain('And it keeps going to prove the entire verse text is retained.');
+  expect(host.querySelector('[data-verse-index="0"] .song-verse-list-excerpt').textContent)
+    .toContain('Verse (2): Another full verse with more words');
+  const css=fs.readFileSync(path.join(__dirname,'..','style.css'),'utf8');
+  expect(css).toContain('#song-display .song-verse-list-excerpt {');
+  expect(css).toContain('text-overflow:ellipsis;');
   const malicious=renderSongVerseCollection({lyrics:[{section:'A',text:'<img src=x onerror=alert(1)>'}]},{mode:'list'});
   const el=document.createElement('div');el.innerHTML=malicious;
   expect(el.querySelector('img')).toBeNull();
