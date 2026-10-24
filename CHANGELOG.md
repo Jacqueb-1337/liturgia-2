@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.1.35 - 2026-10-23
+
+- fix: prevent repeated startup UAC prompts when Program display firewall verification fails; repair only when requested
+- feat: add an operator notification center for multiple warnings, errors and status messages with Save Report and Fix actions
+- feat: add per-song style overrides with per-setting inheritance and a Media Library background override
+- fix: keep the song editor open during text-selection drags and replace the unreadable Edit Styles menu
+- style: animate notification and song-editing panels, cards, tabs and controls with reduced-motion support
+
 ## 6.1.30 - 2026-09-26
 
 - feat: add Liturgia Stream with persistent scenes, saved destinations, device persistence, encoder detection, RTMPS output, and output health
