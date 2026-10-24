@@ -5039,7 +5039,7 @@ function addMediaToSchedule(mediaIndex) {
   };
   
   scheduleItems.push(newItem);
-  renderSchedule();
+  renderSchedule({animateInitial:true});
   saveScheduleToSettings();
 }
 
@@ -5055,7 +5055,7 @@ function addSongToSchedule(songIndex) {
   };
   
   scheduleItems.push(newItem);
-  renderSchedule();
+  renderSchedule({animateInitial:true});
   saveScheduleToSettings();
 }
 
@@ -5068,12 +5068,12 @@ function addScheduleItem(indices) {
   };
   
   scheduleItems.push(newItem);
-  renderSchedule();
+  renderSchedule({animateInitial:true});
   saveScheduleToSettings();
 }
 
 let scheduleMotion = null;
-function renderSchedule() {
+function renderSchedule({animateInitial=false}={}) {
   const scheduleList = document.getElementById('schedule-list');
   if (!scheduleMotion || scheduleMotion.list !== scheduleList) {
     scheduleMotion?.destroy();
@@ -5085,7 +5085,7 @@ function renderSchedule() {
   
   if (scheduleItems.length === 0) {
     scheduleList.innerHTML = '<div class="schedule-empty-hint">Drag verses, songs, or media here.<br><span class="schedule-empty-sub">You can also open a .litsch file.</span></div>';
-    scheduleMotion.reconcile(motionSnapshot);
+    scheduleMotion.reconcile(motionSnapshot,{animateInitial});
     return;
   }
   
@@ -5220,6 +5220,8 @@ function renderSchedule() {
     if (itemLength > 1) {
       const versesDiv = document.createElement('div');
       versesDiv.className = 'schedule-item-verses' + (item.expanded ? ' expanded' : '');
+      versesDiv.setAttribute('aria-hidden', String(!item.expanded));
+      versesDiv.inert = !item.expanded;
       
       if (itemType === 'song') {
         // Render song verses
@@ -5328,7 +5330,7 @@ function renderSchedule() {
     
     scheduleList.appendChild(itemDiv);
   });
-  scheduleMotion.reconcile(motionSnapshot);
+  scheduleMotion.reconcile(motionSnapshot,{animateInitial});
   
   // Re-focus the previously focused item after render
   if (focusedScheduleItem) {

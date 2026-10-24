@@ -2198,6 +2198,10 @@ body.dark-theme .verse-item.selected {
   transform: rotate(90deg);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .expand-arrow { transition: none; }
+}
+
 .schedule-item-text {
   flex: 1;
   font-size: 13px;
@@ -2209,12 +2213,18 @@ body.dark-theme .verse-item.selected {
 }
 
 .schedule-item-verses {
-  padding: 0 0 5px 24px;
-  display: none;
+  padding: 0 0 0 24px;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .schedule-item-verses.expanded {
-  display: block;
+  padding-bottom: 5px;
+  height: auto;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .schedule-verse-item {

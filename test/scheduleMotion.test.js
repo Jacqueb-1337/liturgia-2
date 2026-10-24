@@ -39,6 +39,77 @@ test('stable identity, including duplicate item titles, never modifies saved sch
   expect(t.motions).toHaveLength(0); // ordinary selection/re-render
 });
 
+test('first user add animates from an uninitialized, initially empty schedule',()=>{
+  const t=rig(),first={name:'First verse group'};
+  // No prior render. User's first item must not be mistaken for bootstrap.
+  const before=t.manager.capture();
+  const card=document.createElement('div');
+  card.className='schedule-item';
+  card.dataset.motionId=t.manager.keyFor(first);
+  card.textContent=first.name;
+  t.list.appendChild(card);
+  t.manager.reconcile(before,{animateInitial:true});
+  expect(t.motions).toHaveLength(1);
+  expect(t.motions[0].params.opacity).toEqual([0,1]);
+  expect(t.motions[0].params.scale).toEqual([.975,1]);
+});
+
+test('loaded startup schedule still paints without unnecessary entrance animations',()=>{
+  const t=rig(),saved={name:'Persisted song'};
+  t.draw([saved],[0]);
+  expect(t.motions).toHaveLength(0);
+});
+
+test('opening and closing a nested group animates its actual height and verse children',()=>{
+  const t=rig();
+  const group={name:'Genesis 2:7-10',expanded:false};
+  const other={name:'Closing song'};
+  function drawNested(){
+    const before=t.manager.capture();
+    t.list.innerHTML='';
+    for(const item of [group,other]){
+      const card=document.createElement('div');
+      card.className='schedule-item';
+      card.dataset.motionId=t.manager.keyFor(item);
+      card.textContent=item.name;
+      card.getBoundingClientRect=()=>({top:item===group?0:200,left:0,width:300,height:38});
+      if(item===group){
+        const body=document.createElement('div');
+        body.className='schedule-item-verses'+(group.expanded?' expanded':'');
+        body.setAttribute('aria-hidden',String(!group.expanded));
+        body.inert=!group.expanded;
+        const visibleWhenRendered=group.expanded;
+        body.getBoundingClientRect=()=>({height:visibleWhenRendered?96:0});
+        Object.defineProperty(body,'scrollHeight',{value:96});
+        for(let i=0;i<3;i++){
+          const verse=document.createElement('div');
+          verse.className='schedule-verse-item';
+          verse.textContent='Verse '+(i+1);
+          body.appendChild(verse);
+        }
+        card.appendChild(body);
+      }
+      t.list.appendChild(card);
+    }
+    t.manager.reconcile(before);
+  }
+  drawNested();expect(t.motions).toHaveLength(0);
+  group.expanded=true;drawNested();
+  const expansion=t.motions.find(m=>m.node.classList.contains('schedule-item-verses'));
+  expect(expansion.params.height).toEqual([0,96]);
+  expect(expansion.params.opacity).toEqual([0,1]);
+  expect(t.motions.filter(m=>m.node.classList.contains('schedule-verse-item'))).toHaveLength(3);
+  expect(t.motions.some(m=>m.node.className==='schedule-item')).toBe(false);
+  expect(t.list.firstChild.querySelector('.schedule-item-verses').inert).toBe(false);
+  group.expanded=false;drawNested();
+  const collapse=t.motions.filter(m=>m.node.classList.contains('schedule-item-verses')).at(-1);
+  expect(collapse.params.height).toEqual([96,0]);
+  expect(collapse.params.opacity).toEqual([1,0]);
+  expect(t.list.firstChild.querySelector('.schedule-item-verses').inert).toBe(true);
+  // The new DOM and semantics are immediately collapsed, not delayed by motion.
+  expect(t.list.firstChild.querySelector('.schedule-item-verses').getAttribute('aria-hidden')).toBe('true');
+});
+
 test('new schedule items enter from below and existing cards slide into their new positions',()=>{
   const t=rig();
   const a={name:'Verse'},b={name:'Song'},c={name:'Media'};
@@ -92,11 +163,11 @@ test('quick successive reorder interrupts old animations and reduced motion skip
 test('renderer calls animation controller only around schedule DOM, not preview or live output',()=>{
   const fs=require('fs'),path=require('path');
   const source=fs.readFileSync(path.join(__dirname,'..','renderer.js'),'utf8');
-  const start=source.indexOf('function renderSchedule() {');
+  const start=source.indexOf('function renderSchedule({animateInitial=false}={}) {');
   const end=source.indexOf('\nfunction deleteScheduleItem(',start);
   const impl=source.slice(start,end);
   expect(impl).toContain('scheduleMotion.capture()');
   expect(impl).toContain('scheduleMotion.keyFor(item)');
-  expect(impl).toContain('scheduleMotion.reconcile(motionSnapshot)');
+  expect(impl).toContain('scheduleMotion.reconcile(motionSnapshot,{animateInitial})');
   expect(impl).not.toContain('set-live');
 });
