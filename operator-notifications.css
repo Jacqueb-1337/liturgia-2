@@ -17,7 +17,10 @@
   gap:9px;
   position:relative;
   isolation:isolate;
-  overflow:visible;
+  overflow:hidden;
+  box-sizing:border-box;
+  touch-action:pan-y;
+  user-select:none;
   border-radius:999px;
   border:1px solid var(--border,#aaa);
   box-shadow:0 3px 9px #0002;
@@ -30,7 +33,7 @@
   transition:border-color .18s ease,background-color .18s ease;
 }
 #liturgia-notification-button.has-unread {
-  border-color:color-mix(in srgb,var(--lnt-highlight) 65%,var(--border,#aaa));
+  border-color:var(--border,#aaa);
   box-shadow:0 3px 9px #0002;
 }
 #liturgia-notification-button:hover {
@@ -58,12 +61,20 @@
   width:18px;height:18px;
   z-index:1;
 }
-.lnt-icon-halo {
-  position:absolute;inset:0;
-  border:1.5px solid currentColor;
-  border-radius:50%;
-  opacity:0;
+.lnt-pill-shine {
+  position:absolute;
   pointer-events:none;
+  z-index:2;
+  top:-10%;
+  left:0;
+  height:120%;
+  width:38px;
+  opacity:0;
+  transform:skewX(-20deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.44),transparent);
+}
+#liturgia-notification-center.is-dragging #liturgia-notification-button {
+  cursor:grabbing;
 }
 .lnt-pill-label {
   font-size:12px;
@@ -71,15 +82,16 @@
   letter-spacing:.08px;
 }
 .lnt-pill-count {
-  display:grid;place-items:center;
-  flex:none;
-  min-width:20px;height:20px;padding:0 5px;
-  border-radius:999px;
-  background:var(--lnt-highlight);
-  color:white;
-  font-size:11px;
-  font-weight:750;
-  font-variant-numeric:tabular-nums;
+  display:block;
+  flex:0 0 11px;
+  width:11px;height:11px;
+  min-width:11px;min-height:11px;
+  padding:0;
+  border:0;
+  border-radius:50%;
+  background:#ec484d;
+  font-size:0;
+  line-height:0;
   transform-origin:center;
 }
 
@@ -236,7 +248,10 @@
 .lnt-footer-dot.is-urgent {background:#e7a52a}
 #liturgia-notification-center button:focus-visible,
 #liturgia-notification-center summary:focus-visible {
-  outline:2px solid #2686cf;outline-offset:2px;
+  outline:2px solid var(--border,#777);outline-offset:2px;
+}
+#liturgia-notification-button:focus-visible {
+  outline-color:#929292;
 }
 body.dark-theme #liturgia-notification-center {
   --surface:#252526;

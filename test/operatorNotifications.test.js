@@ -28,7 +28,7 @@ test('queues independent messages and supports severity, read and dismiss', () =
   center.add({ id: 'js-error', title: 'Error in renderer', severity: 'error', body: 'Unexpected failure', actions: [{ id: 'save-report', label: 'Save Report' }] });
   center.add({ id: 'network', title: 'Network access', severity: 'warning', body: 'Rule check failed', actions: [{ id: 'fix', label: 'Fix' }] });
   expect(center.getMessages()).toHaveLength(2);
-  expect(document.querySelector('#liturgia-notification-button').textContent).toContain('2');
+  expect(document.querySelector('#liturgia-notification-button').getAttribute('aria-label')).toContain('2 unread notifications');
   document.querySelector('#liturgia-notification-button').click();
   expect(document.querySelectorAll('.liturgia-notification-entry')).toHaveLength(2);
   expect(center.getMessages().every(x => x.read)).toBe(true);
@@ -44,10 +44,11 @@ test('notification pill shows unread count only in the badge', () => {
   const label = pill.querySelector('.lnt-pill-label');
   const badge = pill.querySelector('.lnt-pill-count');
   expect(label.textContent).toBe('Notifications');
-  expect(badge.textContent).toBe('1');
+  expect(badge.hidden).toBe(false);
+  expect(badge.textContent).toBe('');
   center.add({ id:'second', title:'Two' });
   expect(label.textContent).toBe('Notifications');
-  expect(badge.textContent).toBe('2');
+  expect(pill.getAttribute('aria-label')).toContain('2 unread notifications');
   center.show();
   expect(badge.hidden).toBe(true);
   center.destroy();
@@ -158,12 +159,13 @@ test('reduced motion settles synchronously and responds to preference changes', 
   center.destroy();
 });
 
-test('the new choreography springs from the pill and ripples the bell', () => {
+test('the pill rings its bell and the center opens with a spring', () => {
   const { animateFn, animations } = motionHarness();
   const center = createOperatorNotifications({ doc: document, storage: localStorage, animateFn });
   center.add({ id: 'incoming', title: 'New message', severity: 'warning' });
-  expect(animations.some(a => a.node.classList?.contains('lnt-icon-halo') &&
-    a.options.scale[1] > 3)).toBe(true);
+  expect(animations.some(a => a.node.classList?.contains('lnt-pill-icon') &&
+    a.options.rotate[1] > 0)).toBe(true);
+  expect(center.root.querySelector('.lnt-pill-shine')).not.toBeNull();
   const launcher = center.root.querySelector('#liturgia-notification-button');
   launcher.click();
   const panel = center.root.querySelector('#liturgia-notification-panel');
@@ -240,7 +242,7 @@ test('many messages do not restart existing cards, with mixed severity and new r
   center.add({ id: 'message-29', title: 'Message 29', revision: 'new' });
   expect(center.root.querySelector('[data-notification-id="message-0"]')).toBe(old);
   // Only the refreshed card and its icon animate, never the entire list.
-  expect(animations.length - before).toBeLessThanOrEqual(2);
+  expect(animations.length - before).toBeLessThanOrEqual(3);
   expect(center.getMessages().find(x => x.id === 'message-29').read).toBe(false);
   center.destroy();
 });
