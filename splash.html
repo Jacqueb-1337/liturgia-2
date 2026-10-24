@@ -10,7 +10,11 @@
     html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg1),var(--bg2));-webkit-font-smoothing:antialiased}
     .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px}
     .card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;border-radius:14px;background:transparent;} /* background was linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 10px 30px rgba(0,0,0,0.6) */
-    img.logo{width:190px;height:190px;border-radius:12px;object-fit:cover}
+    .logo-mark{position:relative;width:190px;height:190px;display:grid;place-items:center}
+    .flame-vector{display:block;width:190px;height:190px;overflow:visible}
+    .logo-fallback{width:190px;height:190px;border-radius:12px;object-fit:cover}
+    .logo-fallback[hidden]{display:none}
+    @media (prefers-reduced-motion:reduce){.motto .mask{transition:none!important}}
     .motto{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; color:#fff; font-weight:600; font-size:18px; position:relative; overflow:visible;}
     .motto .mask{display:inline-block; clip-path:inset(0 100% 0 0); transition:clip-path 900ms cubic-bezier(.2,.9,.2,1)}
     .motto.revealed .mask{clip-path:inset(0 0 0 0)}
@@ -33,7 +37,25 @@
 <body>
   <div class="wrap">
     <div class="card" id="card">
-      <img class="logo" src="loading.gif" alt="Liturgia">
+      <div class="logo-mark" role="img" aria-label="Liturgia flame logo">
+        <svg id="flame-logo" class="flame-vector" viewBox="0 0 160 190" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="boot-flame-fill" x1="0" y1="0" x2=".82" y2="1">
+              <stop offset="0" stop-color="#79b0dd"/>
+              <stop offset=".58" stop-color="#6da4d6"/>
+              <stop offset="1" stop-color="#5c91c8"/>
+            </linearGradient>
+            <mask id="boot-flame-cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="160" height="190">
+              <rect x="0" y="0" width="160" height="190" fill="#fff"/>
+              <path id="boot-flame-hollow" fill="#000" d="M 91 98 C 84 109 79 121 79 134 C 79 145 83 156 91 164 C 99 152 101 140 100 129 C 99 115 94 105 91 98 Z"/>
+            </mask>
+          </defs>
+          <g id="boot-flame-art">
+            <path id="boot-flame-body" fill="url(#boot-flame-fill)" mask="url(#boot-flame-cutout)" d="M 81 39 C 78 54 67 62 59 74 C 49 89 46 100 48 115 C 49 133 60 147 76 155 C 80 157 84 159 87 161 C 80 148 78 133 83 119 C 87 107 93 99 95 90 C 94 104 102 115 104 129 C 107 142 103 153 97 160 C 112 155 122 141 123 123 C 126 101 116 86 104 70 C 92 55 84 48 81 39 Z"/>
+          </g>
+        </svg>
+        <img class="logo-fallback" src="loading.gif" alt="" hidden>
+      </div>
       <div class="motto" id="motto"><span class="mask">Worship without distraction.</span></div>
       <div class="loader-container">
         <div class="loader" ><div class="bar" id="bar"></div></div>
@@ -43,6 +65,15 @@
   </div>
   <script>
     const { ipcRenderer } = require('electron');
+    // Kept independent of the operator renderer and its animation state.
+    try {
+      const {createFlameBoot} = require('./lib/flameBoot');
+      window.liturgiaBootFlame = createFlameBoot(document.getElementById('flame-logo'));
+    } catch (error) {
+      console.error('[splash] Vector flame initialization failed:', error);
+      document.getElementById('flame-logo').hidden = true;
+      document.querySelector('.logo-fallback').hidden = false;
+    }
     
     let currentProgress = 0;
     const bar = document.getElementById('bar');

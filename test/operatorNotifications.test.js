@@ -205,8 +205,10 @@ test('details expansion resizes the entire popover through its clipped viewport'
   const { animateFn, animations } = motionHarness();
   let notifyResize;
   window.ResizeObserver = class {
-    constructor(callback) { notifyResize = callback; }
-    observe() {}
+    constructor(callback) { this.callback = callback; }
+    observe(element) {
+      if (element.classList?.contains('lnt-panel-content')) notifyResize = this.callback;
+    }
     disconnect() {}
   };
   const center = createOperatorNotifications({ doc: document, storage: localStorage, animateFn });

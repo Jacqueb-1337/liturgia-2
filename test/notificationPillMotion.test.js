@@ -77,6 +77,23 @@ test('reading notifications shrinks and removes badge and stops periodic shine',
   t.obj.destroy();
 });
 
+test('saved position is painted before interaction and recalculated as badge width changes', () => {
+  localStorage.setItem(POSITION_KEY,'0.25');
+  const t = harness();
+  expect(t.bar.style.transform).toMatch(/translate3d\(-/);
+  const initial = t.bar.style.transform;
+  t.obj.syncUnread(0);
+  expect(t.bar.style.transform).not.toBe('translate3d(0px,0,0)');
+  expect(t.bar.style.transform).not.toBe(initial); // badge visibility changes measured width
+  t.obj.syncUnread(1);
+  const widthTween = t.plays.find(p => p.node === t.button && p.options.width);
+  expect(widthTween).toBeDefined();
+  expect(typeof widthTween.options.onUpdate).toBe('function');
+  widthTween.options.onUpdate();
+  expect(t.bar.style.transform).toMatch(/translate3d\(-/);
+  t.obj.destroy();
+});
+
 test('saved horizontal position is honored and panel follows launcher', () => {
   localStorage.setItem(POSITION_KEY,'0.25');
   const t=harness();
