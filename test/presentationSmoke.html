@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../style.css"></head><body style="background:#1b202a;color:white;margin:0">
+<div id="slide-preview" style="width:660px;height:395px;position:relative;"><canvas id="preview-canvas" width="1920" height="1080" style="width:100%;height:100%"></canvas>
+<div id="presentation-mini" class="presentation-mini" hidden><div id="presentation-slide-list" class="presentation-slide-list"></div><div class="presentation-mini-right"><div class="presentation-mini-stage"><img id="presentation-selected-preview"></div><div class="presentation-mini-footer"><span id="presentation-mini-label"></span><button id="presentation-preview-live">Go Live</button></div></div></div></div>
+<div id="slide-live" style="width:600px;height:340px;position:relative;"><canvas id="live-canvas" width="1920" height="1080" style="width:100%;height:100%"></canvas><div id="presentation-live-nav" class="presentation-live-nav" hidden><button id="presentation-prev">←</button><span id="presentation-live-count"></span><button id="presentation-next">→</button></div></div>
+<script>
+const {createPresentationRuntime}=require('../lib/presentationRuntime'),fs=require('fs'),path=require('path'),os=require('os');
+const {makePresentation,makeElement}=require('../lib/presentationSlides');
+const stored=[],liveCalls=[];
+const runtime=createPresentationRuntime({
+ getMedia:()=>stored,saveMedia:async()=>{},renderMediaGrid:()=>{},
+ showMediaLive:async(m)=>{liveCalls.push({...m});const canvas=document.getElementById('live-canvas'),img=new Image();img.onload=()=>{canvas.getContext('2d').drawImage(img,0,0,1920,1080)};img.src='file:///'+m.path.replace(/\\/g,'/');},
+ getUserData:async()=>path.join(os.tmpdir(),'liturgia-slide-player-test'),
+ reportError:e=>{throw e}
+});runtime.init();window.runtime=runtime;window.stored=stored;window.liveCalls=liveCalls;
+window.testImport=async()=>{
+ console.log('IMPORT_SMOKE_PARSING');
+ const deck=await require('electron').ipcRenderer.invoke('presentation:parse-pptx',path.join(__dirname,'fixtures','powerpoint-two-slides.pptx'));
+ console.log('IMPORT_SMOKE_PARSED',deck.slides.length);
+ const p=makePresentation('PowerPoint Fixture');p.source='pptx';p.slides=deck.slides;p.excludedDisplays=['network:0'];
+ console.log('IMPORT_SMOKE_MATERIALIZING');await runtime.materialize(p);console.log('IMPORT_SMOKE_MATERIALIZED');stored.push(p);
+ runtime.showPreview(p,0);
+ return {slideCount:p.slides.length,initialLabel:document.getElementById('presentation-mini-label').textContent,
+  paths:p.slides.map(s=>s.path),stepPaths:p.slides[0].stepPaths,
+  leftCount:document.querySelectorAll('.presentation-slide-tile').length};
+};
+window.testLive=async()=>{
+ await runtime.goLive(stored[0],0,0);
+ return {count:document.getElementById('presentation-live-count').textContent,navVisible:!document.getElementById('presentation-live-nav').hidden,liveCalls:liveCalls.length,excluded:liveCalls[0]._presentationExcludedDisplays};
+};
+window.testNative=async()=>{
+ const p=makePresentation('Native Fixture');p.slides[0].elements.push(makeElement('rectangle',{fill:'#ff0000',x:0,y:0,w:30,h:30,appearStep:1}));
+ await runtime.materialize(p);stored.push(p);
+ await runtime.goLive(p,0,0);
+ const first=liveCalls.at(-1).path;runtime.advance(true);
+ await new Promise(r=>setTimeout(r,100));
+ return {stepPaths:p.slides[0].stepPaths,first,next:liveCalls.at(-1).path,nav:document.getElementById('presentation-live-count').textContent};
+};
+</script></body></html>

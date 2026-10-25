@@ -8,6 +8,8 @@ const { createOperatorNotifications } = require('./lib/operatorNotifications');
 const { renderUpdateChangelog } = require('./lib/updateReleaseNotes');
 const { createScheduleMotion } = require('./lib/scheduleMotion');
 const { renderMediaLibraryGrid, supportsSongBackground } = require('./lib/mediaLibraryGrid');
+const {createPresentationRuntime}=require('./lib/presentationRuntime');
+let presentationRuntime=null;
 const { mergeSongStyles } = require('./lib/songStyleOverrides');
 const { normalizeSongVerseViewMode, renderSongVerseCollection } = require('./lib/songVerseViews');
 const operatorNotifications = createOperatorNotifications({
@@ -4070,6 +4072,14 @@ async function handleVerseClick(i, e) {
 }
 
 async function handleVerseDoubleClick(i) {
+  if((i===undefined||i===null)&&currentTab==='media'&&selectedMediaIndex!==null&&
+      allMedia[selectedMediaIndex]?.type==='PRESENTATION'){
+    const state=presentationRuntime?.preview;
+    const media=allMedia[selectedMediaIndex];
+    return presentationRuntime.goLive(media,state?.media===media?state.index:0,0);
+  }
+  presentationRuntime?.hideLive();
+
   // Media tab: go live with the selected media item
   if (currentTab === 'media') {
     if (selectedMediaIndex !== null && allMedia[selectedMediaIndex]) {
@@ -5115,8 +5125,10 @@ function renderSchedule({animateInitial=false}={}) {
     header.appendChild(dragHandle);
     
     const itemType = item.type || 'verses'; // Default to verses for backwards compatibility
-    const itemLength = itemType === 'song' ? getSongVerseCount(item.songIndex) : 
-                       itemType === 'media' ? 1 : 
+    const itemLength = itemType === 'song' ? getSongVerseCount(item.songIndex) :
+                       itemType === 'media'
+                         ? (allMedia[item.mediaIndex]?.type==='PRESENTATION'
+                           ? (allMedia[item.mediaIndex]?.slides?.length||1) : 1) :
                        item.indices.length;
     
     // Arrow icon (only show if more than 1 verse)
@@ -5144,7 +5156,9 @@ function renderSchedule({animateInitial=false}={}) {
     if (itemType === 'song') {
       iconDiv.innerHTML = '<i class="fa-solid fa-music" aria-hidden="true"></i>';
     } else if (itemType === 'media') {
-      iconDiv.innerHTML = '<i class="fa-solid fa-image" aria-hidden="true"></i>';
+      iconDiv.innerHTML = allMedia[item.mediaIndex]?.type==='PRESENTATION'
+        ? '<i class="fa-solid fa-file-powerpoint" aria-hidden="true"></i>'
+        : '<i class="fa-solid fa-image" aria-hidden="true"></i>';
     } else {
       iconDiv.innerHTML = '<i class="fa-solid fa-book" aria-hidden="true"></i>';
     }
@@ -5223,7 +5237,35 @@ function renderSchedule({animateInitial=false}={}) {
       versesDiv.setAttribute('aria-hidden', String(!item.expanded));
       versesDiv.inert = !item.expanded;
       
-      if (itemType === 'song') {
+      if(itemType==='media'&&allMedia[item.mediaIndex]?.type==='PRESENTATION') {
+        const deck=allMedia[item.mediaIndex];
+        deck.slides.forEach((slide,slideIndex)=>{
+          const row=document.createElement('div');
+          row.className='schedule-verse-item';
+          row.tabIndex=0;
+          row.setAttribute('aria-label','Slide '+(slideIndex+1)+': '+(slide.name||''));
+          const icon=document.createElement('span');icon.className='schedule-verse-icon';
+          icon.innerHTML='<i class="fa-solid fa-file-powerpoint" aria-hidden="true"></i>';
+          const text=document.createElement('span');text.className='schedule-verse-text';
+          text.textContent=(slideIndex+1)+'. '+(slide.name||'Slide');
+          row.append(icon,text);
+          row.onclick=event=>{
+            event.stopPropagation();
+            selectedMediaIndex=item.mediaIndex;
+            switchTab('media');renderMediaGrid();
+            presentationRuntime?.showPreview(deck,slideIndex);
+          };
+          row.ondblclick=event=>{
+            event.stopPropagation();
+            void presentationRuntime?.goLive(deck,slideIndex,0);
+          };
+          row.addEventListener('keydown',event=>{
+            if(event.key==='Enter'){event.preventDefault();event.stopPropagation();
+              void presentationRuntime?.goLive(deck,slideIndex,0);}
+          });
+          versesDiv.append(row);
+        });
+      } else if (itemType === 'song') {
         // Render song verses
         const song = allSongs[item.songIndex];
         if (song) {
@@ -6490,6 +6532,7 @@ async function updatePreviewFromSongVerse(verseIndex) {
 }
 
 async function updateLiveFromSongVerse(verseIndex) {
+  presentationRuntime?.hideLive();
   hideVideoLiveBar();
   // Stop website mirror if it was active before pushing song content
   hideWebsiteLivePanel(true);
@@ -8116,6 +8159,16 @@ async function loadMedia() {
       defaultBackgrounds = mediaData.defaultBackgrounds || { songs: null, verses: null };
     }
     
+    if(!presentationRuntime) {
+      presentationRuntime=createPresentationRuntime({
+        getMedia:()=>allMedia,saveMedia,renderMediaGrid,
+        selectMedia:index=>{selectedMediaIndex=index;},
+        showMediaLive:displayMediaOnLive,
+        getUserData:()=>ipcRenderer.invoke('get-user-data-path'),
+        reportError:error=>{console.error('[presentation]',error);showAppToast(error.message||String(error),'error');}
+      });
+      presentationRuntime.init();
+    }
     renderMediaGrid();
     initMediaHandlers();
   } catch (err) {
@@ -8174,6 +8227,14 @@ function initMediaHandlers() {
       if (addMenu.style.display === 'block') positionAddMenu();
     });
 
+    document.getElementById('media-add-menu-pptx').addEventListener('click', () => {
+      addMenu.style.display='none';
+      void presentationRuntime.importPptx();
+    });
+    document.getElementById('media-add-menu-slides').addEventListener('click', () => {
+      addMenu.style.display='none';
+      presentationRuntime.openEditor();
+    });
     document.getElementById('media-add-menu-files').addEventListener('click', () => {
       addMenu.style.display = 'none';
       importMediaFiles();
@@ -8382,7 +8443,13 @@ function renderMediaGrid() {
       console.log('Media item clicked:', media);
       if (media) {
         displayMediaOnPreview(media);
-        renderMediaGrid(); // Re-render to show selection
+        // Update selection in-place. Destroying the clicked media DOM node
+        // prevents the browser from delivering its second-click dblclick.
+        document.querySelectorAll('#media-display .media-item').forEach(tile=>{
+          const selected=Number(tile.dataset.index)===index;
+          tile.classList.toggle('selected',selected);
+          tile.style.borderColor=selected?'#0078d4':'transparent';
+        });
       }
     });
     
@@ -8441,6 +8508,12 @@ function showMediaContextMenu(x, y) {
     document.getElementById('media-context-edit').addEventListener('click', () => {
       if (selectedMediaIndex !== null) {
         const media = allMedia[selectedMediaIndex];
+        if (media.type === 'PRESENTATION') {
+          if (media.source==='native')presentationRuntime.openEditor(media,selectedMediaIndex);
+          else void presentationRuntime.editExclusions(media);
+          menu.style.display='none';
+          return;
+        }
         const isImage = ['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP', 'BMP'].includes(media.type);
         const isVideo = ['MP4', 'WEBM', 'OGG', 'MOV', 'AVI'].includes(media.type);
         const isColor   = media.type === 'COLOR';
@@ -8536,7 +8609,7 @@ function showMediaContextMenu(x, y) {
 
   // Hide bg-setting items for WEBSITE media (cannot be used as slide background)
   const _selectedM = selectedMediaIndex !== null ? allMedia[selectedMediaIndex] : null;
-  const isWebsiteSelected = _selectedM && (_selectedM.type === 'WEBSITE' || _selectedM.type === 'ANNOUNCEMENT');
+  const isWebsiteSelected = _selectedM && (_selectedM.type === 'WEBSITE' || _selectedM.type === 'ANNOUNCEMENT' || _selectedM.type === 'PRESENTATION');
   ['media-context-bg-songs', 'media-context-bg-verses', 'media-context-reset-songs', 'media-context-reset-verses'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = isWebsiteSelected ? 'none' : '';
@@ -10591,6 +10664,8 @@ function setObsWidgetCanvasPreview(side, media = null) {
 }
 
 function displayMediaOnPreview(media) {
+  if(media?.type==='PRESENTATION')return presentationRuntime?.showPreview(media,0);
+  presentationRuntime?.hidePreview();
   console.log('displayMediaOnPreview called with:', media);
 
   // Kill any running video draw-loop from a previous video preview.
@@ -10890,6 +10965,8 @@ function initVideoLiveBar() {
 }
 
 async function displayMediaOnLive(media) {
+  if(media?.type==='PRESENTATION')return presentationRuntime?.goLive(media,0,0);
+  if(!media?._presentationDeckId)presentationRuntime?.hideLive();
   if (media.type !== 'OBS_WIDGET') setObsWidgetCanvasPreview('live', null);
   // Ensure the live window exists and liveMode is active — same as handleVerseDoubleClick
   if (!liveMode) {
@@ -11009,8 +11086,12 @@ async function displayMediaOnLive(media) {
     videoRepeat: media.videoRepeat !== undefined ? media.videoRepeat : 0,
     playbackSpeed: media.playbackSpeed || 1,
     gifRepeat: media.gifRepeat !== undefined ? media.gifRepeat : 0,
-    transitionIn: transitionSettings['fade-in'],
+    transitionIn: media._presentationTransition
+      ? {type:media._presentationTransition.type==='none'?'none':'fade',duration:(media._presentationTransition.duration||400)/1000}
+      : transitionSettings['fade-in'],
     transitionOut: transitionSettings['fade-out'],
+    isPresentationSlide: !!media._presentationDeckId,
+    presentationExcludedDisplays: media._presentationExcludedDisplays||[],
     isMedia: true
   };
   window._lastLiveUpdateData = _liveUpdatePayload;

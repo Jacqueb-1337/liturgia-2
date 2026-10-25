@@ -1,5 +1,18 @@
 # Changelog
 
+## 6.1.37 - 2026-10-25
+
+- feat: import PowerPoint PPTX files using JavaScript OOXML parsing and HTML/SVG rendering without Microsoft PowerPoint or Windows Office APIs
+- feat: treat presentations as one Media item with slide-one default, a scrollable thumbnail mini-player in Preview, and single-click Preview or double-click Go Live
+- feat: expand presentations into individual slide rows within Schedule with independent preview and live actions
+- feat: add operator-only Previous and Next controls on the live canvas for slide navigation and click-driven reveal steps
+- feat: add an integrated Slide Creator with editable text, shapes, images, drag-and-resize layout, slide ordering and transitions
+- feat: support per-presentation exclusions for physical monitors, network outputs and Liturgia Stream
+- fix: preserve media tile and slide thumbnail DOM between clicks so double-click reliably sends content live
+- fix: render actual per-version release notes in the updater and publish meaningful changelogs from CI
+- fix: animate the first Schedule insertion and expanded nested verses consistently
+- test: cover presentation serialization, step navigation, display routing and Electron slide player and creator interactions
+
 ## 6.1.36 - 2026-10-23
 
 - feat: reuse the Media tab thumbnail grid for per-song backgrounds, including colors, gradients, images, GIFs, and videos

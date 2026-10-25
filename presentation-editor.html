@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Liturgia Slide Creator</title>
+<style>
+:root{color-scheme:dark;font-family:Segoe UI,system-ui,sans-serif;background:#151923;color:#eef2f7}
+*{box-sizing:border-box}body{margin:0;height:100vh;display:flex;flex-direction:column;font-size:13px}
+header{height:56px;display:flex;align-items:center;gap:12px;padding:0 18px;background:#1f2530;border-bottom:1px solid #323b4a}
+header h1{font-size:17px;font-weight:600;margin:0}header input{width:240px}button{background:#303b4c;color:#edf3ff;border:1px solid #46536a;border-radius:6px;padding:8px 11px;cursor:pointer}
+button:hover{background:#43546a}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #72b6ff}
+button.primary{background:#1671c8;border-color:#3695ed}input,select,textarea{font:inherit;color:#f5f8ff;background:#222d3d;border:1px solid #46536a;padding:8px;border-radius:5px}
+main{flex:1;display:grid;grid-template-columns:180px minmax(0,1fr) 240px;min-height:0}
+aside{padding:14px;overflow:auto;background:#202735}aside.left{border-right:1px solid #364152}aside.right{border-left:1px solid #364152}
+#slide-list{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.slide-tile{background:#131c2d;border:1px solid #43526b;padding:5px;border-radius:6px;cursor:pointer}
+.slide-tile.active{border-color:#73b6ff;box-shadow:0 0 0 1px #73b6ff}
+.slide-tile .slide-thumb{aspect-ratio:16/9;position:relative;overflow:hidden;background:#14243b}
+.slide-tile svg{width:100%;height:100%} .slide-tile-label{font-size:11px;margin:4px 2px}
+.center{min-width:0;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px;background:#171d28}
+#tools{display:flex;gap:7px;flex-wrap:wrap}
+#stage-wrap{width:100%;max-width:1000px;aspect-ratio:16/9;align-self:center;margin:auto;position:relative;box-shadow:0 12px 35px #000a}
+#stage{position:absolute;inset:0;background:#14243b;overflow:hidden;touch-action:none}
+#stage svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.slide-element{position:absolute;cursor:grab;border:1px solid transparent;overflow:hidden;display:flex;align-items:flex-start;justify-content:flex-start;white-space:pre-wrap;overflow-wrap:anywhere;user-select:none}
+.slide-element.active{border:2px solid #75bdff;box-shadow:0 0 0 2px #111a}
+.slide-element:active{cursor:grabbing}
+.slide-element .resize-handle{display:none;position:absolute;right:0;bottom:0;width:13px;height:13px;background:#75bdff;border-radius:3px;cursor:nwse-resize}
+.slide-element.active .resize-handle{display:block}
+.field{display:grid;gap:5px;margin:10px 0}label{color:#c0cddd;font-size:12px}
+.field input,.field select,.field textarea{width:100%}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+h3{font-size:13px;margin:8px 0 12px}
+#display-exclusions{display:grid;gap:7px}
+#display-exclusions label{display:flex;align-items:center;gap:7px;font-size:12px}
+#display-exclusions input{width:auto}
+footer{height:54px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 16px;border-top:1px solid #364152;background:#1f2530}
+#status{font-size:12px;color:#a8bdce}#inspector-empty{color:#92a4ba}
+@media(max-width:850px){main{grid-template-columns:135px minmax(0,1fr) 195px}#stage-wrap{max-width:95%}}
+</style></head><body>
+<header><h1>Slide Creator</h1><input id="deck-title" aria-label="Presentation name" value="New Presentation"><span style="flex:1"></span><button id="add-slide">+ Slide</button><button id="duplicate-slide">Duplicate</button><button id="delete-slide">Delete Slide</button></header>
+<main><aside class="left"><h3>Slides</h3><div id="slide-list"></div></aside>
+<section class="center"><div id="tools">
+<button data-add="text">+ Text</button><button data-add="rectangle">+ Rectangle</button><button data-add="ellipse">+ Circle</button><button id="add-image">+ Image</button><input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" hidden>
+<span style="flex:1"></span><button id="delete-element">Delete element</button>
+</div><div id="stage-wrap"><div id="stage"></div></div><div style="font-size:12px;color:#a4b5c8;text-align:center">Drag to move elements. Drag the blue corner to resize. Set a Reveal step to show an element on a later Next press.</div></section>
+<aside class="right"><h3>Slide properties</h3>
+<div class="field"><label for="slide-name">Slide name</label><input id="slide-name"></div>
+<div class="field"><label for="slide-bg">Background</label><input type="color" id="slide-bg" value="#14243b"></div>
+<div class="field"><label for="slide-transition">Incoming transition</label><select id="slide-transition"><option value="fade">Fade</option><option value="wipe">Wipe</option><option value="push">Push</option><option value="none">None</option></select></div>
+<div class="field"><label for="slide-duration">Duration (ms)</label><input type="number" min="0" max="5000" step="50" id="slide-duration" value="400"></div>
+<hr style="border:0;border-top:1px solid #384352;margin:18px 0">
+<h3>Selected element</h3><div id="inspector-empty">Select an element to edit.</div><div id="element-fields" hidden>
+<div class="field"><label>Text</label><textarea id="el-text" rows="4"></textarea></div>
+<div class="pair"><div class="field"><label>Text color</label><input type="color" id="el-color"></div><div class="field"><label>Fill</label><input type="color" id="el-fill"></div></div>
+<div class="pair"><div class="field"><label>Font size</label><input type="number" id="el-font" min="10" max="180"></div><div class="field"><label>Reveal step</label><input type="number" id="el-step" min="0" max="50"></div></div>
+</div><hr style="border:0;border-top:1px solid #384352;margin:18px 0">
+<h3>Exclude displays</h3><p style="font-size:11px;color:#a7b8ce">Checked outputs will not show this presentation, including network and Stream displays.</p><div id="display-exclusions"></div>
+</aside></main>
+<footer><span id="status">Ready</span><div style="display:flex;gap:8px"><button id="cancel">Cancel</button><button class="primary" id="save">Save Presentation</button></div></footer>
+<script src="presentation-editor.js"></script>
+</body></html>

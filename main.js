@@ -1250,6 +1250,66 @@ function applySettingsPatch(patch) {
   return _settingsUpdateQueue;
 }
 
+// PowerPoint and native Liturgia slide presentations share a lightweight
+// editor window. Main owns output discovery, renderer owns media persistence.
+let presentationEditorWindow = null;
+ipcMain.handle('presentation:materialize',async (event,media)=>{
+  if(!mainWindow || event.sender!==mainWindow.webContents)throw Error('Unauthorized presentation');
+  const {getUserDataDir}=require('./lib/paths');
+  return require('./lib/presentationRasterizer').materializePresentation(media,getUserDataDir(app));
+});
+ipcMain.handle('presentation:parse-pptx',async (event,filePath)=>{
+  if(!mainWindow || event.sender!==mainWindow.webContents)throw Error('Unauthorized presentation import');
+  const absolute=path.resolve(String(filePath||''));
+  if(path.extname(absolute).toLowerCase()!=='.pptx')throw Error('Select a .pptx file');
+  const stat=await fs.promises.stat(absolute);
+  if(stat.size>100*1024*1024)throw Error('PowerPoint file exceeds 100 MB');
+  return require('./lib/presentationImport').parsePptx(absolute);
+});
+
+ipcMain.on('presentation-editor:open', async (event, detail={}) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  if (presentationEditorWindow && !presentationEditorWindow.isDestroyed()) {
+    presentationEditorWindow.focus();return;
+  }
+  const outputs=[];
+  for(const [i,d] of screen.getAllDisplays().entries()){
+    outputs.push({id:'window:'+d.id,name:'Monitor '+(i+1)+(d.id===screen.getPrimaryDisplay().id?' (primary)':'')});
+  }
+  outputs.push({id:'network:0',name:'Liturgia Stream / Program display'});
+  try {
+    const settings=JSON.parse(await fs.promises.readFile(settingsPath,'utf8'));
+    for(const [id,profile] of Object.entries(settings.displaySettings||{})){
+      if(id!=='0' && profile?.networkDisplay?.enabled)
+        outputs.push({id:'network:'+id,name:'Network display '+id});
+    }
+    for(const profile of listProgramDisplays(settings)){
+      outputs.push({id:'network:'+profile.id,name:profile.name+' (network)'});
+    }
+  }catch(_){}
+  const win=new BrowserWindow({
+    width:1150,height:760,minWidth:760,minHeight:540,
+    parent:mainWindow,show:false,backgroundColor:'#151923',
+    webPreferences:{nodeIntegration:true,contextIsolation:false}
+  });
+  presentationEditorWindow=win;
+  win.on('closed',()=>{if(presentationEditorWindow===win)presentationEditorWindow=null;});
+  win.webContents.once('did-finish-load',()=>{
+    if(win.isDestroyed())return;
+    win.webContents.send('presentation-editor:init',{
+      media:detail.media||null,editingIndex:Number.isInteger(detail.editingIndex)?detail.editingIndex:null,
+      displays:outputs
+    });
+    win.show();
+  });
+  win.loadFile(path.join(__dirname,'presentation-editor.html')).catch(err=>console.error('Presentation editor failed:',err));
+});
+ipcMain.on('presentation-editor:save',(event,data)=>{
+  if(!presentationEditorWindow||event.sender!==presentationEditorWindow.webContents||!mainWindow||mainWindow.isDestroyed())return;
+  mainWindow.webContents.send('presentation-editor:saved',data);
+  presentationEditorWindow.close();
+});
+
 // Display profiles live in Worship's settings and are shared by all connected
 // Liturgia Stream computers. Mutations use the SAME queue as other settings.
 function mutateProgramDisplaySettings(mutator) {
@@ -3753,7 +3813,7 @@ ipcMain.on('update-live-window', (event, data) => {
       ? mergeStylesForDisplay(data, overrides[String(displayId)])
       : data, 'network', displayId);
     ns.lastPayload = displayData;
-    const mediaPath = displayData && displayData.media && displayData.media.path;
+    const mediaPath = (displayData?.media?.path || (displayData?.isPresentationSlide ? displayData.mediaPath : null));
     if (typeof mediaPath === 'string' && path.isAbsolute(mediaPath) && !/^https?:\/\//i.test(mediaPath)) {
       ns.allowedMediaPaths.set(path.resolve(mediaPath), Date.now());
     }

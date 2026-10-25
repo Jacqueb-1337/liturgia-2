@@ -412,6 +412,17 @@
       <div id="slide-container" style="flex: 1; display: flex; min-width: 0;">
         <div id="slide-preview" style="flex: 1; overflow: hidden; min-width: 0; position: relative; container-type: size;">
           <canvas id="preview-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+          <!-- When a presentation is selected this contextual mini-player
+               overlays the left preview canvas. The Media Library stays intact. -->
+          <div id="presentation-mini" class="presentation-mini" hidden>
+            <div id="presentation-slide-list" class="presentation-slide-list" role="listbox" aria-label="Presentation slides"></div>
+            <div class="presentation-mini-right">
+              <div class="presentation-mini-stage"><img id="presentation-selected-preview" alt="Selected slide" /></div>
+              <div class="presentation-mini-footer"><span id="presentation-mini-label">Slide 1</span>
+                <button id="presentation-preview-live" class="btn primary" title="Send selected slide live">Go Live</button>
+              </div>
+            </div>
+          </div>
           <div id="preview-edit-overlay">
             <span class="preview-edit-overlay-label">Edit Styles</span>
           </div>
@@ -425,6 +436,11 @@
         <div id="live-panel-wrapper" style="flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden;">
         <div id="slide-live" style="flex: 1; overflow: hidden; min-width: 0; position: relative; min-height: 0;">
           <canvas id="live-canvas" style="width: 100%; height: 100%; object-fit: contain;"></canvas>
+          <div id="presentation-live-nav" class="presentation-live-nav" hidden aria-label="Live presentation navigation">
+            <button id="presentation-prev" type="button" title="Previous slide or reveal step" aria-label="Previous presentation step">&#x2190;</button>
+            <span id="presentation-live-count">1 / 1</span>
+            <button id="presentation-next" type="button" title="Next slide or reveal step" aria-label="Next presentation step">&#x2192;</button>
+          </div>
           <!-- Website live panel with nav controls -->
           <div id="website-live-panel" class="website-panel">
             <div class="website-nav-bar">
@@ -576,6 +592,8 @@
   </div>
   <!-- Media add context menu -->
   <div id="media-add-context-menu">
+        <div class="context-menu-item" id="media-add-menu-pptx">Import PowerPoint (.pptx)</div>
+        <div class="context-menu-item" id="media-add-menu-slides">Create Slides</div>
         <div class="context-menu-item" id="media-add-menu-files">Photo / Video</div>
         <div class="context-menu-item" id="media-add-menu-website">Website</div>
         <div class="context-menu-item" id="media-add-menu-local-widget">Local OBS Widget</div>
